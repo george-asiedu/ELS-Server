@@ -107,4 +107,33 @@ export class UserRepository extends Connection {
       where: { id },
     });
   }
+  public async setResetTokenForUser(userId: string, hashedToken: string, expiry: Date) {
+    return await this.user.update({
+      where: { id: userId },
+      data: {
+        resetToken: hashedToken,
+        resetTokenExpiry: expiry,
+      },
+    });
+  }
+  
+  public async findUserByResetToken(hashedToken: string) {
+    const user = await this.user.findFirst({
+      where: {
+        resetToken: hashedToken,
+      },
+    });
+    return user;
+  }
+  
+  public async resetPasswordByUserId(userId: string, newHashedPassword: string) {
+    return await this.user.update({
+      where: { id: userId },
+      data: {
+        password: newHashedPassword,
+        resetToken: null,
+        resetTokenExpiry: null,
+      },
+    });
+  }
 }
