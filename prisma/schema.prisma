@@ -5,6 +5,7 @@ generator client {
 
 datasource db {
   provider = "mongodb"
+  url = env("DATABASE_URL")
 }
 
 enum Role {
@@ -18,6 +19,9 @@ model User {
   password String
   role     Role      @default(CUSTOMER)
 
+  resetToken       String?  
+  resetTokenExpiry DateTime?
+  
   profile     Profile?
 
   createdAt DateTime @default(now())
