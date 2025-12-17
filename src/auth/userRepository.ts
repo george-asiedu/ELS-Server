@@ -66,41 +66,17 @@ export class UserRepository extends Connection {
   }
 
   public async createProfile(userId: string, data: Profile) {
-    const existing = await this.profile.findUnique({
+    return await this.profile.upsert({
       where: { userId },
-    });
-
-    const profileData: any = {};
-    if (data.firstName !== undefined) profileData.firstName = data.firstName;
-    if (data.lastName !== undefined) profileData.lastName = data.lastName;
-    if (data.phone !== undefined) profileData.phone = data.phone;
-    if (data.avatar !== undefined) profileData.avatar = data.avatar;
-    if (data.location !== undefined) profileData.location = data.location;
-
-    const include = {
-      user: {
-        select: { id: true, email: true, role: true, status: true },
+      update: data,
+      create: {
+        ...data,
+        user: { connect: { id: userId } }
       },
-    };
-
-    if (existing) {
-      const updated = await this.profile.update({
-        where: { id: existing.id },
-        data: profileData,
-        include,
-      });
-      return updated;
-    }
-
-    const created = await this.profile.create({
-      data: {
-        ...profileData,
-        user: { connect: { id: userId } },
-      },
-      include,
+      include: {
+        user: { select: { id: true, email: true, role: true } }
+      }
     });
-
-    return created;
   }
 
   public async getProfile(id: string) {
