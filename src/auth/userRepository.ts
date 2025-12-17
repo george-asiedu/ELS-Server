@@ -45,6 +45,25 @@ export class UserRepository extends Connection {
 
     return newUser;
   }
+  
+  public async updateEmail(id: string, email: string) {
+    const updatedUser = await this.user.update({
+      where: { id },
+      data: { email },
+    });
+
+    return updatedUser;
+  }
+  
+  public async updatePassword(id: string, password: string) {
+    const hashedPassword = await getPasswordHash(password);
+    const updatedUser = await this.user.update({
+      where: { id },
+      data: { password: hashedPassword },
+    });
+
+    return updatedUser;
+  }
 
   public async createProfile(userId: string, data: Profile) {
     const existing = await this.profile.findUnique({
@@ -107,6 +126,7 @@ export class UserRepository extends Connection {
       where: { id },
     });
   }
+  
   public async setResetTokenForUser(userId: string, hashedToken: string, expiry: Date) {
     return await this.user.update({
       where: { id: userId },
