@@ -66,7 +66,7 @@ export class AuthService extends UserRepository {
 
     return { 
       message: "Password reset link sent",
-      data: { resetUrl },
+      data: { resetUrl, resetToken },
     };
   }
   
