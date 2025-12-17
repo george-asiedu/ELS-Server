@@ -9,7 +9,6 @@ export const globalErrorHandler = (
   _next: NextFunction,
 ): void => {
   let error = err;
-  console.error("🔥 Original Error:", err);
 
   if (typeof err === "object" && err !== null && "name" in err) {
     const name = (err as any).name;
