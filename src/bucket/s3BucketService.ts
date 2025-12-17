@@ -50,10 +50,7 @@ export class S3BucketService {
     
     try {
       await this.s3.send(new PutObjectCommand(params));
-      return {
-        url: `https://${bucketName}.s3.${env.aws.region}.amazonaws.com/${key}`,
-        key
-      }
+      return `https://${bucketName}.s3.${env.aws.region}.amazonaws.com/${key}`
     } catch (error) {
       throw new ApiError('Failed to upload file', 500);
     }
