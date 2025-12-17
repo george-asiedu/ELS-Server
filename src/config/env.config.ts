@@ -17,6 +17,7 @@ const requiredVars = [
   "AWS_REGION",
   "SENDGRID_API_KEY",
   "SENDER_EMAIL",
+  "CLIENT_URL"
 ];
 const missing = requiredVars.filter((v) => !process.env[v]);
 
@@ -41,4 +42,5 @@ export const env = {
   },
   sendGridApiKey: process.env.SENDGRID_API_KEY as string,
   senderEmail: process.env.SENDER_EMAIL as string,
+  clientUrl: process.env.CLIENT_URL as string,
 };
