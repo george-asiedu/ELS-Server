@@ -5,8 +5,7 @@ import rateLimit from "express-rate-limit";
 import compression from "compression";
 import morgan from "morgan";
 import hpp from "hpp";
-// @ts-ignore: no type declarations for 'hpp' available
-import xssClean from "xss-clean";
+import { xss } from "express-xss-sanitizer";
 import { env } from "./config/env.config";
 import { globalErrorHandler } from "./middleware/globalErrorHandler";
 import routes from "./routes/index";
@@ -31,7 +30,7 @@ app.use("/api", limiter);
 
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true }));
-// app.use(xssClean() as any);
+app.use(xss());
 app.use(compression());
 
 app.get("/", (_req: Request, res: Response) => {
