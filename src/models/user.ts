@@ -1,3 +1,5 @@
+import "multer";
+
 export interface Signup {
   email: string;
   password: string;
@@ -32,3 +34,5 @@ export interface Profile {
   avatar?: string;
   location?: string;
 }
+
+export type UploadedFile = Express.Multer.File;
