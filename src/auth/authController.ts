@@ -3,6 +3,7 @@ import { AuthService } from "./authService";
 import { validateSignup } from "./validators/signup";
 import { errorMessage } from "../utils/helper";
 import { validateLogin } from "./validators/login";
+import { ApiError } from "../middleware/apiError";
 
 const authService = new AuthService();
 
@@ -41,6 +42,44 @@ export class AuthController {
         });
       }
       const result = await authService.login(req.body);
+      return res.status(200).json(result);
+    } catch (error) {
+      return next(error);
+    }
+  };
+  
+  public static forgotPassword = async (
+     req: Request,
+     res: Response,
+     next: NextFunction,
+  ) => {
+    try {
+      const { email } = req.body;
+      if (!email) {
+        throw new ApiError("Email is required", 400);
+      }
+      const result = await authService.forgotPassword(email);
+      return res.status(200).json(result);
+     } catch (error) {
+       return next(error);
+    }
+  };
+  
+  public static resetPassword = async (
+    req: Request,
+    res: Response,
+    next: NextFunction,
+  ) => {
+    try {
+      const { password } = req.body;
+      const { token } = req.params;
+      if (!token) {
+        throw new ApiError("Token is required", 400);
+      }
+      if (!password) {
+        throw new ApiError("Password is required", 400);
+      }
+      const result = await authService.resetPassword(token, password);
       return res.status(200).json(result);
     } catch (error) {
       return next(error);
