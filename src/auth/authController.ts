@@ -4,6 +4,7 @@ import { validateSignup } from "./validators/signup";
 import { errorMessage } from "../utils/helper";
 import { validateLogin } from "./validators/login";
 import { ApiError } from "../middleware/apiError";
+import { validateEmail, validatePassword } from "../profile/validator/profile";
 
 const authService = new AuthService();
 
@@ -54,11 +55,15 @@ export class AuthController {
      next: NextFunction,
   ) => {
     try {
-      const { email } = req.body;
-      if (!email) {
-        throw new ApiError("Email is required", 400);
+      const isValid = validateEmail(req.body);
+      if (!isValid) {
+        return res.status(400).json({
+          message: errorMessage(validateEmail.errors),
+          errors: validateEmail.errors,
+        });
       }
-      const result = await authService.forgotPassword(email);
+      
+      const result = await authService.forgotPassword(req.body.email);
       return res.status(200).json(result);
      } catch (error) {
        return next(error);
@@ -71,15 +76,19 @@ export class AuthController {
     next: NextFunction,
   ) => {
     try {
-      const { password } = req.body;
+      const isValid = validatePassword(req.body);
+      if (!isValid) {
+        return res.status(400).json({
+          message: errorMessage(validatePassword.errors),
+          errors: validatePassword.errors,
+        });
+      }
+
       const { token } = req.params;
       if (!token) {
         throw new ApiError("Token is required", 400);
       }
-      if (!password) {
-        throw new ApiError("Password is required", 400);
-      }
-      const result = await authService.resetPassword(token, password);
+      const result = await authService.resetPassword(token, req.body.password);
       return res.status(200).json(result);
     } catch (error) {
       return next(error);
