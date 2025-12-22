@@ -66,11 +66,15 @@ export class UserRepository extends Connection {
   }
 
   public async createProfile(userId: string, data: Profile) {
+    const cleanData = Object.fromEntries(
+      Object.entries(data).filter(([_, value]) => value !== undefined)
+    );;
+    
     return await this.profile.upsert({
       where: { userId },
-      update: data,
+      update: cleanData,
       create: {
-        ...data,
+        ...cleanData,
         user: { connect: { id: userId } }
       },
       include: {
