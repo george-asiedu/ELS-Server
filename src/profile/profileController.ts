@@ -3,7 +3,7 @@ import { S3BucketService } from "../bucket/s3BucketService";
 import { ApiError } from "../middleware/apiError";
 import { errorMessage } from "../utils/helper";
 import { ProfileService } from "./profileService";
-import { validateProfile } from "./validator/profile";
+import { validateEmail, validatePassword, validateProfile } from "./validator/profile";
 
 const s3 = new S3BucketService();
 const profileService = new ProfileService(s3)
@@ -96,16 +96,18 @@ export class ProfileController {
   ) => {
     try {
       const id = req.params.id;
-      const { email } = req.body;
-      
       if (!id) {
         throw new ApiError('User ID is required', 400);
       }
-      if (!email) {
-        throw new ApiError('Email is required', 400);
+      const isValid = validateEmail(req.body);
+      if (!isValid) {
+        return res.status(400).json({
+          message: errorMessage(validateEmail.errors),
+          errors: validateEmail.errors,
+        });
       }
        
-      const result = await profileService.updateUserEmail(id, email);
+      const result = await profileService.updateUserEmail(id, req.body.email);
       return res.status(200).json(result);
     } catch (error) {
       return next(error);
@@ -119,16 +121,19 @@ export class ProfileController {
   ) => {
     try {
       const id = req.params.id;
-      const { password } = req.body;
-      
       if (!id) {
         throw new ApiError('User ID is required', 400);
       }
-      if (!password) {
-        throw new ApiError('Password is required', 400);
-      }
        
-      const result = await profileService.changePassword(id, password);
+      const isValid = validatePassword(req.body);
+      if (!isValid) {
+        return res.status(400).json({
+          message: errorMessage(validatePassword.errors),
+          errors: validatePassword.errors,
+        });
+      }
+      
+      const result = await profileService.changePassword(id, req.body.password);
       return res.status(200).json(result);
     } catch (error) {
       return next(error);
