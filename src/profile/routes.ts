@@ -5,7 +5,7 @@ import multer from "multer";
 const router: Router = Router();
 const upload = multer({ storage: multer.memoryStorage() });
 
-router.post('/', upload.single('avatar'), ProfileController.create);
+router.post('/:userId', upload.single('image'), ProfileController.create);
 router.get('/:userId', ProfileController.handleGetProfile);
 router.delete('/:userId', ProfileController.handleDeleteProfile);
 router.delete('/user/:id', ProfileController.handleDeleteUser);
