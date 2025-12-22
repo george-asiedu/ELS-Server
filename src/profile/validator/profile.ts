@@ -1,7 +1,7 @@
 import Ajv, { JSONSchemaType } from "ajv";
 import addFormats from "ajv-formats";
 import addErrors from "ajv-errors";
-import { Profile } from "../../models/user";
+import { Email, Password, Profile } from "../../models/user";
 
 const ajv = new Ajv({ allErrors: true, strict: true, removeAdditional: false });
 addErrors(ajv);
@@ -77,4 +77,54 @@ const profileSchema: JSONSchemaType<Profile> = {
   }
 }
 
+const emailSchema: JSONSchemaType<Email> = {
+  type: "object",
+  properties: {
+    email: {
+      type: "string",
+      format: "email",
+      errorMessage: {
+        type: "Email must be a string",
+        format: "Email must be a valid email address"
+      }
+    }
+  },
+  required: ["email"],
+  additionalProperties: false,
+  errorMessage: {
+    type: 'Invalid request payload',
+    properties: {
+      email: "Email must be a valid email address"
+    }
+  }
+}
+
+const passwordSchema: JSONSchemaType<Password> = {
+  type: "object",
+  properties: {
+    password: {
+      type: "string",
+      minLength: 8,
+      maxLength: 50,
+      pattern: "^(?=.*[a-z])(?=.*[A-Z])(?=.*\\d)(?=.*[@$!%*?&])[A-Za-z\\d@$!%*?&]+$",
+      errorMessage: {
+        type: "Password must be a string",
+        minLength: "Password must be at least 8 characters long",
+        maxLength: "Password must be at most 50 characters long",
+        pattern: "Password must contain at least one lowercase letter, one uppercase letter, one digit, and one special character"
+      }
+    }
+  },
+  required: ["password"],
+  additionalProperties: false,
+  errorMessage: {
+    type: 'Invalid request payload',
+    properties: {
+      password: "Password must contain at least one lowercase letter, one uppercase letter, one digit, and one special character"
+    }
+  }
+}
+
 export const validateProfile = ajv.compile(profileSchema);
+export const validateEmail = ajv.compile(emailSchema);
+export const validatePassword = ajv.compile(passwordSchema);
