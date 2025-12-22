@@ -36,3 +36,11 @@ export interface Profile {
 }
 
 export type UploadedFile = Express.Multer.File;
+
+export interface Email {
+  email: string;
+}
+
+export interface Password {
+  password: string;
+}
