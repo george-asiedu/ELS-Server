@@ -9,7 +9,7 @@ router.post('/:userId', upload.single('image'), ProfileController.create);
 router.get('/:userId', ProfileController.handleGetProfile);
 router.delete('/:userId', ProfileController.handleDeleteProfile);
 router.delete('/user/:id', ProfileController.handleDeleteUser);
-router.post('/update-password/:id', ProfileController.handleUpdatePassword);
+router.post('/change-password/:id', ProfileController.handleUpdatePassword);
 router.post('/update-email/:id', ProfileController.handleUpdateEmail);
 
 export default router;
