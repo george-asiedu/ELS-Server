@@ -15,7 +15,7 @@ export class ProfileController {
     next: NextFunction,
   ) => {
     try {
-      const userId = req.user.id;
+      const userId = req.params.userId;
       if (!userId) {
         throw new ApiError('User ID is required', 400);
       }
@@ -41,7 +41,7 @@ export class ProfileController {
     next: NextFunction
   ) => {
     try {
-      const userId = req.user.id;
+      const userId = req.params.userId
       if (!userId) {
         throw new ApiError('User ID is required', 400);
       }
@@ -59,7 +59,7 @@ export class ProfileController {
     next: NextFunction
   ) => {
     try {
-      const userId = req.user.id;
+      const userId = req.params.userId;
       if (!userId) {
         throw new ApiError('User ID is required', 400);
       }
@@ -77,7 +77,7 @@ export class ProfileController {
     next: NextFunction
   ) => {
     try {
-      const id = req.user.id;
+      const id = req.params.id;
       if (!id) {
         throw new ApiError('User ID is required', 400);
       }
@@ -95,7 +95,7 @@ export class ProfileController {
     next: NextFunction
   ) => {
     try {
-      const id = req.user.id;
+      const id = req.params.id;
       const { email } = req.body;
       
       if (!id) {
@@ -118,7 +118,7 @@ export class ProfileController {
     next: NextFunction
   ) => {
     try {
-      const id = req.user.id;
+      const id = req.params.id;
       const { password } = req.body;
       
       if (!id) {
