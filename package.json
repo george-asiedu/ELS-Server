@@ -6,7 +6,7 @@
   "author": "george-asiedu <asiedug41@gmail.com>",
   "license": "MIT",
   "scripts": {
-    "build:deploy": "yarn install --check-files && yarn prisma generate && yarn build",
+    "build:deploy": "yarn install --check-files --production=false && yarn prisma generate && yarn build",
     "generate": "prisma generate",
     "push": "prisma db push",
     "build": "yarn generate && tsc",
