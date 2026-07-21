@@ -8,17 +8,70 @@ import {
 import { ApiError } from "../middleware/apiError";
 import { env } from "../config/env.config";
 import { randomBytes, createHash } from "crypto";
+import { EmailService } from "../email/emailService";
+
+const emailService = new EmailService();
 
 export class AuthService extends UserRepository {
   public async signup(data: Signup) {
     const existingUser = await this.checkExistingUser(data.email);
     if (existingUser) {
-      throw new Error("User with this email already exists");
+      throw new ApiError("User with this email already exists", 409);
     }
 
-    await this.createUser(data);
+    const newUser = await this.createUser(data);
 
-    return { message: "User created successfully" };
+    // Bootstrap the customer account: profile, loyalty points, referral code.
+    if (data.fullName || data.phone) {
+      await this.createProfile(newUser.id, {
+        ...(data.fullName ? { fullName: data.fullName } : {}),
+        ...(data.phone ? { phone: data.phone } : {}),
+        email: data.email,
+      });
+    }
+
+    await this.createLoyaltyPoints(newUser.id);
+
+    const referralCode = this.generateReferralCode(data.fullName);
+    await this.createReferralCode(newUser.id, referralCode);
+
+    // Handle inbound referral, if a code was supplied.
+    if (data.referralCode) {
+      const referrer = await this.getReferralCodeByCode(
+        data.referralCode.toUpperCase(),
+      );
+      if (referrer) {
+        await this.createReferral(referrer.userId, newUser.id, referrer.id);
+        await this.incrementReferralCodeUses(referrer.id);
+      }
+    }
+
+    const payload = {
+      id: newUser.id,
+      email: newUser.email,
+      role: newUser.role,
+    };
+    const token = loginToken(payload);
+
+    return {
+      message: "User created successfully",
+      data: {
+        user: {
+          id: newUser.id,
+          email: newUser.email,
+          role: newUser.role,
+        },
+        token,
+      },
+    };
+  }
+
+  private generateReferralCode(fullName?: string): string {
+    const prefix = fullName
+      ? fullName.split(" ")[0]!.toUpperCase().replace(/[^A-Z]/g, "").slice(0, 8)
+      : "ELS";
+    const suffix = randomBytes(3).toString("hex").toUpperCase();
+    return `${prefix || "ELS"}${suffix}`;
   }
 
   public async login(data: Login) {
@@ -54,8 +107,15 @@ export class AuthService extends UserRepository {
   
   public async forgotPassword(email: string) {
     const user = await this.getByEmail(email);
+
+    // Always respond the same way so we don't reveal which emails are registered.
+    const genericResponse = {
+      message:
+        "If an account exists for that email, a password reset link has been sent.",
+    };
+
     if (!user) {
-      throw new ApiError("User not found", 404);
+      return genericResponse;
     }
 
     const resetToken = randomBytes(32).toString("hex");
@@ -64,10 +124,15 @@ export class AuthService extends UserRepository {
     await this.setResetTokenForUser(user.id, hashedToken, expiry);
     const resetUrl = `${env.clientUrl}/reset-password/${resetToken}`;
 
-    return { 
-      message: "Password reset link sent",
-      data: { resetUrl, resetToken },
-    };
+    try {
+      await emailService.sendPasswordReset(user.email, resetUrl);
+    } catch (error) {
+      // Roll back the token if the email couldn't be delivered.
+      await this.setResetTokenForUser(user.id, "", new Date(0));
+      throw new ApiError("Failed to send password reset email", 500);
+    }
+
+    return genericResponse;
   }
   
   public async resetPassword(token: string, newPassword: string) {

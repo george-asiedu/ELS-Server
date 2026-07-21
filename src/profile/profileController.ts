@@ -35,6 +35,35 @@ export class ProfileController {
     }
   };
   
+  public static upsertMyProfile = async (
+    req: Request,
+    res: Response,
+    next: NextFunction,
+  ) => {
+    try {
+      if (!req.user) {
+        throw new ApiError('Authentication required', 401);
+      }
+
+      const isValid = validateProfile(req.body);
+      if (!isValid) {
+        return res.status(400).json({
+          message: errorMessage(validateProfile.errors),
+          errors: validateProfile.errors,
+        });
+      }
+      const image = req.file;
+      const result = await profileService.createOrUpdateProfile(
+        req.body,
+        req.user.id,
+        image,
+      );
+      return res.status(200).json(result);
+    } catch (error) {
+      return next(error);
+    }
+  };
+
   public static handleGetProfile = async (
     req: Request,
     res: Response,
@@ -45,8 +74,25 @@ export class ProfileController {
       if (!userId) {
         throw new ApiError('User ID is required', 400);
       }
-      
+
       const result = await profileService.getUserProfile(userId);
+      return res.status(200).json(result);
+    } catch (error) {
+      return next(error);
+    }
+  };
+
+  public static handleGetMyProfile = async (
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ) => {
+    try {
+      if (!req.user) {
+        throw new ApiError('Authentication required', 401);
+      }
+
+      const result = await profileService.getUserProfile(req.user.id);
       return res.status(200).json(result);
     } catch (error) {
       return next(error);

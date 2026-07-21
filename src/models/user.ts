@@ -3,6 +3,9 @@ import "multer";
 export interface Signup {
   email: string;
   password: string;
+  fullName?: string;
+  phone?: string;
+  referralCode?: string;
 }
 
 export interface Login {
@@ -28,8 +31,10 @@ export interface JwtTokenPayload {
 }
 
 export interface Profile {
+  fullName?: string;
   firstName?: string;
   lastName?: string;
+  email?: string;
   phone?: string;
   avatar?: string;
   location?: string;

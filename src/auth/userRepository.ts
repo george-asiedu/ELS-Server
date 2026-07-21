@@ -136,4 +136,59 @@ export class UserRepository extends Connection {
       },
     });
   }
+
+  // ---------- Loyalty ----------
+  public async createLoyaltyPoints(userId: string) {
+    return await this.loyaltyPoints.upsert({
+      where: { userId },
+      update: {},
+      create: { userId, points: 0, lifetimePoints: 0 },
+    });
+  }
+
+  public async getLoyaltyPoints(userId: string) {
+    return await this.loyaltyPoints.findUnique({ where: { userId } });
+  }
+
+  public async getLoyaltyTransactions(userId: string, limit = 10) {
+    return await this.loyaltyTransaction.findMany({
+      where: { userId },
+      orderBy: { createdAt: "desc" },
+      take: limit,
+    });
+  }
+
+  // ---------- Referral ----------
+  public async createReferralCode(userId: string, code: string) {
+    return await this.referralCode.upsert({
+      where: { userId },
+      update: {},
+      create: { userId, code },
+    });
+  }
+
+  public async getReferralCodeByUserId(userId: string) {
+    return await this.referralCode.findUnique({ where: { userId } });
+  }
+
+  public async getReferralCodeByCode(code: string) {
+    return await this.referralCode.findUnique({ where: { code } });
+  }
+
+  public async createReferral(
+    referrerId: string,
+    referredId: string,
+    referralCodeId: string,
+  ) {
+    return await this.referral.create({
+      data: { referrerId, referredId, referralCodeId },
+    });
+  }
+
+  public async incrementReferralCodeUses(id: string) {
+    return await this.referralCode.update({
+      where: { id },
+      data: { uses: { increment: 1 } },
+    });
+  }
 }

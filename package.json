@@ -14,7 +14,8 @@
     "start": "node dist/app.js",
     "lint": "eslint . --ext .ts",
     "lint:fix": "eslint . --ext .ts --fix",
-    "format": "prettier --write ."
+    "format": "prettier --write .",
+    "seed": "ts-node prisma/seed.ts"
   },
   "devDependencies": {
     "@eslint/css": "^0.14.1",

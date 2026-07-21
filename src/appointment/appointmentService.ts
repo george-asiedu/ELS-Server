@@ -1,0 +1,170 @@
+import { Connection } from "../db/dbConnection";
+import { ApiError } from "../middleware/apiError";
+import {
+  AppointmentStatusInput,
+  CreateAppointmentInput,
+} from "./appointmentModels";
+
+const serviceInclude = {
+  service: {
+    select: {
+      id: true,
+      name: true,
+      duration: true,
+      price: true,
+      category: true,
+    },
+  },
+} as const;
+
+export class AppointmentService extends Connection {
+  public async create(data: CreateAppointmentInput, userId?: string) {
+    const service = await this.service.findUnique({
+      where: { id: data.serviceId },
+    });
+    if (!service) {
+      throw new ApiError("Selected service not found", 404);
+    }
+
+    const appointment = await this.appointment.create({
+      data: {
+        fullName: data.fullName,
+        phone: data.phone,
+        email: data.email ?? null,
+        appointmentDate: new Date(`${data.appointmentDate}T00:00:00.000Z`),
+        appointmentTime: data.appointmentTime,
+        notes: data.notes ?? null,
+        totalPrice: service.price,
+        serviceId: data.serviceId,
+        ...(userId ? { userId } : {}),
+      },
+      include: serviceInclude,
+    });
+
+    return { message: "Appointment created successfully", data: appointment };
+  }
+
+  public async listForUser(userId: string) {
+    const appointments = await this.appointment.findMany({
+      where: { userId },
+      orderBy: { appointmentDate: "desc" },
+      include: serviceInclude,
+    });
+    return { message: "Appointments retrieved successfully", data: appointments };
+  }
+
+  public async listAll() {
+    const appointments = await this.appointment.findMany({
+      orderBy: { appointmentDate: "desc" },
+      include: serviceInclude,
+    });
+    return { message: "Appointments retrieved successfully", data: appointments };
+  }
+
+  public async updateStatus(id: string, status: AppointmentStatusInput) {
+    const existing = await this.appointment.findUnique({ where: { id } });
+    if (!existing) {
+      throw new ApiError("Appointment not found", 404);
+    }
+    const appointment = await this.appointment.update({
+      where: { id },
+      data: { status },
+      include: serviceInclude,
+    });
+
+    // Award loyalty points the first time an appointment is completed.
+    if (status === "COMPLETED" && appointment.userId) {
+      await this.awardLoyaltyForCompletion(
+        appointment.id,
+        appointment.userId,
+        appointment.totalPrice ?? 0,
+        appointment.service?.name ?? "service",
+      );
+    }
+
+    return { message: "Appointment status updated", data: appointment };
+  }
+
+  // 10 points earned per $1 spent. Idempotent per appointment.
+  private static readonly POINTS_PER_DOLLAR = 10;
+  private static readonly REFERRAL_BONUS = 500;
+
+  private async awardLoyaltyForCompletion(
+    appointmentId: string,
+    userId: string,
+    totalPrice: number,
+    serviceName: string,
+  ) {
+    // Guard against double-awarding if the status is set to COMPLETED again.
+    const alreadyEarned = await this.loyaltyTransaction.findFirst({
+      where: { appointmentId, type: "EARNED" },
+    });
+    if (alreadyEarned) return;
+
+    const points = Math.round(totalPrice * AppointmentService.POINTS_PER_DOLLAR);
+    if (points <= 0) return;
+
+    await this.loyaltyTransaction.create({
+      data: {
+        userId,
+        points,
+        type: "EARNED",
+        description: `Earned for ${serviceName}`,
+        appointmentId,
+      },
+    });
+
+    await this.loyaltyPoints.upsert({
+      where: { userId },
+      update: {
+        points: { increment: points },
+        lifetimePoints: { increment: points },
+      },
+      create: { userId, points, lifetimePoints: points },
+    });
+
+    await this.awardReferralBonusIfEligible(userId);
+  }
+
+  // When a referred user completes their first appointment, reward the referrer.
+  private async awardReferralBonusIfEligible(referredUserId: string) {
+    const referral = await this.referral.findFirst({
+      where: { referredId: referredUserId, rewarded: false },
+    });
+    if (!referral) return;
+
+    const bonus = AppointmentService.REFERRAL_BONUS;
+
+    await this.loyaltyTransaction.create({
+      data: {
+        userId: referral.referrerId,
+        points: bonus,
+        type: "REFERRAL_BONUS",
+        description: "Referral bonus — a friend you referred completed a visit",
+      },
+    });
+
+    await this.loyaltyPoints.upsert({
+      where: { userId: referral.referrerId },
+      update: {
+        points: { increment: bonus },
+        lifetimePoints: { increment: bonus },
+      },
+      create: { userId: referral.referrerId, points: bonus, lifetimePoints: bonus },
+    });
+
+    await this.referral.update({
+      where: { id: referral.id },
+      data: { rewarded: true },
+    });
+  }
+
+  public async remove(id: string) {
+    const existing = await this.appointment.findUnique({ where: { id } });
+    if (!existing) {
+      throw new ApiError("Appointment not found", 404);
+    }
+    await this.appointment.delete({ where: { id } });
+    return { message: "Appointment deleted successfully" };
+  }
+}

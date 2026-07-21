@@ -10,6 +10,26 @@ addFormats(ajv);
 const profileSchema: JSONSchemaType<Profile> = {
   type: "object",
   properties: {
+    fullName: {
+      type: "string",
+      nullable: true,
+      minLength: 2,
+      maxLength: 100,
+      errorMessage: {
+        type: "Full name must be a string",
+        minLength: "Full name must be at least 2 characters long",
+        maxLength: "Full name must be at most 100 characters long"
+      }
+    },
+    email: {
+      type: "string",
+      nullable: true,
+      format: "email",
+      errorMessage: {
+        type: "Email must be a string",
+        format: "Email must be a valid email address"
+      }
+    },
     firstName: {
       type: "string",
       nullable: true,
@@ -39,10 +59,10 @@ const profileSchema: JSONSchemaType<Profile> = {
     phone: {
       type: "string",
       nullable: true,
-      pattern: "^[0-9]{10}$",
+      pattern: "^[0-9+()\\-\\s]{7,20}$",
       errorMessage: {
         type: "Phone number must be a string",
-        pattern: "Phone number must be a 10-digit number"
+        pattern: "Please enter a valid phone number"
       }
     },
     avatar: {

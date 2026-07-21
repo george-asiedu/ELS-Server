@@ -141,3 +141,9 @@ vite.config.ts.timestamp-*
 /generated/prisma
 src/generated/prisma-client
 /generated/prisma
+.idea/
+# TypeScript incremental build info
+*.tsbuildinfo
+
+# This project uses yarn; ignore npm lockfile
+package-lock.json

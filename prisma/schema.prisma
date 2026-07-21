@@ -13,16 +13,50 @@ enum Role {
   ADMIN
 }
 
+enum ServiceCategory {
+  NAILS
+  LASHES
+  HAIR
+}
+
+enum AppointmentStatus {
+  PENDING
+  CONFIRMED
+  COMPLETED
+  CANCELLED
+}
+
+enum PaymentStatus {
+  PENDING
+  PAID
+  FAILED
+  REFUNDED
+}
+
+enum LoyaltyTransactionType {
+  EARNED
+  REDEEMED
+  REFERRAL_BONUS
+  EXPIRED
+}
+
 model User {
   id       String    @id @default(auto()) @map("_id") @db.ObjectId
   email    String    @unique
   password String
   role     Role      @default(CUSTOMER)
 
-  resetToken       String?  
+  resetToken       String?
   resetTokenExpiry DateTime?
-  
-  profile     Profile?
+
+  profile             Profile?
+  appointments        Appointment[]
+  reviews             Review[]
+  loyaltyPoints       LoyaltyPoints?
+  loyaltyTransactions LoyaltyTransaction[]
+  referralCode        ReferralCode?
+  referralsMade       Referral[] @relation("Referrer")
+  referralReceived    Referral?  @relation("Referred")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -32,11 +66,13 @@ model User {
 }
 
 model Profile {
-  id    String  @id @default(auto()) @map("_id") @db.ObjectId
-  userId    String    @db.ObjectId @unique
+  id        String  @id @default(auto()) @map("_id") @db.ObjectId
+  userId    String  @db.ObjectId @unique
+  fullName  String?
   firstName String?
   lastName  String?
-  phone     String? @unique
+  email     String?
+  phone     String?
   avatar    String?
   location  String?
 
@@ -46,4 +82,215 @@ model Profile {
   updatedAt DateTime @updatedAt
 
   @@map("profiles")
+}
+
+model Appointment {
+  id              String            @id @default(auto()) @map("_id") @db.ObjectId
+  fullName        String
+  phone           String
+  email           String?
+  appointmentDate DateTime
+  appointmentTime String
+  notes           String?
+  status          AppointmentStatus @default(PENDING)
+
+  // Total calculated at time of booking (nullable for now)
+  totalPrice      Float?
+
+  // Nullable so guests (not logged in) can book
+  userId          String?           @db.ObjectId
+  serviceId       String            @db.ObjectId
+
+  user            User?             @relation(fields: [userId], references: [id], onDelete: SetNull)
+  service         Service           @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+
+  payment             Payment?
+  reviews             Review[]
+  loyaltyTransactions LoyaltyTransaction[]
+
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+
+  @@index([userId])
+  @@map("appointments")
+}
+
+model Service {
+  id           String          @id @default(auto()) @map("_id") @db.ObjectId
+  name         String
+  category     ServiceCategory
+  description  String?
+  price        Float
+  duration     String          // Human readable, e.g. "2 hrs"
+  popular      Boolean         @default(false)
+  active       Boolean         @default(true)
+  imageUrl     String?
+
+  appointments Appointment[]
+  addOns       ServiceAddOn[]
+  reviews      Review[]
+
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
+
+  @@map("services")
+}
+
+model ServiceAddOn {
+  id          String   @id @default(auto()) @map("_id") @db.ObjectId
+  name        String
+  price       Float
+  duration    Int      // Additional minutes
+  serviceId   String   @db.ObjectId
+  service     Service  @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+
+  @@map("service_addons")
+}
+
+model Payment {
+  id            String        @id @default(auto()) @map("_id") @db.ObjectId
+  amount        Float
+  status        PaymentStatus @default(PENDING)
+  transactionId String?       @unique
+
+  appointmentId String        @unique @db.ObjectId
+  appointment   Appointment   @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
+
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  @@map("payments")
+}
+
+model Review {
+  id            String       @id @default(auto()) @map("_id") @db.ObjectId
+  rating        Int          // 1-5
+  content       String?
+  approved      Boolean      @default(false)
+
+  userId        String       @db.ObjectId
+  serviceId     String?      @db.ObjectId
+  appointmentId String?      @db.ObjectId
+
+  user          User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  service       Service?     @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+  appointment   Appointment? @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
+
+  createdAt     DateTime     @default(now())
+
+  @@index([approved])
+  @@map("reviews")
+}
+
+model Gallery {
+  id        String          @id @default(auto()) @map("_id") @db.ObjectId
+  title     String?
+  imageUrl  String
+  category  ServiceCategory
+  active    Boolean         @default(true)
+  createdAt DateTime        @default(now())
+
+  @@map("gallery")
+}
+
+model BusinessHours {
+  id          String   @id @default(auto()) @map("_id") @db.ObjectId
+  dayOfWeek   Int      @unique // 0 (Sunday) to 6 (Saturday)
+  openTime    String?  // e.g., "09:00"
+  closeTime   String?  // e.g., "17:00"
+  isClosed    Boolean  @default(false)
+
+  @@map("business_hours")
+}
+
+model BlockedDate {
+  id      String   @id @default(auto()) @map("_id") @db.ObjectId
+  date    DateTime
+  reason  String?
+
+  @@map("blocked_dates")
+}
+
+model ContactInfo {
+  id            String   @id @default(auto()) @map("_id") @db.ObjectId
+  phone         String?
+  whatsapp      String?
+  email         String?
+  instagram     String?
+  tiktok        String?
+  address       String?
+
+  showPhone     Boolean  @default(true)
+  showWhatsapp  Boolean  @default(true)
+  showEmail     Boolean  @default(true)
+  showInstagram Boolean  @default(true)
+  showTiktok    Boolean  @default(true)
+  showAddress   Boolean  @default(true)
+
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@map("contact_info")
+}
+
+model LoyaltyPoints {
+  id             String   @id @default(auto()) @map("_id") @db.ObjectId
+  userId         String   @db.ObjectId @unique
+  points         Int      @default(0)
+  lifetimePoints Int      @default(0)
+
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@map("loyalty_points")
+}
+
+model LoyaltyTransaction {
+  id            String                 @id @default(auto()) @map("_id") @db.ObjectId
+  userId        String                 @db.ObjectId
+  points        Int
+  type          LoyaltyTransactionType
+  description   String?
+  appointmentId String?                @db.ObjectId
+
+  user          User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  appointment   Appointment?           @relation(fields: [appointmentId], references: [id], onDelete: SetNull)
+
+  createdAt     DateTime               @default(now())
+
+  @@index([userId])
+  @@map("loyalty_transactions")
+}
+
+model ReferralCode {
+  id        String     @id @default(auto()) @map("_id") @db.ObjectId
+  userId    String     @db.ObjectId @unique
+  code      String     @unique
+  uses      Int        @default(0)
+
+  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  referrals Referral[]
+
+  createdAt DateTime   @default(now())
+
+  @@map("referral_codes")
+}
+
+model Referral {
+  id             String       @id @default(auto()) @map("_id") @db.ObjectId
+  referrerId     String       @db.ObjectId
+  referredId     String       @db.ObjectId @unique
+  referralCodeId String       @db.ObjectId
+  rewarded       Boolean      @default(false)
+
+  referrer       User         @relation("Referrer", fields: [referrerId], references: [id], onDelete: Cascade)
+  referred       User         @relation("Referred", fields: [referredId], references: [id], onDelete: Cascade)
+  referralCode   ReferralCode @relation(fields: [referralCodeId], references: [id], onDelete: Cascade)
+
+  createdAt      DateTime     @default(now())
+
+  @@index([referrerId])
+  @@map("referrals")
 }

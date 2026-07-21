@@ -32,6 +32,36 @@ const signupSchema: JSONSchemaType<Signup> = {
           "Password must contain at least one uppercase letter, one lowercase letter, one number, and one special character",
       },
     },
+    fullName: {
+      type: "string",
+      nullable: true,
+      minLength: 2,
+      maxLength: 100,
+      errorMessage: {
+        type: "Full name must be a string",
+        minLength: "Full name must be at least 2 characters long",
+        maxLength: "Full name must be at most 100 characters long",
+      },
+    },
+    phone: {
+      type: "string",
+      nullable: true,
+      minLength: 7,
+      maxLength: 20,
+      errorMessage: {
+        type: "Phone must be a string",
+        minLength: "Please enter a valid phone number",
+        maxLength: "Please enter a valid phone number",
+      },
+    },
+    referralCode: {
+      type: "string",
+      nullable: true,
+      maxLength: 40,
+      errorMessage: {
+        type: "Referral code must be a string",
+      },
+    },
   },
   required: ["email", "password"],
   additionalProperties: false,
