@@ -17,6 +17,9 @@
     "format": "prettier --write .",
     "seed": "ts-node prisma/seed.ts"
   },
+  "resolutions": {
+    "@types/express-serve-static-core": "5.1.0"
+  },
   "devDependencies": {
     "@eslint/css": "^0.14.1",
     "@eslint/js": "^9.39.1",
