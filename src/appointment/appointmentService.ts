@@ -1,6 +1,7 @@
 import { Connection } from "../db/dbConnection";
 import { ApiError } from "../middleware/apiError";
 import { S3BucketService } from "../bucket/s3BucketService";
+import { EmailService } from "../email/emailService";
 import { UploadedFile } from "../models/user";
 import {
   AppointmentStatusInput,
@@ -21,6 +22,7 @@ const serviceInclude = {
 
 export class AppointmentService extends Connection {
   private s3 = new S3BucketService();
+  private email = new EmailService();
 
   public async create(
     data: CreateAppointmentInput,
@@ -54,6 +56,20 @@ export class AppointmentService extends Connection {
       },
       include: serviceInclude,
     });
+
+    // Automated confirmation email (best-effort — never block the booking).
+    if (appointment.email) {
+      try {
+        await this.email.sendAppointmentReceived(appointment.email, {
+          fullName: appointment.fullName,
+          serviceName: appointment.service?.name ?? "your service",
+          date: data.appointmentDate,
+          time: appointment.appointmentTime,
+        });
+      } catch (error) {
+        console.error("Failed to send appointment confirmation email:", error);
+      }
+    }
 
     return { message: "Appointment created successfully", data: appointment };
   }
@@ -112,9 +128,9 @@ export class AppointmentService extends Connection {
     return { message: "Appointment status updated", data: appointment };
   }
 
-  // 10 points earned per $1 spent. Idempotent per appointment.
-  private static readonly POINTS_PER_DOLLAR = 10;
-  private static readonly REFERRAL_BONUS = 500;
+  // 1 point earned per GHS 10 spent. Idempotent per appointment.
+  private static readonly GHS_PER_POINT = 10;
+  private static readonly REFERRAL_BONUS = 100;
 
   private async awardLoyaltyForCompletion(
     appointmentId: string,
@@ -128,7 +144,7 @@ export class AppointmentService extends Connection {
     });
     if (alreadyEarned) return;
 
-    const points = Math.round(totalPrice * AppointmentService.POINTS_PER_DOLLAR);
+    const points = Math.floor(totalPrice / AppointmentService.GHS_PER_POINT);
     if (points <= 0) return;
 
     await this.loyaltyTransaction.create({
