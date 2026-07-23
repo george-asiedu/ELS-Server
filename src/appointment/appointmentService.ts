@@ -24,6 +24,10 @@ export class AppointmentService extends Connection {
   private s3 = new S3BucketService();
   private email = new EmailService();
 
+  // Loyalty value + discount cap for booking-time redemption.
+  private static readonly POINTS_PER_GHS = 10; // 10 points = GHS 1 off
+  private static readonly MAX_DISCOUNT_RATIO = 0.3; // never more than 30% off
+
   public async create(
     data: CreateAppointmentInput,
     userId?: string,
@@ -41,6 +45,23 @@ export class AppointmentService extends Connection {
       designImageUrl = await this.s3.uploadFile(designImage);
     }
 
+    // Apply loyalty points as a discount (logged-in users only, capped at 30%).
+    let discountAmount = 0;
+    let pointsRedeemed = 0;
+    if (userId && data.applyPoints === "true") {
+      const balance = await this.loyaltyPoints.findUnique({ where: { userId } });
+      const available = balance?.points ?? 0;
+      if (available > 0) {
+        const maxPointsByCap = Math.floor(
+          service.price *
+            AppointmentService.MAX_DISCOUNT_RATIO *
+            AppointmentService.POINTS_PER_GHS,
+        );
+        pointsRedeemed = Math.min(available, maxPointsByCap);
+        discountAmount = pointsRedeemed / AppointmentService.POINTS_PER_GHS;
+      }
+    }
+
     const appointment = await this.appointment.create({
       data: {
         fullName: data.fullName,
@@ -50,12 +71,31 @@ export class AppointmentService extends Connection {
         appointmentTime: data.appointmentTime,
         notes: data.notes ?? null,
         totalPrice: service.price,
+        discountAmount,
+        pointsRedeemed,
         serviceId: data.serviceId,
         ...(designImageUrl ? { designImageUrl } : {}),
         ...(userId ? { userId } : {}),
       },
       include: serviceInclude,
     });
+
+    // Deduct the redeemed points now that we have the appointment id.
+    if (userId && pointsRedeemed > 0) {
+      await this.loyaltyPoints.update({
+        where: { userId },
+        data: { points: { decrement: pointsRedeemed } },
+      });
+      await this.loyaltyTransaction.create({
+        data: {
+          userId,
+          points: -pointsRedeemed,
+          type: "REDEEMED",
+          description: `Discount on ${service.name} booking`,
+          appointmentId: appointment.id,
+        },
+      });
+    }
 
     // Automated confirmation email (best-effort — never block the booking).
     if (appointment.email) {
@@ -115,14 +155,49 @@ export class AppointmentService extends Connection {
       include: serviceInclude,
     });
 
-    // Award loyalty points the first time an appointment is completed.
+    // Award loyalty points the first time an appointment is completed — on the
+    // amount actually paid (after any loyalty discount), never the sticker price.
     if (status === "COMPLETED" && appointment.userId) {
+      const netPaid =
+        (appointment.totalPrice ?? 0) - (appointment.discountAmount ?? 0);
       await this.awardLoyaltyForCompletion(
         appointment.id,
         appointment.userId,
-        appointment.totalPrice ?? 0,
+        netPaid,
         appointment.service?.name ?? "service",
       );
+    }
+
+    // Refund redeemed points if the booking is cancelled (once).
+    if (
+      status === "CANCELLED" &&
+      appointment.userId &&
+      appointment.pointsRedeemed > 0 &&
+      !appointment.pointsRefunded
+    ) {
+      await this.loyaltyPoints.upsert({
+        where: { userId: appointment.userId },
+        update: { points: { increment: appointment.pointsRedeemed } },
+        create: {
+          userId: appointment.userId,
+          points: appointment.pointsRedeemed,
+          lifetimePoints: 0,
+        },
+      });
+      await this.loyaltyTransaction.create({
+        data: {
+          userId: appointment.userId,
+          points: appointment.pointsRedeemed,
+          type: "REFUND",
+          description: "Points refunded (appointment cancelled)",
+          appointmentId: appointment.id,
+        },
+      });
+      await this.appointment.update({
+        where: { id: appointment.id },
+        data: { pointsRefunded: true },
+      });
+      appointment.pointsRefunded = true;
     }
 
     return { message: "Appointment status updated", data: appointment };
