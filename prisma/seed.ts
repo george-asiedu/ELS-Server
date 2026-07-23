@@ -1,6 +1,7 @@
 import "dotenv/config";
 import * as bcrypt from "bcrypt";
 import { PrismaClient } from "../src/generated/prisma-client/client";
+import { generateReferralCode } from "../src/utils/helper";
 
 const prisma = new PrismaClient();
 
@@ -67,7 +68,7 @@ async function seedUser(
   await prisma.referralCode.upsert({
     where: { userId: user.id },
     update: {},
-    create: { userId: user.id, code: `ELS${user.id.slice(-6).toUpperCase()}` },
+    create: { userId: user.id, code: generateReferralCode() },
   });
 
   console.log(`✔ ${role} user ready: ${email}`);
