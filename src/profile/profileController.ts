@@ -64,6 +64,40 @@ export class ProfileController {
     }
   };
 
+  public static handleChangeMyPassword = async (
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ) => {
+    try {
+      if (!req.user) {
+        throw new ApiError('Authentication required', 401);
+      }
+
+      const { currentPassword, newPassword } = req.body ?? {};
+      if (!currentPassword || typeof currentPassword !== 'string') {
+        throw new ApiError('Your current password is required', 400);
+      }
+
+      const isValid = validatePassword({ password: newPassword });
+      if (!isValid) {
+        return res.status(400).json({
+          message: errorMessage(validatePassword.errors),
+          errors: validatePassword.errors,
+        });
+      }
+
+      const result = await profileService.changeOwnPassword(
+        req.user.id,
+        currentPassword,
+        newPassword,
+      );
+      return res.status(200).json(result);
+    } catch (error) {
+      return next(error);
+    }
+  };
+
   public static handleGetProfile = async (
     req: Request,
     res: Response,
