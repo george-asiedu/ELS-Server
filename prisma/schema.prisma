@@ -37,6 +37,7 @@ enum LoyaltyTransactionType {
   EARNED
   REDEEMED
   REFERRAL_BONUS
+  REFUND
   EXPIRED
 }
 
@@ -93,8 +94,12 @@ model Appointment {
   designImageUrl  String?
   status          AppointmentStatus @default(PENDING)
 
-  // Total calculated at time of booking (nullable for now)
+  // Original service price at time of booking.
   totalPrice      Float?
+  // Loyalty discount applied to this booking (amount due = totalPrice - discountAmount).
+  discountAmount  Float             @default(0)
+  pointsRedeemed  Int               @default(0)
+  pointsRefunded  Boolean           @default(false)
 
   // Nullable so guests (not logged in) can book
   userId          String?           @db.ObjectId
