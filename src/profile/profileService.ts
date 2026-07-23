@@ -22,13 +22,22 @@ export class ProfileService extends UserRepository {
       if(image) {
         data.avatar = await this.s3.uploadFile(image);
       }
-      
+
+      // Keep the account (login) email in sync with the profile email.
+      if (data.email) {
+        const existing = await this.getByEmail(data.email);
+        if (existing && existing.id !== userId) {
+          throw new ApiError("That email is already in use", 409);
+        }
+        await this.updateEmail(userId, data.email);
+      }
+
       const profile = await this.createProfile(userId, data);
-          
+
       if (!profile) {
         throw new ApiError("Failed to process profile", 500);
       }
-    
+
       return {
         message: "Profile processed successfully",
         data: profile,
