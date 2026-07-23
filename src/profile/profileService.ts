@@ -3,6 +3,7 @@ import { UserRepository } from "../auth/userRepository";
 import { S3BucketService } from "../bucket/s3BucketService";
 import { ApiError } from "../middleware/apiError";
 import { UploadedFile } from "../models/user";
+import { verifyPassword } from "../utils/helper";
 
 export class ProfileService extends UserRepository {
   constructor(private s3: S3BucketService) {
@@ -106,9 +107,32 @@ export class ProfileService extends UserRepository {
     if (!existingUser) {
       throw new ApiError("User not found", 404);
     }
-  
+
     await this.updatePassword(id, password);
-  
+
+    return { message: "Password updated successfully" };
+  }
+
+  // Self-service password change — requires the current password.
+  public async changeOwnPassword(
+    userId: string,
+    currentPassword: string,
+    newPassword: string,
+  ) {
+    const user = await this.user.findUnique({
+      where: { id: userId },
+      select: { password: true },
+    });
+    if (!user) {
+      throw new ApiError("User not found", 404);
+    }
+
+    const isValid = await verifyPassword(currentPassword, user.password);
+    if (!isValid) {
+      throw new ApiError("Your current password is incorrect", 400);
+    }
+
+    await this.updatePassword(userId, newPassword);
     return { message: "Password updated successfully" };
   }
 }
