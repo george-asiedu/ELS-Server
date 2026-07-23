@@ -1,8 +1,20 @@
 import { ErrorObject } from "ajv";
 import * as bcrypt from "bcrypt";
 import jwt, { SignOptions } from "jsonwebtoken";
+import { randomBytes } from "crypto";
 import { Payload, AuthToken } from "../models/user";
 import { env } from "../config/env.config";
+
+// Short, shareable referral code — random uppercase alphanumeric (default 6 chars).
+export const generateReferralCode = (length = 6): string => {
+  const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+  const bytes = randomBytes(length);
+  let code = "";
+  for (let i = 0; i < length; i++) {
+    code += chars[bytes[i]! % chars.length];
+  }
+  return code;
+};
 
 export const getPasswordHash = async (password: string) => {
   const salt = await bcrypt.genSalt(10);
