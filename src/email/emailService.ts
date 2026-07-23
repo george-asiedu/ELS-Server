@@ -54,4 +54,42 @@ export class EmailService {
     `;
     await this.send({ to, subject, html, text });
   }
+
+  public async sendAppointmentReceived(
+    to: string,
+    details: {
+      fullName: string;
+      serviceName: string;
+      date: string;
+      time: string;
+    },
+  ) {
+    const { fullName, serviceName, date, time } = details;
+    const subject = "We've received your appointment request";
+    const text =
+      `Hi ${fullName},\n\n` +
+      `Thank you for booking with EL Beauty Studio! We've received your request:\n\n` +
+      `Service: ${serviceName}\n` +
+      `Date: ${date}\n` +
+      `Time: ${time}\n` +
+      `Status: Pending confirmation\n\n` +
+      `We'll confirm your appointment shortly. See you soon!\n\n` +
+      `— EL Beauty Studio`;
+    const html = `
+      <div style="font-family: Arial, sans-serif; max-width: 480px; margin: 0 auto; color: #1f2937;">
+        <h2 style="color: #be185d;">EL Beauty Studio</h2>
+        <p>Hi ${fullName},</p>
+        <p>Thank you for booking with us! We've received your appointment request:</p>
+        <table style="width: 100%; border-collapse: collapse; margin: 16px 0;">
+          <tr><td style="padding: 6px 0; color: #6b7280;">Service</td><td style="padding: 6px 0; font-weight: 600;">${serviceName}</td></tr>
+          <tr><td style="padding: 6px 0; color: #6b7280;">Date</td><td style="padding: 6px 0; font-weight: 600;">${date}</td></tr>
+          <tr><td style="padding: 6px 0; color: #6b7280;">Time</td><td style="padding: 6px 0; font-weight: 600;">${time}</td></tr>
+          <tr><td style="padding: 6px 0; color: #6b7280;">Status</td><td style="padding: 6px 0; font-weight: 600; color: #d97706;">Pending confirmation</td></tr>
+        </table>
+        <p>We'll confirm your appointment shortly. See you soon! 💅</p>
+        <p style="font-size: 12px; color: #6b7280;">— EL Beauty Studio</p>
+      </div>
+    `;
+    await this.send({ to, subject, html, text });
+  }
 }
