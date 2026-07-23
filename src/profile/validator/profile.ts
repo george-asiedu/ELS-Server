@@ -30,32 +30,6 @@ const profileSchema: JSONSchemaType<Profile> = {
         format: "Email must be a valid email address"
       }
     },
-    firstName: {
-      type: "string",
-      nullable: true,
-      minLength: 3,
-      maxLength: 50,
-      pattern: "^[a-zA-Z]+$",
-      errorMessage: {
-        type: "First name must be a string",
-        minLength: "First name must be at least 3 characters long",
-        maxLength: "First name must be at most 50 characters long",
-        pattern: "First name must contain only letters"
-      }
-    },
-    lastName: {
-      type: "string",
-      minLength: 3,
-      nullable: true,
-      maxLength: 50,
-      pattern: "^[a-zA-Z]+$",
-      errorMessage: {
-        type: "First name must be a string",
-        minLength: "First name must be at least 3 characters long",
-        maxLength: "Last name must be at most 50 characters long",
-        pattern: "Last name must contain only letters"
-      }
-    },
     phone: {
       type: "string",
       nullable: true,
@@ -88,9 +62,9 @@ const profileSchema: JSONSchemaType<Profile> = {
   errorMessage: {
     type: 'Invalid request payload',
     properties: {
-      firstName: "First name must contain only letters",
-      lastName: "Last name must contain only letters",
-      phone: "Phone number must be a 10-digit number",
+      fullName: "Full name must be 2-100 characters",
+      email: "Email must be a valid email address",
+      phone: "Please enter a valid phone number",
       avatar: "Avatar URL must be a valid URL",
       location: "Location must contain only letters, numbers, spaces, and commas"
     }

@@ -32,8 +32,6 @@ export interface JwtTokenPayload {
 
 export interface Profile {
   fullName?: string;
-  firstName?: string;
-  lastName?: string;
   email?: string;
   phone?: string;
   avatar?: string;
