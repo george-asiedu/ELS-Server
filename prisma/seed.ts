@@ -106,7 +106,9 @@ async function seedCustomerActivity(customerId: string) {
     },
   });
 
-  const points = Math.round(service.price * 10);
+  // Give the demo customer a healthy starting balance so the discount-at-booking
+  // flow is easy to try (500 pts = GHS 50 of potential discount).
+  const points = 500;
   await prisma.loyaltyPoints.update({
     where: { userId: customerId },
     data: { points, lifetimePoints: points },
@@ -116,7 +118,7 @@ async function seedCustomerActivity(customerId: string) {
       userId: customerId,
       points,
       type: "EARNED",
-      description: `Earned for ${service.name}`,
+      description: "Welcome demo points",
     },
   });
 
