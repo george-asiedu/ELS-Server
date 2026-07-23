@@ -1,9 +1,10 @@
 import { UserRepository } from "../auth/userRepository";
 import { ApiError } from "../middleware/apiError";
+import { generateReferralCode } from "../utils/helper";
 
-// 100 points = GHS 1  (so 1000 pts = GHS 10). Redeem in whole GHS increments.
-const POINTS_PER_GHS = 100;
-const MIN_REDEEM_POINTS = 1000;
+// 10 points = GHS 1 off (so 100 pts = GHS 10). Redeem in whole-GHS increments.
+const POINTS_PER_GHS = 10;
+const MIN_REDEEM_POINTS = 100;
 
 export class AccountService extends UserRepository {
   public async getLoyalty(userId: string) {
@@ -70,8 +71,7 @@ export class AccountService extends UserRepository {
   public async getReferral(userId: string) {
     let code = await this.getReferralCodeByUserId(userId);
     if (!code) {
-      const generated = `ELS${userId.slice(-6).toUpperCase()}`;
-      code = await this.createReferralCode(userId, generated);
+      code = await this.createReferralCode(userId, generateReferralCode());
     }
     return { message: "Referral code retrieved successfully", data: code };
   }
