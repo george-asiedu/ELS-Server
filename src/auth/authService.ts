@@ -3,7 +3,8 @@ import { UserRepository } from "./userRepository";
 import {
   loginToken,
   verifyPassword,
-  getPasswordHash
+  getPasswordHash,
+  generateReferralCode
 } from "../utils/helper";
 import { ApiError } from "../middleware/apiError";
 import { env } from "../config/env.config";
@@ -32,7 +33,7 @@ export class AuthService extends UserRepository {
 
     await this.createLoyaltyPoints(newUser.id);
 
-    const referralCode = this.generateReferralCode(data.fullName);
+    const referralCode = await this.generateUniqueReferralCode();
     await this.createReferralCode(newUser.id, referralCode);
 
     // Handle inbound referral, if a code was supplied.
@@ -66,12 +67,14 @@ export class AuthService extends UserRepository {
     };
   }
 
-  private generateReferralCode(fullName?: string): string {
-    const prefix = fullName
-      ? fullName.split(" ")[0]!.toUpperCase().replace(/[^A-Z]/g, "").slice(0, 8)
-      : "ELS";
-    const suffix = randomBytes(3).toString("hex").toUpperCase();
-    return `${prefix || "ELS"}${suffix}`;
+  // Generate a short referral code, retrying on the rare chance of a collision.
+  private async generateUniqueReferralCode(): Promise<string> {
+    for (let i = 0; i < 5; i++) {
+      const code = generateReferralCode();
+      const existing = await this.getReferralCodeByCode(code);
+      if (!existing) return code;
+    }
+    return generateReferralCode(8);
   }
 
   public async login(data: Login) {
