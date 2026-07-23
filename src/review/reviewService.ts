@@ -14,12 +14,33 @@ const reviewInclude = {
 
 export class ReviewService extends Connection {
   public async create(userId: string, data: CreateReviewInput) {
+    let serviceId = data.serviceId;
+
+    if (data.appointmentId) {
+      const appointment = await this.appointment.findUnique({
+        where: { id: data.appointmentId },
+      });
+      if (!appointment || appointment.userId !== userId) {
+        throw new ApiError("Appointment not found", 404);
+      }
+      // One review per appointment.
+      const existing = await this.review.findFirst({
+        where: { appointmentId: data.appointmentId },
+      });
+      if (existing) {
+        throw new ApiError("You've already reviewed this appointment", 409);
+      }
+      // Default the service from the appointment if not supplied.
+      if (!serviceId) serviceId = appointment.serviceId;
+    }
+
     const review = await this.review.create({
       data: {
         rating: data.rating,
         content: data.content,
         userId,
-        ...(data.serviceId ? { serviceId: data.serviceId } : {}),
+        ...(serviceId ? { serviceId } : {}),
+        ...(data.appointmentId ? { appointmentId: data.appointmentId } : {}),
       },
       include: reviewInclude,
     });

@@ -92,6 +92,7 @@ model Appointment {
   appointmentDate DateTime
   appointmentTime String
   notes           String?
+  designImageUrl  String?
   status          AppointmentStatus @default(PENDING)
 
   // Total calculated at time of booking (nullable for now)

@@ -6,6 +6,8 @@ const prisma = new PrismaClient();
 
 const ADMIN_EMAIL = process.env.SEED_ADMIN_EMAIL || "admin@elsbeauty.com";
 const ADMIN_PASSWORD = process.env.SEED_ADMIN_PASSWORD || "Admin@1234";
+const CUSTOMER_EMAIL = process.env.SEED_CUSTOMER_EMAIL || "customer@elsbeauty.com";
+const CUSTOMER_PASSWORD = process.env.SEED_CUSTOMER_PASSWORD || "Customer@1234";
 
 const services = [
   // Nails
@@ -38,32 +40,86 @@ const businessHours = [
   { dayOfWeek: 6, openTime: "10:00", closeTime: "16:00", isClosed: false },
 ];
 
-async function seedAdmin() {
-  const hashed = await bcrypt.hash(ADMIN_PASSWORD, 10);
-  const admin = await prisma.user.upsert({
-    where: { email: ADMIN_EMAIL },
-    update: { role: "ADMIN" },
-    create: { email: ADMIN_EMAIL, password: hashed, role: "ADMIN" },
+async function seedUser(
+  email: string,
+  password: string,
+  role: "ADMIN" | "CUSTOMER",
+  fullName: string,
+  phone?: string,
+) {
+  const hashed = await bcrypt.hash(password, 10);
+  const user = await prisma.user.upsert({
+    where: { email },
+    update: { role },
+    create: { email, password: hashed, role },
   });
 
   await prisma.profile.upsert({
-    where: { userId: admin.id },
+    where: { userId: user.id },
     update: {},
-    create: { userId: admin.id, fullName: "Studio Admin", email: ADMIN_EMAIL },
+    create: { userId: user.id, fullName, email, ...(phone ? { phone } : {}) },
   });
   await prisma.loyaltyPoints.upsert({
-    where: { userId: admin.id },
+    where: { userId: user.id },
     update: {},
-    create: { userId: admin.id },
+    create: { userId: user.id },
   });
   await prisma.referralCode.upsert({
-    where: { userId: admin.id },
+    where: { userId: user.id },
     update: {},
-    create: { userId: admin.id, code: `ELS${admin.id.slice(-6).toUpperCase()}` },
+    create: { userId: user.id, code: `ELS${user.id.slice(-6).toUpperCase()}` },
   });
 
-  console.log(`✔ Admin user ready: ${ADMIN_EMAIL}`);
-  return admin;
+  console.log(`✔ ${role} user ready: ${email}`);
+  return user;
+}
+
+// Give the sample customer a completed appointment + matching points so the
+// review and rewards flows can be demoed straight after seeding.
+async function seedCustomerActivity(customerId: string) {
+  const existing = await prisma.appointment.findFirst({
+    where: { userId: customerId },
+  });
+  if (existing) {
+    console.log("• Sample customer already has activity; skipping.");
+    return;
+  }
+
+  const service = await prisma.service.findFirst({ where: { category: "NAILS" } });
+  if (!service) return;
+
+  const lastWeek = new Date();
+  lastWeek.setDate(lastWeek.getDate() - 7);
+
+  await prisma.appointment.create({
+    data: {
+      fullName: "Ama Customer",
+      phone: "+233201112222",
+      email: CUSTOMER_EMAIL,
+      appointmentDate: new Date(lastWeek.toISOString().slice(0, 10) + "T00:00:00.000Z"),
+      appointmentTime: "10:00 AM",
+      status: "COMPLETED",
+      totalPrice: service.price,
+      serviceId: service.id,
+      userId: customerId,
+    },
+  });
+
+  const points = Math.round(service.price * 10);
+  await prisma.loyaltyPoints.update({
+    where: { userId: customerId },
+    data: { points, lifetimePoints: points },
+  });
+  await prisma.loyaltyTransaction.create({
+    data: {
+      userId: customerId,
+      points,
+      type: "EARNED",
+      description: `Earned for ${service.name}`,
+    },
+  });
+
+  console.log(`✔ Sample customer has 1 completed appointment and ${points} points.`);
 }
 
 async function seedServices() {
@@ -87,7 +143,8 @@ async function seedBusinessHours() {
   console.log("✔ Business hours ready (Mon–Sat open, Sun closed).");
 }
 
-async function seedReviews(adminId: string) {
+// Reviews are written by customers, never the admin.
+async function seedReviews(customerId: string) {
   const count = await prisma.review.count();
   if (count > 0) {
     console.log(`• Reviews already present (${count}); skipping.`);
@@ -110,23 +167,34 @@ async function seedReviews(adminId: string) {
         rating: s.rating,
         content: s.content,
         approved: true,
-        userId: adminId,
+        userId: customerId,
         ...(svc ? { serviceId: svc.id } : {}),
       },
     });
   }
-  console.log(`✔ Seeded ${samples.length} approved sample reviews.`);
+  console.log(`✔ Seeded ${samples.length} approved sample reviews (by the customer).`);
 }
 
 async function main() {
   console.log("Seeding ELS database...");
-  const admin = await seedAdmin();
+  const admin = await seedUser(ADMIN_EMAIL, ADMIN_PASSWORD, "ADMIN", "Studio Admin");
+  const customer = await seedUser(
+    CUSTOMER_EMAIL,
+    CUSTOMER_PASSWORD,
+    "CUSTOMER",
+    "Ama Customer",
+    "+233201112222",
+  );
+  void admin;
+
   await seedServices();
   await seedBusinessHours();
-  await seedReviews(admin.id);
-  console.log("\nDone. Admin login:");
-  console.log(`  email:    ${ADMIN_EMAIL}`);
-  console.log(`  password: ${ADMIN_PASSWORD}`);
+  await seedCustomerActivity(customer.id);
+  await seedReviews(customer.id);
+
+  console.log("\nDone. Two separate accounts:");
+  console.log(`  ADMIN    → ${ADMIN_EMAIL} / ${ADMIN_PASSWORD}  (studio dashboard)`);
+  console.log(`  CUSTOMER → ${CUSTOMER_EMAIL} / ${CUSTOMER_PASSWORD}  (booking + rewards)`);
 }
 
 main()

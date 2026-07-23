@@ -11,6 +11,7 @@ const createReviewSchema: JSONSchemaType<CreateReviewInput> = {
     rating: { type: "integer", minimum: 1, maximum: 5 },
     content: { type: "string", minLength: 10, maxLength: 500 },
     serviceId: { type: "string", nullable: true },
+    appointmentId: { type: "string", nullable: true },
   },
   required: ["rating", "content"],
   additionalProperties: false,

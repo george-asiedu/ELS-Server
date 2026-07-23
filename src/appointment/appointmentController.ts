@@ -22,8 +22,29 @@ export class AppointmentController {
       }
       // optionalAuth populates req.user for logged-in bookings; guests allowed.
       const userId = req.user?.id;
-      const result = await appointmentService.create(req.body, userId);
+      const result = await appointmentService.create(
+        req.body,
+        userId,
+        req.file,
+      );
       return res.status(201).json(result);
+    } catch (error) {
+      return next(error);
+    }
+  };
+
+  public static availability = async (
+    req: Request,
+    res: Response,
+    next: NextFunction,
+  ) => {
+    try {
+      const date = String(req.query.date || "");
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+        throw new ApiError("A valid date (yyyy-MM-dd) is required", 400);
+      }
+      const result = await appointmentService.takenSlots(date);
+      return res.status(200).json(result);
     } catch (error) {
       return next(error);
     }

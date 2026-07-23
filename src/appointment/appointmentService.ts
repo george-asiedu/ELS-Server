@@ -1,5 +1,7 @@
 import { Connection } from "../db/dbConnection";
 import { ApiError } from "../middleware/apiError";
+import { S3BucketService } from "../bucket/s3BucketService";
+import { UploadedFile } from "../models/user";
 import {
   AppointmentStatusInput,
   CreateAppointmentInput,
@@ -18,12 +20,23 @@ const serviceInclude = {
 } as const;
 
 export class AppointmentService extends Connection {
-  public async create(data: CreateAppointmentInput, userId?: string) {
+  private s3 = new S3BucketService();
+
+  public async create(
+    data: CreateAppointmentInput,
+    userId?: string,
+    designImage?: UploadedFile,
+  ) {
     const service = await this.service.findUnique({
       where: { id: data.serviceId },
     });
     if (!service) {
       throw new ApiError("Selected service not found", 404);
+    }
+
+    let designImageUrl: string | undefined;
+    if (designImage) {
+      designImageUrl = await this.s3.uploadFile(designImage);
     }
 
     const appointment = await this.appointment.create({
@@ -36,12 +49,26 @@ export class AppointmentService extends Connection {
         notes: data.notes ?? null,
         totalPrice: service.price,
         serviceId: data.serviceId,
+        ...(designImageUrl ? { designImageUrl } : {}),
         ...(userId ? { userId } : {}),
       },
       include: serviceInclude,
     });
 
     return { message: "Appointment created successfully", data: appointment };
+  }
+
+  // Times already taken (any non-cancelled appointment) for a given date.
+  public async takenSlots(date: string) {
+    const appointments = await this.appointment.findMany({
+      where: {
+        appointmentDate: new Date(`${date}T00:00:00.000Z`),
+        status: { not: "CANCELLED" },
+      },
+      select: { appointmentTime: true },
+    });
+    const taken = [...new Set(appointments.map((a) => a.appointmentTime))];
+    return { message: "Availability retrieved successfully", data: taken };
   }
 
   public async listForUser(userId: string) {

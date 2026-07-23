@@ -1,11 +1,21 @@
 import { Router } from "express";
+import multer from "multer";
 import { AppointmentController } from "./appointmentController";
 import { authenticate, requireAdmin, optionalAuth } from "../middleware/auth";
 
 const router: Router = Router();
+const upload = multer({ storage: multer.memoryStorage() });
 
-// Create — guests and logged-in users both allowed.
-router.post("/", optionalAuth, AppointmentController.create);
+// Public availability — which time slots are already taken for a date.
+router.get("/availability", AppointmentController.availability);
+
+// Create — guests and logged-in users both allowed; optional design image.
+router.post(
+  "/",
+  optionalAuth,
+  upload.single("designImage"),
+  AppointmentController.create,
+);
 
 // Logged-in user's own appointments.
 router.get("/me", authenticate, AppointmentController.listMine);
