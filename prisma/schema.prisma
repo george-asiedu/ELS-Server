@@ -69,8 +69,6 @@ model Profile {
   id        String  @id @default(auto()) @map("_id") @db.ObjectId
   userId    String  @db.ObjectId @unique
   fullName  String?
-  firstName String?
-  lastName  String?
   email     String?
   phone     String?
   avatar    String?
