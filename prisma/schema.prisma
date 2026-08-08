@@ -13,12 +13,6 @@ enum Role {
   ADMIN
 }
 
-enum ServiceCategory {
-  NAILS
-  LASHES
-  HAIR
-}
-
 enum AppointmentStatus {
   PENDING
   CONFIRMED
@@ -39,6 +33,11 @@ enum LoyaltyTransactionType {
   REFERRAL_BONUS
   REFUND
   EXPIRED
+}
+
+enum MediaType {
+  IMAGE
+  VIDEO
 }
 
 model User {
@@ -122,9 +121,11 @@ model Appointment {
 model Service {
   id           String          @id @default(auto()) @map("_id") @db.ObjectId
   name         String
-  category     ServiceCategory
+  category     String          // Category slug (see Category model)
   description  String?
   price        Float
+  // When set (and below price), this is an active promotional price.
+  promoPrice   Float?
   duration     String          // Human readable, e.g. "2 hrs"
   popular      Boolean         @default(false)
   active       Boolean         @default(true)
@@ -190,11 +191,26 @@ model Gallery {
   id        String          @id @default(auto()) @map("_id") @db.ObjectId
   title     String?
   imageUrl  String
-  category  ServiceCategory
+  mediaType MediaType       @default(IMAGE)
+  category  String          // Category slug (see Category model)
   active    Boolean         @default(true)
   createdAt DateTime        @default(now())
 
   @@map("gallery")
+}
+
+// Admin-managed service/gallery categories with public visibility control.
+model Category {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  name      String
+  slug      String   @unique
+  active    Boolean  @default(true)
+  order     Int      @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("categories")
 }
 
 model BusinessHours {
