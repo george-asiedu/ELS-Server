@@ -45,15 +45,21 @@ export class AppointmentService extends Connection {
       designImageUrl = await this.s3.uploadFile(designImage);
     }
 
+    // A service on promo bills at its promo price.
+    const onPromo =
+      service.promoPrice != null && service.promoPrice < service.price;
+    const effectivePrice = onPromo ? service.promoPrice! : service.price;
+
     // Apply loyalty points as a discount (logged-in users only, capped at 30%).
+    // Points can't be combined with a promo — the price is already reduced.
     let discountAmount = 0;
     let pointsRedeemed = 0;
-    if (userId && data.applyPoints === "true") {
+    if (userId && data.applyPoints === "true" && !onPromo) {
       const balance = await this.loyaltyPoints.findUnique({ where: { userId } });
       const available = balance?.points ?? 0;
       if (available > 0) {
         const maxPointsByCap = Math.floor(
-          service.price *
+          effectivePrice *
             AppointmentService.MAX_DISCOUNT_RATIO *
             AppointmentService.POINTS_PER_GHS,
         );
@@ -70,7 +76,7 @@ export class AppointmentService extends Connection {
         appointmentDate: new Date(`${data.appointmentDate}T00:00:00.000Z`),
         appointmentTime: data.appointmentTime,
         notes: data.notes ?? null,
-        totalPrice: service.price,
+        totalPrice: effectivePrice,
         discountAmount,
         pointsRedeemed,
         serviceId: data.serviceId,
