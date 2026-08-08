@@ -12,23 +12,23 @@ const CUSTOMER_PASSWORD = process.env.SEED_CUSTOMER_PASSWORD || "Customer@1234";
 
 const services = [
   // Nails
-  { name: "Full Set Acrylics", category: "NAILS", description: "Full set of sculpted acrylic nails with your choice of shape and length", duration: "2 hrs", price: 65, popular: true },
-  { name: "Acrylic Fill", category: "NAILS", description: "Maintenance fill for existing acrylic nails", duration: "1.5 hrs", price: 45, popular: false },
-  { name: "Gel Manicure", category: "NAILS", description: "Long-lasting gel polish with nail shaping and cuticle care", duration: "1 hr", price: 40, popular: true },
-  { name: "Classic Manicure", category: "NAILS", description: "Traditional manicure with nail shaping, cuticle care, and polish", duration: "45 min", price: 25, popular: false },
-  { name: "Spa Pedicure", category: "NAILS", description: "Relaxing pedicure with exfoliation, massage, and polish", duration: "1 hr", price: 50, popular: false },
-  { name: "Nail Art Add-on", category: "NAILS", description: "Custom nail art designs (per nail)", duration: "15 min", price: 5, popular: false },
+  { name: "Full Set Acrylics", category: "nails", description: "Full set of sculpted acrylic nails with your choice of shape and length", duration: "2 hrs", price: 65, popular: true },
+  { name: "Acrylic Fill", category: "nails", description: "Maintenance fill for existing acrylic nails", duration: "1.5 hrs", price: 45, popular: false },
+  { name: "Gel Manicure", category: "nails", description: "Long-lasting gel polish with nail shaping and cuticle care", duration: "1 hr", price: 40, popular: true },
+  { name: "Classic Manicure", category: "nails", description: "Traditional manicure with nail shaping, cuticle care, and polish", duration: "45 min", price: 25, popular: false },
+  { name: "Spa Pedicure", category: "nails", description: "Relaxing pedicure with exfoliation, massage, and polish", duration: "1 hr", price: 50, popular: false },
+  { name: "Nail Art Add-on", category: "nails", description: "Custom nail art designs (per nail)", duration: "15 min", price: 5, popular: false },
   // Lashes
-  { name: "Classic Lash Set", category: "LASHES", description: "Natural-looking lash extensions, one extension per natural lash", duration: "2 hrs", price: 120, popular: true },
-  { name: "Hybrid Lash Set", category: "LASHES", description: "Mix of classic and volume lashes for a textured look", duration: "2.5 hrs", price: 150, popular: false },
-  { name: "Volume Lash Set", category: "LASHES", description: "Multiple lightweight extensions per lash for dramatic fullness", duration: "3 hrs", price: 180, popular: true },
-  { name: "Lash Fill", category: "LASHES", description: "Maintenance fill for existing lash extensions (2-3 weeks)", duration: "1 hr", price: 60, popular: false },
-  { name: "Lash Removal", category: "LASHES", description: "Safe removal of existing lash extensions", duration: "30 min", price: 25, popular: false },
+  { name: "Classic Lash Set", category: "lashes", description: "Natural-looking lash extensions, one extension per natural lash", duration: "2 hrs", price: 120, popular: true },
+  { name: "Hybrid Lash Set", category: "lashes", description: "Mix of classic and volume lashes for a textured look", duration: "2.5 hrs", price: 150, popular: false },
+  { name: "Volume Lash Set", category: "lashes", description: "Multiple lightweight extensions per lash for dramatic fullness", duration: "3 hrs", price: 180, popular: true },
+  { name: "Lash Fill", category: "lashes", description: "Maintenance fill for existing lash extensions (2-3 weeks)", duration: "1 hr", price: 60, popular: false },
+  { name: "Lash Removal", category: "lashes", description: "Safe removal of existing lash extensions", duration: "30 min", price: 25, popular: false },
   // Hair
-  { name: "Silk Press", category: "HAIR", description: "Wash, blow-dry and silk press for a smooth, sleek finish", duration: "1.5 hrs", price: 70, popular: true },
-  { name: "Knotless Braids", category: "HAIR", description: "Protective knotless box braids in your choice of length", duration: "4 hrs", price: 160, popular: true },
-  { name: "Wig Install", category: "HAIR", description: "Custom lace wig install with styling and laid edges", duration: "2 hrs", price: 120, popular: false },
-  { name: "Wash & Style", category: "HAIR", description: "Cleansing shampoo, condition and blow-out with styling", duration: "1 hr", price: 55, popular: false },
+  { name: "Silk Press", category: "hair", description: "Wash, blow-dry and silk press for a smooth, sleek finish", duration: "1.5 hrs", price: 70, popular: true },
+  { name: "Knotless Braids", category: "hair", description: "Protective knotless box braids in your choice of length", duration: "4 hrs", price: 160, popular: true },
+  { name: "Wig Install", category: "hair", description: "Custom lace wig install with styling and laid edges", duration: "2 hrs", price: 120, popular: false },
+  { name: "Wash & Style", category: "hair", description: "Cleansing shampoo, condition and blow-out with styling", duration: "1 hr", price: 55, popular: false },
 ] as const;
 
 const businessHours = [
@@ -86,7 +86,7 @@ async function seedCustomerActivity(customerId: string) {
     return;
   }
 
-  const service = await prisma.service.findFirst({ where: { category: "NAILS" } });
+  const service = await prisma.service.findFirst({ where: { category: "nails" } });
   if (!service) return;
 
   const lastWeek = new Date();
@@ -125,6 +125,23 @@ async function seedCustomerActivity(customerId: string) {
   console.log(`✔ Sample customer has 1 completed appointment and ${points} points.`);
 }
 
+const categories = [
+  { name: "Nails", slug: "nails", order: 0 },
+  { name: "Lashes", slug: "lashes", order: 1 },
+  { name: "Hair", slug: "hair", order: 2 },
+];
+
+async function seedCategories() {
+  for (const c of categories) {
+    await prisma.category.upsert({
+      where: { slug: c.slug },
+      update: {},
+      create: { name: c.name, slug: c.slug, order: c.order, active: true },
+    });
+  }
+  console.log("✔ Categories ready (nails, lashes, hair).");
+}
+
 async function seedServices() {
   const count = await prisma.service.count();
   if (count > 0) {
@@ -143,7 +160,7 @@ async function seedBusinessHours() {
       create: h,
     });
   }
-  console.log("✔ Business hours ready (Mon–Sat open, Sun closed).");
+  console.log("✔ Business hours ready (Mon-Sat open, Sun closed).");
 }
 
 // Reviews are written by customers, never the admin.
@@ -157,10 +174,10 @@ async function seedReviews(customerId: string) {
   const byCategory = (c: string) => all.find((s) => s.category === c);
 
   const samples = [
-    { rating: 5, content: "Absolutely love my nails! El is so talented and always makes sure I leave feeling beautiful. The attention to detail is incredible.", category: "NAILS" },
-    { rating: 5, content: "Best lash extensions I have ever had! They look so natural and last for weeks. Highly recommend El's Beauty Studio!", category: "LASHES" },
-    { rating: 5, content: "My silk press came out flawless and lasted for days. El really listens to what you want and delivers beyond expectations!", category: "HAIR" },
-    { rating: 4, content: "Great service and beautiful results. The booking process was easy and the studio has such a welcoming atmosphere.", category: "NAILS" },
+    { rating: 5, content: "Absolutely love my nails! El is so talented and always makes sure I leave feeling beautiful. The attention to detail is incredible.", category: "nails" },
+    { rating: 5, content: "Best lash extensions I have ever had! They look so natural and last for weeks. Highly recommend El's Beauty Studio!", category: "lashes" },
+    { rating: 5, content: "My silk press came out flawless and lasted for days. El really listens to what you want and delivers beyond expectations!", category: "hair" },
+    { rating: 4, content: "Great service and beautiful results. The booking process was easy and the studio has such a welcoming atmosphere.", category: "nails" },
   ];
 
   for (const s of samples) {
@@ -190,6 +207,7 @@ async function main() {
   );
   void admin;
 
+  await seedCategories();
   await seedServices();
   await seedBusinessHours();
   await seedCustomerActivity(customer.id);
