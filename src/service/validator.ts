@@ -9,9 +9,10 @@ const createServiceSchema: JSONSchemaType<CreateServiceInput> = {
   type: "object",
   properties: {
     name: { type: "string", minLength: 1, maxLength: 120 },
-    category: { type: "string", enum: ["NAILS", "LASHES", "HAIR"] },
+    category: { type: "string", minLength: 1, maxLength: 60 },
     description: { type: "string", nullable: true, maxLength: 1000 },
     price: { type: "number", minimum: 0 },
+    promoPrice: { type: "number", nullable: true, minimum: 0 },
     duration: { type: "string", minLength: 1, maxLength: 40 },
     popular: { type: "boolean", nullable: true },
     active: { type: "boolean", nullable: true },
@@ -33,9 +34,10 @@ const updateServiceSchema: JSONSchemaType<UpdateServiceInput> = {
   type: "object",
   properties: {
     name: { type: "string", nullable: true, minLength: 1, maxLength: 120 },
-    category: { type: "string", nullable: true, enum: ["NAILS", "LASHES", "HAIR"] },
+    category: { type: "string", nullable: true, minLength: 1, maxLength: 60 },
     description: { type: "string", nullable: true, maxLength: 1000 },
     price: { type: "number", nullable: true, minimum: 0 },
+    promoPrice: { type: "number", nullable: true, minimum: 0 },
     duration: { type: "string", nullable: true, minLength: 1, maxLength: 40 },
     popular: { type: "boolean", nullable: true },
     active: { type: "boolean", nullable: true },
