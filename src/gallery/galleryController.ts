@@ -6,8 +6,6 @@ import { ApiError } from "../middleware/apiError";
 const s3 = new S3BucketService();
 const galleryService = new GalleryService(s3);
 
-const VALID_CATEGORIES = ["NAILS", "LASHES", "HAIR"];
-
 export class GalleryController {
   public static list = async (
     _req: Request,
@@ -45,14 +43,10 @@ export class GalleryController {
         title?: string;
         category?: string;
       };
-      if (!category || !VALID_CATEGORIES.includes(category)) {
-        throw new ApiError("Category must be NAILS, LASHES or HAIR", 400);
+      if (!category) {
+        throw new ApiError("A category is required", 400);
       }
-      const result = await galleryService.create(
-        title,
-        category as "NAILS" | "LASHES" | "HAIR",
-        req.file,
-      );
+      const result = await galleryService.create(title, category, req.file);
       return res.status(201).json(result);
     } catch (error) {
       return next(error);
