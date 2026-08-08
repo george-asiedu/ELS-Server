@@ -3,16 +3,20 @@ import { S3BucketService } from "../bucket/s3BucketService";
 import { ApiError } from "../middleware/apiError";
 import { UploadedFile } from "../models/user";
 
-type GalleryCategoryInput = "NAILS" | "LASHES" | "HAIR";
-
 export class GalleryService extends Connection {
   constructor(private s3: S3BucketService) {
     super();
   }
 
+  // Public: active items whose category is also visible (active).
   public async listActive() {
-    const images = await this.gallery.findMany({
+    const visible = await this.category.findMany({
       where: { active: true },
+      select: { slug: true },
+    });
+    const slugs = visible.map((c) => c.slug);
+    const images = await this.gallery.findMany({
+      where: { active: true, category: { in: slugs } },
       orderBy: { createdAt: "desc" },
     });
     return { message: "Gallery retrieved successfully", data: images };
@@ -27,21 +31,30 @@ export class GalleryService extends Connection {
 
   public async create(
     title: string | undefined,
-    category: GalleryCategoryInput,
-    image?: UploadedFile,
+    category: string,
+    file?: UploadedFile,
   ) {
-    if (!image) {
-      throw new ApiError("An image file is required", 400);
+    if (!file) {
+      throw new ApiError("An image or video file is required", 400);
     }
-    const imageUrl = await this.s3.uploadFile(image);
+    const categoryExists = await this.category.findUnique({
+      where: { slug: category },
+    });
+    if (!categoryExists) {
+      throw new ApiError("Selected category does not exist", 400);
+    }
+    const mediaType = file.mimetype.startsWith("video/") ? "VIDEO" : "IMAGE";
+    const imageUrl = await this.s3.uploadFile(file);
     const created = await this.gallery.create({
       data: {
         ...(title ? { title } : {}),
         category,
+        mediaType,
         imageUrl,
       },
     });
-    return { message: "Image uploaded successfully", data: created };
+    const label = mediaType === "VIDEO" ? "Video" : "Image";
+    return { message: `${label} uploaded successfully`, data: created };
   }
 
   public async remove(id: string) {
