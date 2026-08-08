@@ -1,10 +1,10 @@
-export type ServiceCategoryInput = "NAILS" | "LASHES" | "HAIR";
-
+// Category is now a slug referencing the Category collection.
 export interface CreateServiceInput {
   name: string;
-  category: ServiceCategoryInput;
+  category: string;
   description?: string;
   price: number;
+  promoPrice?: number | null;
   duration: string;
   popular?: boolean;
   active?: boolean;
@@ -13,9 +13,10 @@ export interface CreateServiceInput {
 
 export interface UpdateServiceInput {
   name?: string;
-  category?: ServiceCategoryInput;
+  category?: string;
   description?: string;
   price?: number;
+  promoPrice?: number | null;
   duration?: string;
   popular?: boolean;
   active?: boolean;
