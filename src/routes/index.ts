@@ -8,11 +8,13 @@ import reviewRoutes from "../review/routes";
 import galleryRoutes from "../gallery/routes";
 import businessHoursRoutes from "../businessHours/routes";
 import contactRoutes from "../contact/routes";
+import categoryRoutes from "../category/routes";
 
 const router: Router = Router();
 
 router.use("/auth", authRoutes);
 router.use("/profile", profileRoutes);
+router.use("/categories", categoryRoutes);
 router.use("/services", serviceRoutes);
 router.use("/appointments", appointmentRoutes);
 router.use("/account", accountRoutes);
