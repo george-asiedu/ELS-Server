@@ -6,4 +6,5 @@ export enum HttpCode {
   FORBIDDEN = 403,
   CONFLICT = 409,
   NO_CONTENT = 204,
+  BAD_GATEWAY = 502,
 }
