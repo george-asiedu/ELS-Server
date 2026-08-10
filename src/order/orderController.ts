@@ -11,11 +11,79 @@ export class OrderController {
     next: NextFunction,
   ) => {
     try {
-      const { fulfillment, deliveryAddress, deliveryPhone } = req.body ?? {};
+      const {
+        fulfillment,
+        deliveryAddress,
+        deliveryPhone,
+        applyPoints,
+        referralCode,
+      } = req.body ?? {};
       const result = await orderService.checkout(req.user.id, {
         fulfillment: fulfillment === "DELIVERY" ? "DELIVERY" : "PICKUP",
         deliveryAddress,
         deliveryPhone,
+        applyPoints: applyPoints === true || applyPoints === "true",
+        referralCode,
+      });
+      return res.status(201).json(result);
+    } catch (error) {
+      return next(error);
+    }
+  };
+
+  // Public — a guest buys one or more products without an account.
+  public static guestCheckout = async (
+    req: Request,
+    res: Response,
+    next: NextFunction,
+  ) => {
+    try {
+      const {
+        items,
+        name,
+        email,
+        phone,
+        fulfillment,
+        deliveryAddress,
+        deliveryPhone,
+        referralCode,
+      } = req.body ?? {};
+      if (!Array.isArray(items) || items.length === 0) {
+        throw new ApiError("At least one product is required", 400);
+      }
+      const result = await orderService.guestCheckout({
+        items,
+        name,
+        email,
+        phone,
+        fulfillment: fulfillment === "DELIVERY" ? "DELIVERY" : "PICKUP",
+        deliveryAddress,
+        deliveryPhone,
+        referralCode,
+      });
+      return res.status(201).json(result);
+    } catch (error) {
+      return next(error);
+    }
+  };
+
+  // Customer — pay for products added to a booking (combined with the service).
+  public static bookingCheckout = async (
+    req: Request,
+    res: Response,
+    next: NextFunction,
+  ) => {
+    try {
+      const { appointmentId, items, serviceType, referralCode } = req.body ?? {};
+      if (!appointmentId) throw new ApiError("appointmentId is required", 400);
+      if (!Array.isArray(items) || items.length === 0) {
+        throw new ApiError("At least one product is required", 400);
+      }
+      const result = await orderService.bookingCheckout(req.user.id, {
+        appointmentId,
+        items,
+        serviceType: serviceType === "PARTIAL" ? "PARTIAL" : "FULL",
+        referralCode,
       });
       return res.status(201).json(result);
     } catch (error) {
