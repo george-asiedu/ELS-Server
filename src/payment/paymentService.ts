@@ -134,11 +134,25 @@ export class PaymentService extends Connection {
   public async verify(reference: string) {
     const data = await paystack.verify(reference);
     const payment = await this.processVerification(reference, data);
+    if (!payment) throw new ApiError("Payment not found", 404);
     return { message: "Payment verified", data: payment };
   }
 
+  // Combined booking charge: finalize the service payment AND the linked product
+  // order that share one Paystack reference. Either may be absent.
+  public async verifyCombined(reference: string) {
+    const data = await paystack.verify(reference);
+    const payment = await this.processVerification(reference, data);
+    const order = await this.orders.finalizeByReference(reference, data);
+    if (!payment && !order) {
+      throw new ApiError("Transaction not found", 404);
+    }
+    return { message: "Payment verified", data: { payment, order } };
+  }
+
   // Shared by verify + webhook. Idempotently marks the payment paid and emails
-  // the receipt the first time it transitions to PAID.
+  // the receipt the first time it transitions to PAID. Returns null when no
+  // payment matches the reference (order-only / combined charges).
   private async processVerification(
     reference: string,
     data: PaystackVerifyData,
@@ -147,7 +161,7 @@ export class PaymentService extends Connection {
       where: { reference },
       include: appointmentInclude,
     });
-    if (!payment) throw new ApiError("Payment not found", 404);
+    if (!payment) return null;
 
     const succeeded = data.status === "success";
 
@@ -218,13 +232,11 @@ export class PaymentService extends Connection {
       const reference: string = event.data.reference;
       try {
         const data = await paystack.verify(reference);
-        // Orders and appointment payments share one webhook — dispatch by the
-        // reference prefix (order references are "ORD-…").
-        if (reference.startsWith("ORD-")) {
-          await this.orders.finalizeByReference(reference, data);
-        } else {
-          await this.processVerification(reference, data);
-        }
+        // One webhook covers appointment payments, product orders, and combined
+        // booking+product charges (which share a reference) — finalize both;
+        // each is a no-op when nothing matches.
+        await this.processVerification(reference, data);
+        await this.orders.finalizeByReference(reference, data);
       } catch (error) {
         console.error("Webhook processing error:", error);
       }
