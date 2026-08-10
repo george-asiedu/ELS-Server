@@ -129,6 +129,10 @@ model Appointment {
   payment             Payment?
   reviews             Review[]
   loyaltyTransactions LoyaltyTransaction[]
+  // Products bought as part of this booking (separate revenue bucket).
+  // One-to-many at the schema level (Mongo unique-null limitation); at most one
+  // product order per appointment is enforced in application code.
+  productOrders       Order[]
 
   createdAt       DateTime          @default(now())
   updatedAt       DateTime          @updatedAt
@@ -434,11 +438,21 @@ model CartItem {
 model Order {
   id              String          @id @default(auto()) @map("_id") @db.ObjectId
   orderNumber     String          @unique
-  userId          String          @db.ObjectId
-  user            User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  // Null for guest orders (purchases without an account).
+  userId          String?         @db.ObjectId
+  user            User?           @relation(fields: [userId], references: [id], onDelete: SetNull)
   items           OrderItem[]
 
+  // Contact snapshot (guests, or a copy for logged-in buyers).
+  customerName    String?
+  customerEmail   String?
+  customerPhone   String?
+
   subtotal        Float
+  // Loyalty redemption applied to the product subtotal (customers only).
+  discountAmount  Float           @default(0)
+  pointsRedeemed  Int             @default(0)
+  pointsRefunded  Boolean         @default(false)
   deliveryFee     Float           @default(0)
   total           Float
   status          OrderStatus     @default(PENDING_PAYMENT)
@@ -447,7 +461,17 @@ model Order {
   deliveryAddress String?
   deliveryPhone   String?
 
-  // Paystack payment fields (reference always set to a generated UUID).
+  // A referral code used at checkout (rewards the code owner once per buyer).
+  referralCode    String?
+
+  // When products are bought as part of a booking, the order links here so
+  // revenue can be split (service -> booking, products -> product). Not unique
+  // (Mongo rejects multiple null values); at most one is enforced in code.
+  appointmentId   String?         @db.ObjectId
+  appointment     Appointment?    @relation(fields: [appointmentId], references: [id], onDelete: SetNull)
+
+  // Paystack payment fields (reference always set to a generated UUID; shared
+  // with the appointment Payment for a combined booking+products charge).
   reference       String?         @unique
   transactionId   String?
   channel         String?
@@ -467,12 +491,24 @@ model OrderItem {
   // Snapshot so order history is stable if the product later changes/deletes.
   name      String
   unitPrice Float
+  costPrice Float    @default(0)
   quantity  Int
 
   order     Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
   product   Product? @relation(fields: [productId], references: [id], onDelete: SetNull)
 
   @@map("order_items")
+}
+
+// De-dups the referral reward so a referrer earns 50 pts once per new buyer.
+model ReferralOrderReward {
+  id             String   @id @default(auto()) @map("_id") @db.ObjectId
+  referralCodeId String   @db.ObjectId
+  buyerEmail     String
+  createdAt      DateTime @default(now())
+
+  @@unique([referralCodeId, buyerEmail])
+  @@map("referral_order_rewards")
 }
 
 // Admin-controlled shop policy (single document).
