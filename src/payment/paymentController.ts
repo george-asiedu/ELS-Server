@@ -78,6 +78,22 @@ export class PaymentController {
     }
   };
 
+  // Combined booking + products charge (shared reference).
+  public static verifyCombined = async (
+    req: Request,
+    res: Response,
+    next: NextFunction,
+  ) => {
+    try {
+      const reference = String(req.query.reference || "");
+      if (!reference) throw new ApiError("reference is required", 400);
+      const result = await paymentService.verifyCombined(reference);
+      return res.status(200).json(result);
+    } catch (error) {
+      return next(error);
+    }
+  };
+
   public static webhook = async (
     req: Request,
     res: Response,
