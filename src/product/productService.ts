@@ -7,6 +7,7 @@ export interface CreateProductInput {
   name: string;
   description?: string | null;
   price: number;
+  costPrice?: number;
   promoPrice?: number | null;
   category: string;
   stock?: number;
@@ -67,6 +68,7 @@ export class ProductService extends Connection {
         name: data.name.trim(),
         description: data.description ?? null,
         price: data.price,
+        costPrice: data.costPrice ?? 0,
         promoPrice: data.promoPrice ?? null,
         category: data.category,
         stock: data.stock ?? 0,
@@ -101,6 +103,7 @@ export class ProductService extends Connection {
           ? { description: data.description }
           : {}),
         ...(data.price !== undefined ? { price: data.price } : {}),
+        ...(data.costPrice !== undefined ? { costPrice: data.costPrice } : {}),
         ...(data.promoPrice !== undefined ? { promoPrice: data.promoPrice } : {}),
         ...(data.category !== undefined ? { category: data.category } : {}),
         ...(data.stock !== undefined ? { stock: data.stock } : {}),
