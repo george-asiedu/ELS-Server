@@ -18,6 +18,17 @@ const serviceInclude = {
       category: true,
     },
   },
+  payment: {
+    select: {
+      amount: true,
+      totalAmount: true,
+      type: true,
+      status: true,
+      reference: true,
+      channel: true,
+      paidAt: true,
+    },
+  },
 } as const;
 
 export class AppointmentService extends Connection {
