@@ -17,7 +17,9 @@ const requiredVars = [
   "AWS_REGION",
   "SENDGRID_API_KEY",
   "SENDER_EMAIL",
-  "CLIENT_URL"
+  "CLIENT_URL",
+  "PAYSTACK_SECRET_KEY",
+  "PAYSTACK_PUBLIC_KEY"
 ];
 const missing = requiredVars.filter((v) => !process.env[v]);
 
@@ -43,4 +45,8 @@ export const env = {
   sendGridApiKey: process.env.SENDGRID_API_KEY as string,
   senderEmail: process.env.SENDER_EMAIL as string,
   clientUrl: process.env.CLIENT_URL as string,
+  paystack: {
+    secretKey: process.env.PAYSTACK_SECRET_KEY as string,
+    publicKey: process.env.PAYSTACK_PUBLIC_KEY as string,
+  },
 };
