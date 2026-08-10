@@ -28,7 +28,15 @@ const limiter = rateLimit({
 });
 app.use("/api", limiter);
 
-app.use(express.json({ limit: "10mb" }));
+app.use(
+  express.json({
+    limit: "10mb",
+    // Keep the raw body so the Paystack webhook can verify its HMAC signature.
+    verify: (req: Request & { rawBody?: Buffer }, _res, buf) => {
+      req.rawBody = buf;
+    },
+  }),
+);
 app.use(express.urlencoded({ extended: true }));
 app.use(xss());
 app.use(compression());
