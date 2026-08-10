@@ -5,6 +5,7 @@ import { ApiError } from "../middleware/apiError";
 import { env } from "../config/env.config";
 import { paystack, PaystackVerifyData } from "./paystackClient";
 import { EmailService } from "../email/emailService";
+import { OrderService } from "../order/orderService";
 
 type PaymentType = "FULL" | "PARTIAL";
 
@@ -31,6 +32,7 @@ interface PaymentWithAppointment {
 
 export class PaymentService extends Connection {
   private email = new EmailService();
+  private orders = new OrderService();
 
   private async settings() {
     const existing = await this.paymentSettings.findFirst();
@@ -213,9 +215,16 @@ export class PaymentService extends Connection {
 
     const event = JSON.parse(rawBody.toString("utf8"));
     if (event?.event === "charge.success" && event?.data?.reference) {
+      const reference: string = event.data.reference;
       try {
-        const data = await paystack.verify(event.data.reference);
-        await this.processVerification(event.data.reference, data);
+        const data = await paystack.verify(reference);
+        // Orders and appointment payments share one webhook — dispatch by the
+        // reference prefix (order references are "ORD-…").
+        if (reference.startsWith("ORD-")) {
+          await this.orders.finalizeByReference(reference, data);
+        } else {
+          await this.processVerification(reference, data);
+        }
       } catch (error) {
         console.error("Webhook processing error:", error);
       }

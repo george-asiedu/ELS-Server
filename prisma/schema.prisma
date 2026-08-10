@@ -370,6 +370,8 @@ model Product {
   name        String
   description String?
   price       Float
+  // Cost to the studio; profit (revenue) = selling price - cost. Optional.
+  costPrice   Float    @default(0)
   // When set (and below price), an active promotional price.
   promoPrice  Float?
   imageUrl    String?
