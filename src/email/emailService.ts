@@ -92,4 +92,71 @@ export class EmailService {
     `;
     await this.send({ to, subject, html, text });
   }
+
+  public async sendPaymentReceipt(
+    to: string,
+    details: {
+      fullName: string;
+      serviceName: string;
+      reference: string;
+      amountPaid: number;
+      totalAmount: number;
+      type: "FULL" | "PARTIAL";
+      balance: number;
+      date: string;
+      time: string;
+    },
+  ) {
+    const {
+      fullName,
+      serviceName,
+      reference,
+      amountPaid,
+      totalAmount,
+      type,
+      balance,
+      date,
+      time,
+    } = details;
+    const label = type === "PARTIAL" ? "Deposit paid" : "Amount paid";
+    const subject = "Your EL Beauty Studio payment receipt";
+    const balanceLine =
+      balance > 0
+        ? `Balance due at studio: GHS ${balance}\n`
+        : "";
+    const text =
+      `Hi ${fullName},\n\n` +
+      `Thank you for your payment. Here is your receipt:\n\n` +
+      `Service: ${serviceName}\n` +
+      `Date: ${date}\n` +
+      `Time: ${time}\n` +
+      `${label}: GHS ${amountPaid}\n` +
+      `Total: GHS ${totalAmount}\n` +
+      balanceLine +
+      `Reference: ${reference}\n\n` +
+      `See you soon!\n\n— EL Beauty Studio`;
+    const html = `
+      <div style="font-family: Arial, sans-serif; max-width: 480px; margin: 0 auto; color: #1f2937;">
+        <h2 style="color: #be185d;">EL Beauty Studio</h2>
+        <p>Hi ${fullName},</p>
+        <p>Thank you for your payment. Here is your receipt:</p>
+        <table style="width: 100%; border-collapse: collapse; margin: 16px 0;">
+          <tr><td style="padding: 6px 0; color: #6b7280;">Service</td><td style="padding: 6px 0; font-weight: 600;">${serviceName}</td></tr>
+          <tr><td style="padding: 6px 0; color: #6b7280;">Date</td><td style="padding: 6px 0; font-weight: 600;">${date}</td></tr>
+          <tr><td style="padding: 6px 0; color: #6b7280;">Time</td><td style="padding: 6px 0; font-weight: 600;">${time}</td></tr>
+          <tr><td style="padding: 6px 0; color: #6b7280;">${label}</td><td style="padding: 6px 0; font-weight: 600; color: #16a34a;">GHS ${amountPaid}</td></tr>
+          <tr><td style="padding: 6px 0; color: #6b7280;">Total</td><td style="padding: 6px 0; font-weight: 600;">GHS ${totalAmount}</td></tr>
+          ${
+            balance > 0
+              ? `<tr><td style="padding: 6px 0; color: #6b7280;">Balance due at studio</td><td style="padding: 6px 0; font-weight: 600; color: #d97706;">GHS ${balance}</td></tr>`
+              : ""
+          }
+          <tr><td style="padding: 6px 0; color: #6b7280;">Reference</td><td style="padding: 6px 0; font-weight: 600;">${reference}</td></tr>
+        </table>
+        <p>See you soon! 💅</p>
+        <p style="font-size: 12px; color: #6b7280;">— EL Beauty Studio</p>
+      </div>
+    `;
+    await this.send({ to, subject, html, text });
+  }
 }
