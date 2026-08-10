@@ -45,6 +45,18 @@ enum MediaType {
   VIDEO
 }
 
+enum OrderStatus {
+  PENDING_PAYMENT
+  PAID
+  FULFILLED
+  CANCELLED
+}
+
+enum FulfillmentType {
+  PICKUP
+  DELIVERY
+}
+
 model User {
   id       String    @id @default(auto()) @map("_id") @db.ObjectId
   email    String    @unique
@@ -62,6 +74,8 @@ model User {
   referralCode        ReferralCode?
   referralsMade       Referral[] @relation("Referrer")
   referralReceived    Referral?  @relation("Referred")
+  cart                Cart?
+  orders              Order[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -347,4 +361,128 @@ model Referral {
 
   @@index([referrerId])
   @@map("referrals")
+}
+
+// ------------------- Commerce (mini shop) -------------------
+
+model Product {
+  id          String   @id @default(auto()) @map("_id") @db.ObjectId
+  name        String
+  description String?
+  price       Float
+  // When set (and below price), an active promotional price.
+  promoPrice  Float?
+  imageUrl    String?
+  category    String   // ProductCategory slug
+  stock       Int      @default(0)
+  trackStock  Boolean  @default(true)
+  active      Boolean  @default(true)
+  popular     Boolean  @default(false)
+
+  cartItems   CartItem[]
+  orderItems  OrderItem[]
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@map("products")
+}
+
+// Admin-managed product categories, independent of service categories.
+model ProductCategory {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  name      String
+  slug      String   @unique
+  active    Boolean  @default(true)
+  order     Int      @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("product_categories")
+}
+
+model Cart {
+  id        String     @id @default(auto()) @map("_id") @db.ObjectId
+  userId    String     @db.ObjectId @unique
+  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  items     CartItem[]
+
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+
+  @@map("carts")
+}
+
+model CartItem {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  cartId    String   @db.ObjectId
+  productId String   @db.ObjectId
+  quantity  Int      @default(1)
+
+  cart      Cart     @relation(fields: [cartId], references: [id], onDelete: Cascade)
+  product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@unique([cartId, productId])
+  @@map("cart_items")
+}
+
+model Order {
+  id              String          @id @default(auto()) @map("_id") @db.ObjectId
+  orderNumber     String          @unique
+  userId          String          @db.ObjectId
+  user            User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  items           OrderItem[]
+
+  subtotal        Float
+  deliveryFee     Float           @default(0)
+  total           Float
+  status          OrderStatus     @default(PENDING_PAYMENT)
+
+  fulfillment     FulfillmentType @default(PICKUP)
+  deliveryAddress String?
+  deliveryPhone   String?
+
+  // Paystack payment fields (reference always set to a generated UUID).
+  reference       String?         @unique
+  transactionId   String?
+  channel         String?
+  paidAt          DateTime?
+
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+
+  @@index([userId])
+  @@map("orders")
+}
+
+model OrderItem {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  orderId   String   @db.ObjectId
+  productId String?  @db.ObjectId
+  // Snapshot so order history is stable if the product later changes/deletes.
+  name      String
+  unitPrice Float
+  quantity  Int
+
+  order     Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product   Product? @relation(fields: [productId], references: [id], onDelete: SetNull)
+
+  @@map("order_items")
+}
+
+// Admin-controlled shop policy (single document).
+model CommerceSettings {
+  id             String   @id @default(auto()) @map("_id") @db.ObjectId
+  enabled        Boolean  @default(true)  // show the shop publicly
+  enablePickup   Boolean  @default(true)
+  enableDelivery Boolean  @default(true)
+  deliveryFee    Float    @default(0)
+
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@map("commerce_settings")
 }
