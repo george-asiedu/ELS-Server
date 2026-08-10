@@ -9,6 +9,7 @@ import galleryRoutes from "../gallery/routes";
 import businessHoursRoutes from "../businessHours/routes";
 import contactRoutes from "../contact/routes";
 import categoryRoutes from "../category/routes";
+import paymentRoutes from "../payment/routes";
 
 const router: Router = Router();
 
@@ -22,5 +23,6 @@ router.use("/reviews", reviewRoutes);
 router.use("/gallery", galleryRoutes);
 router.use("/business-hours", businessHoursRoutes);
 router.use("/contact-info", contactRoutes);
+router.use("/payments", paymentRoutes);
 
 export default router;
