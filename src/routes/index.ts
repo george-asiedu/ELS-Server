@@ -10,6 +10,11 @@ import businessHoursRoutes from "../businessHours/routes";
 import contactRoutes from "../contact/routes";
 import categoryRoutes from "../category/routes";
 import paymentRoutes from "../payment/routes";
+import productRoutes from "../product/routes";
+import productCategoryRoutes from "../productCategory/routes";
+import cartRoutes from "../cart/routes";
+import orderRoutes from "../order/routes";
+import commerceRoutes from "../commerce/routes";
 
 const router: Router = Router();
 
@@ -24,5 +29,10 @@ router.use("/gallery", galleryRoutes);
 router.use("/business-hours", businessHoursRoutes);
 router.use("/contact-info", contactRoutes);
 router.use("/payments", paymentRoutes);
+router.use("/products", productRoutes);
+router.use("/product-categories", productCategoryRoutes);
+router.use("/cart", cartRoutes);
+router.use("/orders", orderRoutes);
+router.use("/commerce", commerceRoutes);
 
 export default router;
