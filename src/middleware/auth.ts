@@ -67,6 +67,25 @@ export const requireAdmin = (
   return next();
 };
 
+// Booking is customer-only — admins and guests are rejected.
+export const requireCustomer = (
+  req: Request,
+  _res: Response,
+  next: NextFunction,
+) => {
+  if (!req.user) {
+    return next(
+      new ApiError("Please log in to book an appointment", HttpCode.UNAUTHORIZED_ACCESS),
+    );
+  }
+  if (req.user.role !== "CUSTOMER") {
+    return next(
+      new ApiError("Only customer accounts can book appointments", HttpCode.FORBIDDEN),
+    );
+  }
+  return next();
+};
+
 // Attaches req.user when a valid token is present, but does not require it.
 // Used for endpoints that behave differently for guests vs logged-in users.
 export const optionalAuth = (
