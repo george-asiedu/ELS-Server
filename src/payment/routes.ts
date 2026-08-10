@@ -30,6 +30,9 @@ router.post(
 // Verify a transaction after the Paystack redirect (any logged-in user).
 router.get("/verify", authenticate, PaymentController.verify);
 
+// Verify a combined booking + products charge (customer).
+router.get("/verify-combined", authenticate, PaymentController.verifyCombined);
+
 // Paystack server-to-server webhook (public; HMAC signature-verified).
 router.post("/webhook", PaymentController.webhook);
 
