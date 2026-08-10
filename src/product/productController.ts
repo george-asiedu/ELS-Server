@@ -18,6 +18,8 @@ const parseBody = (body: Record<string, unknown>): UpdateProductInput => {
     out.description = body.description === "" ? null : String(body.description);
   const price = toNum(body.price);
   if (price !== undefined) out.price = price;
+  const costPrice = toNum(body.costPrice);
+  if (costPrice !== undefined) out.costPrice = costPrice;
   if (body.promoPrice !== undefined) {
     const p = toNum(body.promoPrice);
     out.promoPrice = p === undefined ? null : p;
