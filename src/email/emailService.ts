@@ -159,4 +159,61 @@ export class EmailService {
     `;
     await this.send({ to, subject, html, text });
   }
+
+  public async sendOrderReceipt(
+    to: string,
+    details: {
+      orderNumber: string;
+      items: { name: string; quantity: number; unitPrice: number }[];
+      subtotal: number;
+      deliveryFee: number;
+      total: number;
+      fulfillment: string;
+      reference: string;
+    },
+  ) {
+    const { orderNumber, items, subtotal, deliveryFee, total, fulfillment, reference } =
+      details;
+    const subject = `Your EL Beauty Studio order ${orderNumber}`;
+    const itemsText = items
+      .map((i) => `- ${i.name} x${i.quantity} — GHS ${i.unitPrice * i.quantity}`)
+      .join("\n");
+    const text =
+      `Thank you for your order!\n\n` +
+      `Order: ${orderNumber}\n` +
+      `Fulfillment: ${fulfillment === "DELIVERY" ? "Delivery" : "Pickup at studio"}\n\n` +
+      `${itemsText}\n\n` +
+      `Subtotal: GHS ${subtotal}\n` +
+      (deliveryFee > 0 ? `Delivery: GHS ${deliveryFee}\n` : "") +
+      `Total: GHS ${total}\n` +
+      `Reference: ${reference}\n\n` +
+      `— EL Beauty Studio`;
+    const itemsHtml = items
+      .map(
+        (i) =>
+          `<tr><td style="padding:6px 0;">${i.name} <span style="color:#6b7280;">x${i.quantity}</span></td><td style="padding:6px 0; text-align:right; font-weight:600;">GHS ${i.unitPrice * i.quantity}</td></tr>`,
+      )
+      .join("");
+    const html = `
+      <div style="font-family: Arial, sans-serif; max-width: 480px; margin: 0 auto; color: #1f2937;">
+        <h2 style="color: #be185d;">EL Beauty Studio</h2>
+        <p>Thank you for your order!</p>
+        <p style="color:#6b7280; margin:0;">Order</p>
+        <p style="font-weight:600; margin-top:2px;">${orderNumber}</p>
+        <p style="color:#6b7280; margin:12px 0 0;">Fulfillment</p>
+        <p style="font-weight:600; margin-top:2px;">${fulfillment === "DELIVERY" ? "Delivery" : "Pickup at studio"}</p>
+        <table style="width: 100%; border-collapse: collapse; margin: 16px 0; border-top:1px solid #e5e7eb;">
+          ${itemsHtml}
+        </table>
+        <table style="width:100%; border-collapse:collapse; border-top:1px solid #e5e7eb;">
+          <tr><td style="padding:6px 0; color:#6b7280;">Subtotal</td><td style="padding:6px 0; text-align:right;">GHS ${subtotal}</td></tr>
+          ${deliveryFee > 0 ? `<tr><td style="padding:6px 0; color:#6b7280;">Delivery</td><td style="padding:6px 0; text-align:right;">GHS ${deliveryFee}</td></tr>` : ""}
+          <tr><td style="padding:6px 0; font-weight:700; color:#be185d;">Total</td><td style="padding:6px 0; text-align:right; font-weight:700; color:#be185d;">GHS ${total}</td></tr>
+        </table>
+        <p style="font-size: 12px; color: #6b7280;">Reference: ${reference}</p>
+        <p style="font-size: 12px; color: #6b7280;">— EL Beauty Studio</p>
+      </div>
+    `;
+    await this.send({ to, subject, html, text });
+  }
 }
