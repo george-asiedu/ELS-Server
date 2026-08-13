@@ -22,7 +22,7 @@ export class ProductService extends Connection {
   private s3 = new S3BucketService();
 
   private async assertCategoryExists(slug: string) {
-    const category = await this.productCategory.findUnique({ where: { slug } });
+    const category = await this.productCategory.findFirst({ where: { slug } });
     if (!category) {
       throw new ApiError("Selected product category does not exist", 400);
     }

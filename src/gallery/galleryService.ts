@@ -37,7 +37,7 @@ export class GalleryService extends Connection {
     if (!file) {
       throw new ApiError("An image or video file is required", 400);
     }
-    const categoryExists = await this.category.findUnique({
+    const categoryExists = await this.category.findFirst({
       where: { slug: category },
     });
     if (!categoryExists) {
