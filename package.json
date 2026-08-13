@@ -15,7 +15,8 @@
     "lint": "eslint . --ext .ts",
     "lint:fix": "eslint . --ext .ts --fix",
     "format": "prettier --write .",
-    "seed": "ts-node prisma/seed.ts"
+    "seed": "ts-node prisma/seed.ts",
+    "backfill:tenants": "ts-node prisma/backfillTenants.ts"
   },
   "resolutions": {
     "@types/express-serve-static-core": "5.1.0"
