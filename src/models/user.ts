@@ -22,6 +22,8 @@ export interface Payload {
   id: string;
   email: string;
   role: string;
+  // The studio the user belongs to (null for super admins).
+  studioId?: string | null;
 }
 
 export interface JwtTokenPayload {
