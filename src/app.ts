@@ -8,6 +8,7 @@ import hpp from "hpp";
 import { xss } from "express-xss-sanitizer";
 import { env } from "./config/env.config";
 import { globalErrorHandler } from "./middleware/globalErrorHandler";
+import { resolveTenant } from "./middleware/tenant";
 import routes from "./routes/index";
 
 const app = express();
@@ -55,6 +56,9 @@ app.get("/health", (_req: Request, res: Response) => {
   });
 });
 
+// Resolve the studio (tenant) for every API request before the routes run, so
+// services query within the right studio's scope.
+app.use("/api", resolveTenant);
 app.use("/api", routes);
 
 app.use((err: Error, req: Request, res: Response, next: NextFunction) =>
