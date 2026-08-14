@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { PlatformController } from "./platformController";
+import { FeatureRequestController } from "../featureRequest/featureRequestController";
 import { authenticate, requireSuperAdmin } from "../middleware/auth";
 
 const router: Router = Router();
@@ -19,5 +20,12 @@ router.patch("/studios/:id", PlatformController.updateStudio);
 router.patch("/studios/:id/status", PlatformController.setStatus);
 router.patch("/studios/:id/settings", PlatformController.updateSettings);
 router.post("/studios/:id/impersonate", PlatformController.impersonate);
+
+// Feature-request triage across all studios.
+router.get("/feature-requests", FeatureRequestController.platformList);
+router.patch(
+  "/feature-requests/:id",
+  FeatureRequestController.platformUpdateStatus,
+);
 
 export default router;
