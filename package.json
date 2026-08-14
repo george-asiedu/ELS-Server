@@ -16,7 +16,8 @@
     "lint:fix": "eslint . --ext .ts --fix",
     "format": "prettier --write .",
     "seed": "ts-node prisma/seed.ts",
-    "backfill:tenants": "ts-node prisma/backfillTenants.ts"
+    "backfill:tenants": "ts-node prisma/backfillTenants.ts",
+    "create:superadmin": "ts-node prisma/createSuperAdmin.ts"
   },
   "resolutions": {
     "@types/express-serve-static-core": "5.1.0"
