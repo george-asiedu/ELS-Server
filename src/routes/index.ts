@@ -15,8 +15,13 @@ import productCategoryRoutes from "../productCategory/routes";
 import cartRoutes from "../cart/routes";
 import orderRoutes from "../order/routes";
 import commerceRoutes from "../commerce/routes";
+import platformRoutes from "../platform/routes";
 
 const router: Router = Router();
+
+// Super-admin surface. resolveTenant runs these in the platform (superAdmin)
+// context — no studio scoping — and the routes guard themselves.
+router.use("/platform", platformRoutes);
 
 router.use("/auth", authRoutes);
 router.use("/profile", profileRoutes);
