@@ -9,6 +9,7 @@ interface AccessTokenPayload {
   sub: string;
   email: string;
   role: string;
+  studioId?: string | null;
   token: string;
 }
 
@@ -37,10 +38,21 @@ export const authenticate = (
       throw new ApiError("Invalid token type", HttpCode.UNAUTHORIZED_ACCESS);
     }
 
+    // Reject a token minted for one studio being used against another.
+    if (
+      decoded.role !== "SUPER_ADMIN" &&
+      decoded.studioId &&
+      req.studioId &&
+      decoded.studioId !== req.studioId
+    ) {
+      throw new ApiError("Token does not belong to this studio", HttpCode.UNAUTHORIZED_ACCESS);
+    }
+
     req.user = {
       id: decoded.sub,
       email: decoded.email,
       role: decoded.role,
+      studioId: decoded.studioId ?? null,
     };
 
     return next();
@@ -63,6 +75,23 @@ export const requireAdmin = (
     return next(
       new ApiError("Admin access required", HttpCode.FORBIDDEN),
     );
+  }
+  return next();
+};
+
+// Platform operator only — the super-admin dashboard.
+export const requireSuperAdmin = (
+  req: Request,
+  _res: Response,
+  next: NextFunction,
+) => {
+  if (!req.user) {
+    return next(
+      new ApiError("Authentication required", HttpCode.UNAUTHORIZED_ACCESS),
+    );
+  }
+  if (req.user.role !== "SUPER_ADMIN") {
+    return next(new ApiError("Super admin access required", HttpCode.FORBIDDEN));
   }
   return next();
 };
@@ -104,6 +133,7 @@ export const optionalAuth = (
         id: decoded.sub,
         email: decoded.email,
         role: decoded.role,
+        studioId: decoded.studioId ?? null,
       };
     }
     return next();

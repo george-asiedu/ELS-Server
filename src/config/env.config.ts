@@ -45,6 +45,12 @@ export const env = {
   sendGridApiKey: process.env.SENDGRID_API_KEY as string,
   senderEmail: process.env.SENDER_EMAIL as string,
   clientUrl: process.env.CLIENT_URL as string,
+  // Studio slug used when a request carries no studio hint (subdomain/header).
+  // Bridges the existing single-tenant frontend during the multi-tenant rollout.
+  defaultStudioSlug: (process.env.DEFAULT_STUDIO_SLUG as string) || "els",
+  // Apex host of the platform, e.g. "app.example.com"; its subdomains are
+  // studios and the apex itself is the super-admin surface.
+  rootDomain: (process.env.ROOT_DOMAIN as string) || "",
   paystack: {
     secretKey: process.env.PAYSTACK_SECRET_KEY as string,
     publicKey: process.env.PAYSTACK_PUBLIC_KEY as string,

@@ -75,7 +75,7 @@ export class OrderService extends Connection {
     for (let i = 0; i < 10; i++) {
       const rand = Math.random().toString(36).slice(2, 6).toUpperCase();
       const candidate = `ORD-${stamp}-${rand}`;
-      if (!(await this.order.findUnique({ where: { orderNumber: candidate } })))
+      if (!(await this.order.findFirst({ where: { orderNumber: candidate } })))
         return candidate;
     }
     return `ORD-${stamp}-${randomUUID().slice(0, 6).toUpperCase()}`;
@@ -621,7 +621,7 @@ export class OrderService extends Connection {
     buyerUserId: string | null,
   ) {
     if (!code || !buyerEmail) return;
-    const referral = await this.referralCode.findUnique({ where: { code } });
+    const referral = await this.referralCode.findFirst({ where: { code } });
     if (!referral) return;
     // No self-referral.
     if (buyerUserId && referral.userId === buyerUserId) return;

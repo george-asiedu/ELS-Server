@@ -48,7 +48,7 @@ export class ProductCategoryService extends Connection {
 
     let slug = base;
     let n = 2;
-    while (await this.productCategory.findUnique({ where: { slug } })) {
+    while (await this.productCategory.findFirst({ where: { slug } })) {
       slug = `${base}-${n++}`;
     }
 

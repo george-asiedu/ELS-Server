@@ -4,7 +4,9 @@ import { getPasswordHash } from "../utils/helper";
 
 export class UserRepository extends Connection {
   public async getByEmail(email: string) {
-    const user = await this.user.findUnique({
+    // findFirst (not findUnique): email is unique per studio now, and the tenant
+    // extension scopes this to the current studio's user.
+    const user = await this.user.findFirst({
       where: { email },
     });
     return user;
@@ -26,7 +28,7 @@ export class UserRepository extends Connection {
   }
 
   public async checkExistingUser(email: string) {
-    const existingUser = await this.user.findUnique({
+    const existingUser = await this.user.findFirst({
       where: { email },
       select: { email: true },
     });
@@ -172,7 +174,7 @@ export class UserRepository extends Connection {
   }
 
   public async getReferralCodeByCode(code: string) {
-    return await this.referralCode.findUnique({ where: { code } });
+    return await this.referralCode.findFirst({ where: { code } });
   }
 
   public async createReferral(

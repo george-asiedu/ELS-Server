@@ -51,6 +51,7 @@ export class AuthService extends UserRepository {
       id: newUser.id,
       email: newUser.email,
       role: newUser.role,
+      studioId: newUser.studioId,
     };
     const token = loginToken(payload);
 
@@ -61,6 +62,7 @@ export class AuthService extends UserRepository {
           id: newUser.id,
           email: newUser.email,
           role: newUser.role,
+          studioId: newUser.studioId,
         },
         token,
       },
@@ -92,6 +94,7 @@ export class AuthService extends UserRepository {
       id: user.id,
       email: user.email,
       role: user.role,
+      studioId: user.studioId,
     };
     const token = loginToken(payload);
 
@@ -102,6 +105,7 @@ export class AuthService extends UserRepository {
           id: user.id,
           email: user.email,
           role: user.role,
+          studioId: user.studioId,
         },
         token,
       },
