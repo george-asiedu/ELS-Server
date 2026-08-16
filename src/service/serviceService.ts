@@ -18,7 +18,7 @@ export class ServiceService extends Connection {
   }
 
   private async assertCategoryExists(slug: string) {
-    const category = await this.category.findUnique({ where: { slug } });
+    const category = await this.category.findFirst({ where: { slug } });
     if (!category) {
       throw new ApiError("Selected category does not exist", 400);
     }

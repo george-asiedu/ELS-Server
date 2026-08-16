@@ -10,6 +10,36 @@ const ADMIN_PASSWORD = process.env.SEED_ADMIN_PASSWORD || "Admin@1234";
 const CUSTOMER_EMAIL = process.env.SEED_CUSTOMER_EMAIL || "customer@elsbeauty.com";
 const CUSTOMER_PASSWORD = process.env.SEED_CUSTOMER_PASSWORD || "Customer@1234";
 
+const STUDIO_SLUG = process.env.DEFAULT_STUDIO_SLUG || "els";
+const STUDIO_NAME = process.env.DEFAULT_STUDIO_NAME || "El's Beauty Studio";
+
+// Ensure the studio exists and return its id. Everything the seed creates is
+// scoped to it (this seed uses the raw client, so studioId is set explicitly).
+async function ensureStudio(): Promise<string> {
+  const studio = await prisma.studio.upsert({
+    where: { slug: STUDIO_SLUG },
+    update: {},
+    create: { name: STUDIO_NAME, slug: STUDIO_SLUG, status: "ACTIVE" },
+  });
+  await prisma.studioSettings.upsert({
+    where: { studioId: studio.id },
+    update: {},
+    create: { studioId: studio.id, commerce: false, onlinePayments: false },
+  });
+  await prisma.studioBranding.upsert({
+    where: { studioId: studio.id },
+    update: {},
+    create: { studioId: studio.id },
+  });
+  await prisma.studioContent.upsert({
+    where: { studioId: studio.id },
+    update: {},
+    create: { studioId: studio.id, showTestimonials: true },
+  });
+  console.log(`✔ Studio ready: ${STUDIO_NAME} (${STUDIO_SLUG}) -> ${studio.id}`);
+  return studio.id;
+}
+
 const services = [
   // Nails
   { name: "Full Set Acrylics", category: "nails", description: "Full set of sculpted acrylic nails with your choice of shape and length", duration: "2 hrs", price: 65, popular: true },
@@ -42,6 +72,7 @@ const businessHours = [
 ];
 
 async function seedUser(
+  studioId: string,
   email: string,
   password: string,
   role: "ADMIN" | "CUSTOMER",
@@ -50,25 +81,25 @@ async function seedUser(
 ) {
   const hashed = await bcrypt.hash(password, 10);
   const user = await prisma.user.upsert({
-    where: { email },
+    where: { studioId_email: { studioId, email } },
     update: { role },
-    create: { email, password: hashed, role },
+    create: { studioId, email, password: hashed, role },
   });
 
   await prisma.profile.upsert({
     where: { userId: user.id },
     update: {},
-    create: { userId: user.id, fullName, email, ...(phone ? { phone } : {}) },
+    create: { studioId, userId: user.id, fullName, email, ...(phone ? { phone } : {}) },
   });
   await prisma.loyaltyPoints.upsert({
     where: { userId: user.id },
     update: {},
-    create: { userId: user.id },
+    create: { studioId, userId: user.id },
   });
   await prisma.referralCode.upsert({
     where: { userId: user.id },
     update: {},
-    create: { userId: user.id, code: generateReferralCode() },
+    create: { studioId, userId: user.id, code: generateReferralCode() },
   });
 
   console.log(`✔ ${role} user ready: ${email}`);
@@ -77,7 +108,7 @@ async function seedUser(
 
 // Give the sample customer a completed appointment + matching points so the
 // review and rewards flows can be demoed straight after seeding.
-async function seedCustomerActivity(customerId: string) {
+async function seedCustomerActivity(studioId: string, customerId: string) {
   const existing = await prisma.appointment.findFirst({
     where: { userId: customerId },
   });
@@ -86,7 +117,9 @@ async function seedCustomerActivity(customerId: string) {
     return;
   }
 
-  const service = await prisma.service.findFirst({ where: { category: "nails" } });
+  const service = await prisma.service.findFirst({
+    where: { studioId, category: "nails" },
+  });
   if (!service) return;
 
   const lastWeek = new Date();
@@ -94,6 +127,7 @@ async function seedCustomerActivity(customerId: string) {
 
   await prisma.appointment.create({
     data: {
+      studioId,
       fullName: "Ama Customer",
       phone: "+233201112222",
       email: CUSTOMER_EMAIL,
@@ -115,6 +149,7 @@ async function seedCustomerActivity(customerId: string) {
   });
   await prisma.loyaltyTransaction.create({
     data: {
+      studioId,
       userId: customerId,
       points,
       type: "EARNED",
@@ -131,46 +166,48 @@ const categories = [
   { name: "Hair", slug: "hair", order: 2 },
 ];
 
-async function seedCategories() {
+async function seedCategories(studioId: string) {
   for (const c of categories) {
     await prisma.category.upsert({
-      where: { slug: c.slug },
+      where: { studioId_slug: { studioId, slug: c.slug } },
       update: {},
-      create: { name: c.name, slug: c.slug, order: c.order, active: true },
+      create: { studioId, name: c.name, slug: c.slug, order: c.order, active: true },
     });
   }
   console.log("✔ Categories ready (nails, lashes, hair).");
 }
 
-async function seedServices() {
-  const count = await prisma.service.count();
+async function seedServices(studioId: string) {
+  const count = await prisma.service.count({ where: { studioId } });
   if (count > 0) {
     console.log(`• Services already present (${count}); skipping.`);
     return;
   }
-  await prisma.service.createMany({ data: services as unknown as any[] });
+  await prisma.service.createMany({
+    data: services.map((s) => ({ ...s, studioId })) as unknown as any[],
+  });
   console.log(`✔ Seeded ${services.length} services (nails, lashes, hair).`);
 }
 
-async function seedBusinessHours() {
+async function seedBusinessHours(studioId: string) {
   for (const h of businessHours) {
     await prisma.businessHours.upsert({
-      where: { dayOfWeek: h.dayOfWeek },
+      where: { studioId_dayOfWeek: { studioId, dayOfWeek: h.dayOfWeek } },
       update: {},
-      create: h,
+      create: { studioId, ...h },
     });
   }
   console.log("✔ Business hours ready (Mon-Sat open, Sun closed).");
 }
 
 // Reviews are written by customers, never the admin.
-async function seedReviews(customerId: string) {
-  const count = await prisma.review.count();
+async function seedReviews(studioId: string, customerId: string) {
+  const count = await prisma.review.count({ where: { studioId } });
   if (count > 0) {
     console.log(`• Reviews already present (${count}); skipping.`);
     return;
   }
-  const all = await prisma.service.findMany();
+  const all = await prisma.service.findMany({ where: { studioId } });
   const byCategory = (c: string) => all.find((s) => s.category === c);
 
   const samples = [
@@ -184,6 +221,7 @@ async function seedReviews(customerId: string) {
     const svc = byCategory(s.category);
     await prisma.review.create({
       data: {
+        studioId,
         rating: s.rating,
         content: s.content,
         approved: true,
@@ -197,21 +235,34 @@ async function seedReviews(customerId: string) {
 
 async function main() {
   console.log("Seeding ELS database...");
-  const admin = await seedUser(ADMIN_EMAIL, ADMIN_PASSWORD, "ADMIN", "Studio Admin");
+  const studioId = await ensureStudio();
+  const admin = await seedUser(
+    studioId,
+    ADMIN_EMAIL,
+    ADMIN_PASSWORD,
+    "ADMIN",
+    "Studio Admin",
+  );
   const customer = await seedUser(
+    studioId,
     CUSTOMER_EMAIL,
     CUSTOMER_PASSWORD,
     "CUSTOMER",
     "Ama Customer",
     "+233201112222",
   );
-  void admin;
 
-  await seedCategories();
-  await seedServices();
-  await seedBusinessHours();
-  await seedCustomerActivity(customer.id);
-  await seedReviews(customer.id);
+  // Point the studio at its owner.
+  await prisma.studio.update({
+    where: { id: studioId },
+    data: { ownerUserId: admin.id },
+  });
+
+  await seedCategories(studioId);
+  await seedServices(studioId);
+  await seedBusinessHours(studioId);
+  await seedCustomerActivity(studioId, customer.id);
+  await seedReviews(studioId, customer.id);
 
   console.log("\nDone. Two separate accounts:");
   console.log(`  ADMIN    → ${ADMIN_EMAIL} / ${ADMIN_PASSWORD}  (studio dashboard)`);

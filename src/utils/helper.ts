@@ -56,7 +56,10 @@ declare global {
         id: string;
         email: string;
         role: string;
+        studioId?: string | null;
       };
+      // The studio this request resolved to (null for platform/super-admin).
+      studioId?: string | null;
       rawBody?: Buffer;
     }
   }
@@ -72,6 +75,7 @@ export const loginToken = (user: Payload) => {
       sub: user.id,
       email: user.email,
       role: user.role,
+      studioId: user.studioId ?? null,
       token: AuthToken.ACCESS_TOKEN,
     },
     secret,

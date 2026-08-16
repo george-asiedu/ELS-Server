@@ -43,7 +43,7 @@ export class CategoryService extends Connection {
     // Ensure a unique slug (append -2, -3, … on collision).
     let slug = base;
     let n = 2;
-    while (await this.category.findUnique({ where: { slug } })) {
+    while (await this.category.findFirst({ where: { slug } })) {
       slug = `${base}-${n++}`;
     }
 
@@ -98,7 +98,7 @@ export class CategoryService extends Connection {
 
   // Used by service/gallery creation to validate a category slug exists.
   public async slugExists(slug: string): Promise<boolean> {
-    const c = await this.category.findUnique({ where: { slug } });
+    const c = await this.category.findFirst({ where: { slug } });
     return !!c;
   }
 }
