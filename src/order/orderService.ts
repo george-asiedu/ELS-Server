@@ -223,22 +223,28 @@ export class OrderService extends Connection {
       });
     }
 
+    const subaccount = await this.currentStudioSubaccount();
     const init = await paystack.initialize({
       email: params.contact.email,
       amountPesewas: Math.round(total * 100),
       reference,
       callbackUrl: `${env.clientUrl}${params.callbackPath}`,
       metadata: { orderId: order.id, orderNumber, kind: "order" },
+      subaccount,
     });
 
     return {
       message: "Order created",
       data: {
         authorizationUrl: init.authorization_url,
+        accessCode: init.access_code,
         reference,
         orderId: order.id,
         orderNumber,
         total,
+        email: params.contact.email,
+        subaccount,
+        publicKey: env.paystack.publicKey,
       },
     };
   }
@@ -417,24 +423,30 @@ export class OrderService extends Connection {
       include: orderInclude,
     });
 
+    const subaccount = await this.currentStudioSubaccount();
     const init = await paystack.initialize({
       email,
       amountPesewas: Math.round(combined * 100),
       reference,
       callbackUrl: `${env.clientUrl}/booking/callback`,
       metadata: { orderId: order.id, appointmentId: appt.id, kind: "booking" },
+      subaccount,
     });
 
     return {
       message: "Booking payment initialized",
       data: {
         authorizationUrl: init.authorization_url,
+        accessCode: init.access_code,
         reference,
         orderId: order.id,
         serviceDueNow,
         productSubtotal,
         total: combined,
         serviceType,
+        email,
+        subaccount,
+        publicKey: env.paystack.publicKey,
       },
     };
   }

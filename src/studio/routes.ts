@@ -50,4 +50,8 @@ router.put(
 router.get("/content", authenticate, requireAdmin, StudioController.getContent);
 router.put("/content", authenticate, requireAdmin, StudioController.updateContent);
 
+// Admin: payout account (Paystack subaccount) for split settlement.
+router.get("/payout", authenticate, requireAdmin, StudioController.getPayout);
+router.put("/payout", authenticate, requireAdmin, StudioController.updatePayout);
+
 export default router;

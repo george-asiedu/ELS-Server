@@ -1,4 +1,5 @@
 import { createTenantClient, RawDb, TenantDb } from "../tenant/tenantClient";
+import { getTenantContext } from "../tenant/context";
 
 /**
  * Base class every service extends. It exposes the Prisma model delegates as
@@ -58,6 +59,19 @@ export class Connection {
   get orderItem() { return this.db.orderItem; }
   get referralOrderReward() { return this.db.referralOrderReward; }
   get commerceSettings() { return this.db.commerceSettings; }
+
+  // The current studio's Paystack subaccount code (for split settlement), or
+  // null when the studio hasn't connected a payout account — in which case
+  // payments settle to the platform account as before.
+  protected async currentStudioSubaccount(): Promise<string | null> {
+    const studioId = getTenantContext()?.studioId;
+    if (!studioId) return null;
+    const studio = await this.studio.findUnique({
+      where: { id: studioId },
+      select: { paystackSubaccountCode: true },
+    });
+    return studio?.paystackSubaccountCode ?? null;
+  }
 
   // ---- Platform models (not auto-scoped; used by super-admin/onboarding) ----
   get studio() { return this.db.studio; }
