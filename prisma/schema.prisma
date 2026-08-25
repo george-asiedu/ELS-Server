@@ -189,6 +189,26 @@ model FeatureRequest {
   @@map("feature_requests")
 }
 
+// Platform/admin action trail. Not tenant-scoped: it spans studios and is read
+// by the super admin. Written best-effort (never blocks the action it records).
+model AuditLog {
+  id         String   @id @default(auto()) @map("_id") @db.ObjectId
+  actorId    String?  @db.ObjectId
+  actorEmail String
+  actorRole  String
+  action     String // e.g. "studio.provisioned", "studio.suspended"
+  targetType String? // e.g. "Studio"
+  targetId   String?
+  studioId   String?  @db.ObjectId // studio the action relates to, when applicable
+  metadata   Json?
+
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([studioId])
+  @@map("audit_logs")
+}
+
 // ------------------- Tenant-owned models -------------------
 
 model User {

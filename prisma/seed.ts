@@ -9,6 +9,9 @@ const ADMIN_EMAIL = process.env.SEED_ADMIN_EMAIL || "admin@elsbeauty.com";
 const ADMIN_PASSWORD = process.env.SEED_ADMIN_PASSWORD || "Admin@1234";
 const CUSTOMER_EMAIL = process.env.SEED_CUSTOMER_EMAIL || "customer@elsbeauty.com";
 const CUSTOMER_PASSWORD = process.env.SEED_CUSTOMER_PASSWORD || "Customer@1234";
+// Platform super admin (operates the /platform console; has no studio).
+const SUPER_ADMIN_EMAIL = process.env.SEED_SUPER_ADMIN_EMAIL || "superadmin@elsbeauty.com";
+const SUPER_ADMIN_PASSWORD = process.env.SEED_SUPER_ADMIN_PASSWORD || "Super@1234";
 
 const STUDIO_SLUG = process.env.DEFAULT_STUDIO_SLUG || "els";
 const STUDIO_NAME = process.env.DEFAULT_STUDIO_NAME || "El's Beauty Studio";
@@ -233,9 +236,29 @@ async function seedReviews(studioId: string, customerId: string) {
   console.log(`✔ Seeded ${samples.length} approved sample reviews (by the customer).`);
 }
 
+// The platform super admin has no studio, so it can't use the (studioId,email)
+// composite key — match on email + role instead. Idempotent.
+async function seedSuperAdmin() {
+  const email = SUPER_ADMIN_EMAIL.toLowerCase();
+  const hashed = await bcrypt.hash(SUPER_ADMIN_PASSWORD, await bcrypt.genSalt(10));
+  const existing = await prisma.user.findFirst({
+    where: { email, role: "SUPER_ADMIN" },
+  });
+  if (existing) {
+    await prisma.user.update({ where: { id: existing.id }, data: { password: hashed } });
+    console.log(`• Super admin already present (${email}); password reset.`);
+  } else {
+    await prisma.user.create({
+      data: { email, password: hashed, role: "SUPER_ADMIN", studioId: null },
+    });
+    console.log(`✔ Super admin created: ${email}`);
+  }
+}
+
 async function main() {
   console.log("Seeding ELS database...");
   const studioId = await ensureStudio();
+  await seedSuperAdmin();
   const admin = await seedUser(
     studioId,
     ADMIN_EMAIL,
@@ -264,9 +287,10 @@ async function main() {
   await seedCustomerActivity(studioId, customer.id);
   await seedReviews(studioId, customer.id);
 
-  console.log("\nDone. Two separate accounts:");
-  console.log(`  ADMIN    → ${ADMIN_EMAIL} / ${ADMIN_PASSWORD}  (studio dashboard)`);
-  console.log(`  CUSTOMER → ${CUSTOMER_EMAIL} / ${CUSTOMER_PASSWORD}  (booking + rewards)`);
+  console.log("\nDone. Accounts:");
+  console.log(`  SUPER ADMIN → ${SUPER_ADMIN_EMAIL} / ${SUPER_ADMIN_PASSWORD}  (/platform console)`);
+  console.log(`  ADMIN       → ${ADMIN_EMAIL} / ${ADMIN_PASSWORD}  (studio dashboard)`);
+  console.log(`  CUSTOMER    → ${CUSTOMER_EMAIL} / ${CUSTOMER_PASSWORD}  (booking + rewards)`);
 }
 
 main()

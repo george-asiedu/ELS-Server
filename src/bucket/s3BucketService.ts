@@ -7,6 +7,7 @@ import { env } from '../config/env.config';
 import { ApiError } from '../middleware/apiError';
 import path from 'path';
 import { v4 as uuidv4 } from 'uuid';
+import { processImage, ImageProcessOptions } from './imageProcessor';
 
 export interface SafeFile {
   originalname: string;
@@ -27,25 +28,29 @@ export class S3BucketService {
     });
   }
   
-  public async uploadFile(file: SafeFile) {
+  public async uploadFile(file: SafeFile, opts?: ImageProcessOptions) {
     if (!file) {
       throw new ApiError('File is required', 400);
     }
-    
+
+    // Optimise photos for the web (auto-orient + downscale + WebP) while keeping
+    // them sharp; non-images pass through unchanged.
+    const processed = await processImage(file, opts);
+
     const bucketName = env.aws.s3BucketName;
-    const fileExtension = path.extname(file.originalname);
+    const fileExtension = path.extname(processed.originalname);
     if (!fileExtension) {
       throw new ApiError('File must have an extension', 400);
     }
-    
-    const cleanFileName = file.originalname.replace(/\s+/g, '-');
+
+    const cleanFileName = processed.originalname.replace(/\s+/g, '-');
     const key = `uploads/${uuidv4()}-${cleanFileName}`;
-    
+
     const params = {
       Bucket: bucketName,
       Key: key,
-      Body: file.buffer,
-      ContentType: file.mimetype,
+      Body: processed.buffer,
+      ContentType: processed.mimetype,
     };
     
     try {

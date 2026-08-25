@@ -21,6 +21,9 @@ router.patch("/studios/:id/status", PlatformController.setStatus);
 router.patch("/studios/:id/settings", PlatformController.updateSettings);
 router.post("/studios/:id/impersonate", PlatformController.impersonate);
 
+// Audit trail of platform actions.
+router.get("/audit-logs", PlatformController.listAudit);
+
 // Feature-request triage across all studios.
 router.get("/feature-requests", FeatureRequestController.platformList);
 router.patch(
