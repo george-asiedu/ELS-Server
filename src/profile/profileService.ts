@@ -21,7 +21,7 @@ export class ProfileService extends UserRepository {
     
     try {
       if(image) {
-        data.avatar = await this.s3.uploadFile(image);
+        data.avatar = await this.s3.uploadFile(image, { maxDim: 512, quality: 85 });
       }
 
       // Keep the account (login) email in sync with the profile email.

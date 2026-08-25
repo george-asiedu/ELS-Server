@@ -149,7 +149,7 @@ export class StudioService extends Connection {
     }
 
     if (logoFile) {
-      data.logoUrl = await this.s3.uploadFile(logoFile);
+      data.logoUrl = await this.s3.uploadFile(logoFile, { maxDim: 512, quality: 90 });
     } else if (
       input.removeLogo === true ||
       input.removeLogo === "true"
