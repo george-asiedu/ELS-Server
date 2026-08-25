@@ -63,6 +63,69 @@ export class PaymentController {
     }
   };
 
+  // Customer — charge their own booking via mobile money (phone prompt).
+  public static chargeMomo = async (
+    req: Request,
+    res: Response,
+    next: NextFunction,
+  ) => {
+    try {
+      const { appointmentId, type, phone, provider } = req.body ?? {};
+      if (!appointmentId) throw new ApiError("appointmentId is required", 400);
+      if (!phone || !provider) {
+        throw new ApiError("phone and provider are required", 400);
+      }
+      const paymentType = type === "PARTIAL" ? "PARTIAL" : "FULL";
+      const result = await paymentService.chargeMomoBooking(
+        appointmentId,
+        paymentType,
+        req.user.id,
+        String(phone).trim(),
+        String(provider).trim().toLowerCase(),
+      );
+      return res.status(200).json(result);
+    } catch (error) {
+      return next(error);
+    }
+  };
+
+  // Submit an OTP for a mobile-money charge that requested one.
+  public static submitOtp = async (
+    req: Request,
+    res: Response,
+    next: NextFunction,
+  ) => {
+    try {
+      const { reference, otp } = req.body ?? {};
+      if (!reference || !otp) {
+        throw new ApiError("reference and otp are required", 400);
+      }
+      const result = await paymentService.submitMomoOtp(
+        String(reference),
+        String(otp).trim(),
+      );
+      return res.status(200).json(result);
+    } catch (error) {
+      return next(error);
+    }
+  };
+
+  // Poll the status of a charge (mobile money or inline popup).
+  public static status = async (
+    req: Request,
+    res: Response,
+    next: NextFunction,
+  ) => {
+    try {
+      const reference = String(req.query.reference || "");
+      if (!reference) throw new ApiError("reference is required", 400);
+      const result = await paymentService.chargeStatus(reference);
+      return res.status(200).json(result);
+    } catch (error) {
+      return next(error);
+    }
+  };
+
   public static verify = async (
     req: Request,
     res: Response,

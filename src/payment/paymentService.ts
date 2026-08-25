@@ -47,8 +47,10 @@ export class PaymentService extends Connection {
     return user?.email ?? null;
   }
 
-  // Start a Paystack transaction for a customer's own booking.
-  public async initialize(
+  // Validate a booking payment and (re)create its PENDING Payment row with a
+  // fresh reference. Shared by the hosted/inline initialize and the mobile-money
+  // charge so both channels behave identically.
+  private async prepareBookingCharge(
     appointmentId: string,
     type: PaymentType,
     userId: string,
@@ -111,21 +113,82 @@ export class PaymentService extends Connection {
       },
     });
 
+    return { reference, charge, email, appointmentId, type };
+  }
+
+  // Start a Paystack transaction for a customer's own booking. Returns the data
+  // the in-app payment dialog needs: reference + amount + email + the studio's
+  // subaccount (for the inline popup / split), plus an authorization_url as a
+  // hosted-checkout fallback.
+  public async initialize(
+    appointmentId: string,
+    type: PaymentType,
+    userId: string,
+  ) {
+    const { reference, charge, email } = await this.prepareBookingCharge(
+      appointmentId,
+      type,
+      userId,
+    );
+    const subaccount = await this.currentStudioSubaccount();
+
     const init = await paystack.initialize({
       email,
       amountPesewas: Math.round(charge * 100),
       reference,
       callbackUrl: `${env.clientUrl}/payment/callback`,
       metadata: { appointmentId, type },
+      subaccount,
     });
 
     return {
       message: "Payment initialized",
       data: {
         authorizationUrl: init.authorization_url,
+        accessCode: init.access_code,
         reference,
         amount: charge,
+        email,
+        subaccount,
+        publicKey: env.paystack.publicKey,
         type,
+      },
+    };
+  }
+
+  // Mobile-money charge for a booking: prompts the customer's phone directly
+  // (no hosted checkout). The webhook (or a status poll) finalizes it.
+  public async chargeMomoBooking(
+    appointmentId: string,
+    type: PaymentType,
+    userId: string,
+    phone: string,
+    provider: string,
+  ) {
+    const { reference, charge, email } = await this.prepareBookingCharge(
+      appointmentId,
+      type,
+      userId,
+    );
+    const subaccount = await this.currentStudioSubaccount();
+
+    const res = await paystack.chargeMobileMoney({
+      email,
+      amountPesewas: Math.round(charge * 100),
+      reference,
+      phone,
+      provider,
+      subaccount,
+      metadata: { appointmentId, type },
+    });
+
+    return {
+      message: "Charge started",
+      data: {
+        reference,
+        status: res.status,
+        displayText: res.display_text ?? res.message ?? null,
+        amount: charge,
       },
     };
   }
@@ -148,6 +211,43 @@ export class PaymentService extends Connection {
       throw new ApiError("Transaction not found", 404);
     }
     return { message: "Payment verified", data: { payment, order } };
+  }
+
+  // Submit an OTP for a mobile-money charge that requested one.
+  public async submitMomoOtp(reference: string, otp: string) {
+    const res = await paystack.submitOtp({ reference, otp });
+    return {
+      message: "OTP submitted",
+      data: {
+        reference,
+        status: res.status,
+        displayText: res.display_text ?? res.message ?? null,
+      },
+    };
+  }
+
+  // Poll the outcome of a charge (mobile money or inline). Re-verifies against
+  // Paystack and finalizes idempotently (same path as the webhook), so a
+  // completed payment is settled even if the webhook is delayed.
+  public async chargeStatus(reference: string) {
+    let paystackStatus = "pending";
+    try {
+      const data = await paystack.verify(reference);
+      paystackStatus = data.status;
+      await this.processVerification(reference, data);
+      await this.orders.finalizeByReference(reference, data);
+    } catch {
+      // Transaction not found yet / still initializing — treat as pending.
+    }
+
+    const status =
+      paystackStatus === "success"
+        ? "success"
+        : ["failed", "abandoned", "reversed", "timeout"].includes(paystackStatus)
+          ? "failed"
+          : "pending";
+
+    return { message: "Charge status", data: { reference, status } };
   }
 
   // Shared by verify + webhook. Idempotently marks the payment paid and emails

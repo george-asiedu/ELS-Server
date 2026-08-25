@@ -93,6 +93,14 @@ model Studio {
 
   // Paystack subaccount code for split settlement (money -> the studio).
   paystackSubaccountCode String?
+  // Percentage of each transaction the PLATFORM keeps (Paystack subaccount
+  // percentage_charge). Set by the super admin; 0 = platform takes no cut.
+  platformFeePercent     Float   @default(0)
+  // Mobile-money settlement account the subaccount pays out to (display only;
+  // the authoritative copy lives on Paystack).
+  payoutProvider         String? // e.g. "MTN", "VOD"/"TGO" bank code label
+  payoutAccountNumber    String? // MoMo number
+  payoutAccountName      String?
 
   branding        StudioBranding?
   content         StudioContent?

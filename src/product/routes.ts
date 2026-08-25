@@ -2,6 +2,7 @@ import { Router, Request, Response, NextFunction } from "express";
 import multer from "multer";
 import { ProductController } from "./productController";
 import { authenticate, requireAdmin } from "../middleware/auth";
+import { reenterTenant } from "../middleware/tenant";
 import { ApiError } from "../middleware/apiError";
 
 const router: Router = Router();
@@ -38,8 +39,8 @@ router.get("/", ProductController.list);
 
 // Admin
 router.get("/all", authenticate, requireAdmin, ProductController.listAll);
-router.post("/", authenticate, requireAdmin, uploadSingle, ProductController.create);
-router.put("/:id", authenticate, requireAdmin, uploadSingle, ProductController.update);
+router.post("/", authenticate, requireAdmin, uploadSingle, reenterTenant, ProductController.create);
+router.put("/:id", authenticate, requireAdmin, uploadSingle, reenterTenant, ProductController.update);
 router.delete("/:id", authenticate, requireAdmin, ProductController.remove);
 
 // Public single (kept after /all so it doesn't shadow it)

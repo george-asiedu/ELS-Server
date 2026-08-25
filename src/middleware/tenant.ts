@@ -43,7 +43,9 @@ export const resolveTenant = async (
       // Super-admin / webhook context: scoping is bypassed. Route-level guards
       // (requireSuperAdmin) still protect platform endpoints, and the webhook
       // resolves its studio from the payment reference.
-      return runWithTenant({ studioId: null, superAdmin: true }, () => next());
+      const ctx = { studioId: null, superAdmin: true };
+      req.tenantContext = ctx;
+      return runWithTenant(ctx, () => next());
     }
 
     const slug = studioSlugFromRequest(req);
@@ -59,11 +61,29 @@ export const resolveTenant = async (
     // Expose for downstream handlers that want the id without reading ALS.
     req.studioId = studio.id;
 
-    return runWithTenant(
-      { studioId: studio.id, superAdmin: false },
-      () => next(),
-    );
+    const ctx = { studioId: studio.id, superAdmin: false };
+    req.tenantContext = ctx;
+    return runWithTenant(ctx, () => next());
   } catch (error) {
     return next(error);
   }
+};
+
+/**
+ * Re-establish the tenant ALS context after a body parser that breaks async
+ * context propagation. multer (multipart/form-data) parses the request stream —
+ * whose underlying socket predates resolveTenant's `runWithTenant` — so its
+ * completion callback, and the controller it invokes, run OUTSIDE the tenant
+ * store and the scoping extension would fail closed. `req.tenantContext` is a
+ * plain property that survives, so we re-enter the store here. Mount this
+ * immediately AFTER the multer middleware on every multipart route.
+ */
+export const reenterTenant = (
+  req: Request,
+  _res: Response,
+  next: NextFunction,
+) => {
+  const ctx =
+    req.tenantContext ?? { studioId: req.studioId ?? null, superAdmin: false };
+  return runWithTenant(ctx, () => next());
 };
