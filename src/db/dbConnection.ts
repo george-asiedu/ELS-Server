@@ -79,4 +79,5 @@ export class Connection {
   get studioContent() { return this.db.studioContent; }
   get studioSettings() { return this.db.studioSettings; }
   get featureRequest() { return this.db.featureRequest; }
+  get auditLog() { return this.db.auditLog; }
 }
