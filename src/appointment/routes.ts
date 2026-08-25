@@ -2,6 +2,7 @@ import { Router } from "express";
 import multer from "multer";
 import { AppointmentController } from "./appointmentController";
 import { authenticate, requireAdmin, requireCustomer } from "../middleware/auth";
+import { reenterTenant } from "../middleware/tenant";
 
 const router: Router = Router();
 const upload = multer({ storage: multer.memoryStorage() });
@@ -15,6 +16,7 @@ router.post(
   authenticate,
   requireCustomer,
   upload.single("designImage"),
+  reenterTenant,
   AppointmentController.create,
 );
 

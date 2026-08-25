@@ -2,6 +2,7 @@ import { Router, Request, Response, NextFunction } from "express";
 import multer from "multer";
 import { GalleryController } from "./galleryController";
 import { authenticate, requireAdmin } from "../middleware/auth";
+import { reenterTenant } from "../middleware/tenant";
 import { ApiError } from "../middleware/apiError";
 
 const router: Router = Router();
@@ -42,7 +43,7 @@ router.get("/", GalleryController.list);
 
 // Admin
 router.get("/all", authenticate, requireAdmin, GalleryController.listAll);
-router.post("/", authenticate, requireAdmin, uploadSingle, GalleryController.create);
+router.post("/", authenticate, requireAdmin, uploadSingle, reenterTenant, GalleryController.create);
 router.delete("/:id", authenticate, requireAdmin, GalleryController.remove);
 
 export default router;

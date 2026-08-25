@@ -2,6 +2,7 @@ import { Router, Request, Response, NextFunction } from "express";
 import multer from "multer";
 import { StudioController } from "./studioController";
 import { authenticate, requireAdmin } from "../middleware/auth";
+import { reenterTenant } from "../middleware/tenant";
 import { ApiError } from "../middleware/apiError";
 
 const router: Router = Router();
@@ -43,6 +44,7 @@ router.put(
   authenticate,
   requireAdmin,
   uploadLogo,
+  reenterTenant,
   StudioController.updateBranding,
 );
 router.get("/content", authenticate, requireAdmin, StudioController.getContent);

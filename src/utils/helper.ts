@@ -60,6 +60,10 @@ declare global {
       };
       // The studio this request resolved to (null for platform/super-admin).
       studioId?: string | null;
+      // The full tenant context resolved for this request. Stashed so it can be
+      // re-established after body parsers (multer) that break async-context
+      // propagation. See middleware/tenant.ts reenterTenant.
+      tenantContext?: { studioId: string | null; superAdmin: boolean };
       rawBody?: Buffer;
     }
   }
