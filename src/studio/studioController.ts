@@ -1,8 +1,10 @@
 import { Request, Response, NextFunction } from "express";
 import { StudioService } from "./studioService";
 import { S3BucketService } from "../bucket/s3BucketService";
+import { AuditService } from "../audit/auditService";
 
 const studioService = new StudioService(new S3BucketService());
+const audit = new AuditService();
 
 export class StudioController {
   // Public storefront config for the studio resolved by resolveTenant.
@@ -88,6 +90,18 @@ export class StudioController {
   ) => {
     try {
       const result = await studioService.updatePayout(req.studioId, req.body ?? {});
+      await audit.record({
+        actor: {
+          id: req.user?.id,
+          email: req.user?.email,
+          role: req.user?.role,
+        },
+        action: "studio.payout_connected",
+        targetType: "Studio",
+        targetId: req.studioId ?? undefined,
+        studioId: req.studioId ?? undefined,
+        metadata: { provider: req.body?.provider },
+      });
       return res.status(200).json(result);
     } catch (error) {
       return next(error);
