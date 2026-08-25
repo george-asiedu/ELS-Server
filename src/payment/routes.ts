@@ -27,6 +27,23 @@ router.post(
   PaymentController.initialize,
 );
 
+// Customer — mobile-money charge (phone prompt) for their own booking.
+router.post(
+  "/charge/momo",
+  authenticate,
+  requireCustomer,
+  PaymentController.chargeMomo,
+);
+// Submit an OTP if the mobile-money charge asks for one.
+router.post(
+  "/charge/submit-otp",
+  authenticate,
+  requireCustomer,
+  PaymentController.submitOtp,
+);
+// Poll a charge's status (mobile money or inline popup).
+router.get("/status", authenticate, PaymentController.status);
+
 // Verify a transaction after the Paystack redirect (any logged-in user).
 router.get("/verify", authenticate, PaymentController.verify);
 

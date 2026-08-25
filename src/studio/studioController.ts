@@ -66,6 +66,34 @@ export class StudioController {
     }
   };
 
+  // ---- Admin: payout ----------------------------------------------------
+
+  public static getPayout = async (
+    req: Request,
+    res: Response,
+    next: NextFunction,
+  ) => {
+    try {
+      const result = await studioService.getPayout(req.studioId);
+      return res.status(200).json(result);
+    } catch (error) {
+      return next(error);
+    }
+  };
+
+  public static updatePayout = async (
+    req: Request,
+    res: Response,
+    next: NextFunction,
+  ) => {
+    try {
+      const result = await studioService.updatePayout(req.studioId, req.body ?? {});
+      return res.status(200).json(result);
+    } catch (error) {
+      return next(error);
+    }
+  };
+
   public static updateContent = async (
     req: Request,
     res: Response,

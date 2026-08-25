@@ -3,6 +3,7 @@ import { S3BucketService } from "../bucket/s3BucketService";
 import { ApiError } from "../middleware/apiError";
 import { HttpCode } from "../models/status_codes";
 import { UploadedFile } from "../models/user";
+import { paystack } from "../payment/paystackClient";
 
 const HEX_RE = /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/;
 const MAX_FEATURE_CARDS = 6;
@@ -174,6 +175,124 @@ export class StudioService extends Connection {
       create: { studioId: id },
     });
     return { message: "Content retrieved", data: content };
+  }
+
+  // ---- Admin: payout (Paystack subaccount for split settlement) ---------
+
+  public async getPayout(studioId: string | null | undefined) {
+    const id = this.requireStudioId(studioId);
+    const studio = await this.studio.findUnique({
+      where: { id },
+      select: {
+        paystackSubaccountCode: true,
+        platformFeePercent: true,
+        payoutProvider: true,
+        payoutAccountNumber: true,
+        payoutAccountName: true,
+      },
+    });
+    if (!studio) throw new ApiError("Studio not found", HttpCode.NOT_FOUND);
+
+    // Available mobile-money providers for the settlement dropdown.
+    let providers: { name: string; code: string }[] = [];
+    try {
+      const banks = await paystack.listMobileMoneyBanks();
+      providers = banks.map((b) => ({ name: b.name, code: b.code }));
+    } catch {
+      providers = [];
+    }
+
+    return {
+      message: "Payout settings",
+      data: {
+        connected: Boolean(studio.paystackSubaccountCode),
+        platformFeePercent: studio.platformFeePercent,
+        provider: studio.payoutProvider,
+        accountNumber: studio.payoutAccountNumber,
+        accountName: studio.payoutAccountName,
+        providers,
+      },
+    };
+  }
+
+  public async updatePayout(
+    studioId: string | null | undefined,
+    input: { provider?: unknown; accountNumber?: unknown; accountName?: unknown },
+  ) {
+    const id = this.requireStudioId(studioId);
+    const provider = String(input.provider ?? "").trim(); // momo bank code
+    const accountNumber = String(input.accountNumber ?? "").trim();
+    const accountName = String(input.accountName ?? "").trim();
+
+    if (!provider) {
+      throw new ApiError("A mobile-money provider is required", HttpCode.BAD_REQUEST);
+    }
+    if (!/^\d{9,15}$/.test(accountNumber)) {
+      throw new ApiError("Enter a valid mobile-money number", HttpCode.BAD_REQUEST);
+    }
+    if (accountName.length < 2) {
+      throw new ApiError("An account name is required", HttpCode.BAD_REQUEST);
+    }
+
+    const studio = await this.studio.findUnique({
+      where: { id },
+      select: {
+        name: true,
+        paystackSubaccountCode: true,
+        platformFeePercent: true,
+        ownerUserId: true,
+      },
+    });
+    if (!studio) throw new ApiError("Studio not found", HttpCode.NOT_FOUND);
+
+    const ownerEmail = studio.ownerUserId
+      ? (
+          await this.user.findUnique({
+            where: { id: studio.ownerUserId },
+            select: { email: true },
+          })
+        )?.email
+      : undefined;
+
+    let code = studio.paystackSubaccountCode ?? null;
+    try {
+      if (code) {
+        await paystack.updateSubaccount(code, {
+          businessName: accountName || studio.name,
+          settlementBank: provider,
+          accountNumber,
+          percentageCharge: studio.platformFeePercent,
+        });
+      } else {
+        const created = await paystack.createSubaccount({
+          businessName: accountName || studio.name,
+          settlementBank: provider,
+          accountNumber,
+          percentageCharge: studio.platformFeePercent,
+          ...(ownerEmail ? { primaryContactEmail: ownerEmail } : {}),
+        });
+        code = created.subaccount_code;
+      }
+    } catch (error) {
+      throw new ApiError(
+        error instanceof ApiError
+          ? `Paystack: ${error.message}`
+          : "Could not save payout account with Paystack",
+        HttpCode.BAD_GATEWAY,
+      );
+    }
+
+    await this.studio.update({
+      where: { id },
+      data: {
+        paystackSubaccountCode: code,
+        payoutProvider: provider,
+        payoutAccountNumber: accountNumber,
+        payoutAccountName: accountName,
+      },
+    });
+
+    return this.getPayout(id);
   }
 
   public async updateContent(

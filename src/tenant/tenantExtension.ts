@@ -36,6 +36,33 @@ const SCOPED_MODELS = new Set<string>([
 const lcFirst = (s: string) => s.charAt(0).toLowerCase() + s.slice(1);
 
 /**
+ * Flatten a `findUnique`-style where (WhereUniqueInput) into a `findFirst`-safe
+ * where. Composite unique keys are passed as a single nested object, e.g.
+ * `{ cartId_productId: { cartId, productId } }`, which `findFirst` rejects —
+ * so we spread those members up to the top level. Composite keys are the only
+ * where entries named with an underscore (joined field names), which no scalar
+ * field in this schema uses.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const toFindFirstWhere = (where: any, studioId: string) => {
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(where ?? {})) {
+    if (
+      key.includes("_") &&
+      value &&
+      typeof value === "object" &&
+      !Array.isArray(value)
+    ) {
+      Object.assign(out, value);
+    } else {
+      out[key] = value;
+    }
+  }
+  out.studioId = studioId;
+  return out;
+};
+
+/**
  * Prisma client extension that transparently scopes every query on a
  * tenant-owned model to the current studio (from AsyncLocalStorage):
  *
@@ -77,7 +104,7 @@ export const tenantExtension = (raw: PrismaClient) => ({
           case "findUniqueOrThrow": {
             const res = await delegate.findFirst({
               ...a,
-              where: { ...(a.where ?? {}), studioId },
+              where: toFindFirstWhere(a.where, studioId),
             });
             if (!res && operation === "findUniqueOrThrow") {
               throw new Error(`No ${model} found`);
@@ -110,7 +137,7 @@ export const tenantExtension = (raw: PrismaClient) => ({
           case "delete": {
             // Can't add studioId to a unique `where`; verify ownership first.
             const owned = await delegate.findFirst({
-              where: { ...(a.where ?? {}), studioId },
+              where: toFindFirstWhere(a.where, studioId),
               select: { id: true },
             });
             if (!owned) throw new Error(`No ${model} found in this studio`);
@@ -119,7 +146,7 @@ export const tenantExtension = (raw: PrismaClient) => ({
 
           case "upsert": {
             const owned = await delegate.findFirst({
-              where: { ...(a.where ?? {}), studioId },
+              where: toFindFirstWhere(a.where, studioId),
               select: { id: true },
             });
             if (owned) {

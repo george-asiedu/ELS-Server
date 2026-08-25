@@ -3,6 +3,7 @@ import { ApiError } from "../middleware/apiError";
 import { HttpCode } from "../models/status_codes";
 import { getPasswordHash, loginToken } from "../utils/helper";
 import { forgetStudioSlug } from "../tenant/studioResolver";
+import { paystack } from "../payment/paystackClient";
 
 // Slugs that can never belong to a studio: they collide with platform routes,
 // reserved subdomains, or the super-admin surface.
@@ -255,12 +256,43 @@ export class PlatformService extends Connection {
 
   public async updateStudio(
     id: string,
-    data: { name?: string; customDomain?: string | null },
+    data: {
+      name?: string;
+      customDomain?: string | null;
+      platformFeePercent?: number;
+    },
   ) {
     const studio = await this.studio.findUnique({ where: { id } });
     if (!studio) throw new ApiError("Studio not found", HttpCode.NOT_FOUND);
 
-    const patch: { name?: string; customDomain?: string | null } = {};
+    const patch: {
+      name?: string;
+      customDomain?: string | null;
+      platformFeePercent?: number;
+    } = {};
+
+    if (data.platformFeePercent !== undefined) {
+      const pct = Number(data.platformFeePercent);
+      if (!Number.isFinite(pct) || pct < 0 || pct > 100) {
+        throw new ApiError("Fee must be between 0 and 100", HttpCode.BAD_REQUEST);
+      }
+      patch.platformFeePercent = pct;
+      // Keep Paystack in sync when the studio already has a subaccount.
+      if (studio.paystackSubaccountCode) {
+        try {
+          await paystack.updateSubaccount(studio.paystackSubaccountCode, {
+            percentageCharge: pct,
+          });
+        } catch (error) {
+          throw new ApiError(
+            error instanceof ApiError
+              ? `Paystack: ${error.message}`
+              : "Could not update the studio's fee on Paystack",
+            HttpCode.BAD_GATEWAY,
+          );
+        }
+      }
+    }
 
     if (data.name !== undefined) {
       const name = String(data.name).trim();
