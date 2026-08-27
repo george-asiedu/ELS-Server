@@ -132,6 +132,18 @@ export const paystack = {
     );
   },
 
+  // Resolve an account number to its registered name (bank or mobile money).
+  async resolveAccount(args: {
+    accountNumber: string;
+    bankCode: string;
+  }): Promise<{ account_number: string; account_name: string }> {
+    return call<{ account_number: string; account_name: string }>(
+      `/bank/resolve?account_number=${encodeURIComponent(
+        args.accountNumber,
+      )}&bank_code=${encodeURIComponent(args.bankCode)}`,
+    );
+  },
+
   async createSubaccount(args: {
     businessName: string;
     settlementBank: string; // momo provider bank code

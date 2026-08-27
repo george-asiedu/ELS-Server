@@ -215,6 +215,38 @@ export class StudioService extends Connection {
     };
   }
 
+  // Look up the registered name for a mobile-money number so the admin doesn't
+  // type it (and to catch typos before saving the payout account).
+  public async resolvePayoutAccount(
+    studioId: string | null | undefined,
+    accountNumber: string,
+    provider: string,
+  ) {
+    this.requireStudioId(studioId);
+    const number = String(accountNumber ?? "").trim();
+    const bankCode = String(provider ?? "").trim();
+    if (!/^\d{9,15}$/.test(number)) {
+      throw new ApiError("Enter a valid mobile-money number", HttpCode.BAD_REQUEST);
+    }
+    if (!bankCode) {
+      throw new ApiError("A provider is required", HttpCode.BAD_REQUEST);
+    }
+    try {
+      const res = await paystack.resolveAccount({
+        accountNumber: number,
+        bankCode,
+      });
+      return { message: "Account resolved", data: { accountName: res.account_name } };
+    } catch (error) {
+      throw new ApiError(
+        error instanceof ApiError
+          ? `Paystack: ${error.message}`
+          : "Could not verify that account",
+        HttpCode.BAD_GATEWAY,
+      );
+    }
+  }
+
   public async updatePayout(
     studioId: string | null | undefined,
     input: { provider?: unknown; accountNumber?: unknown; accountName?: unknown },

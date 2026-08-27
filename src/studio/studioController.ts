@@ -83,6 +83,25 @@ export class StudioController {
     }
   };
 
+  public static resolvePayout = async (
+    req: Request,
+    res: Response,
+    next: NextFunction,
+  ) => {
+    try {
+      const accountNumber = String(req.query.accountNumber ?? "");
+      const provider = String(req.query.provider ?? "");
+      const result = await studioService.resolvePayoutAccount(
+        req.studioId,
+        accountNumber,
+        provider,
+      );
+      return res.status(200).json(result);
+    } catch (error) {
+      return next(error);
+    }
+  };
+
   public static updatePayout = async (
     req: Request,
     res: Response,
