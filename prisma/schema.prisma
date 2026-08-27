@@ -72,6 +72,13 @@ enum FulfillmentType {
   DELIVERY
 }
 
+// Where a studio's promo banner shows: the shop, the booking page, or both.
+enum PromoPlacement {
+  SHOP
+  BOOKING
+  BOTH
+}
+
 // ------------------- Multi-tenant platform -------------------
 // A Studio is a tenant. Every customer-facing model carries a `studioId`
 // discriminator (a plain indexed scalar, not a Prisma relation, to keep this
@@ -207,6 +214,26 @@ model AuditLog {
   @@index([createdAt])
   @@index([studioId])
   @@map("audit_logs")
+}
+
+// A studio's scrolling promo banner (advertised on the shop and/or booking
+// pages). Tenant-scoped like the rest of the storefront content.
+model PromoBanner {
+  id        String        @id @default(auto()) @map("_id") @db.ObjectId
+  studioId  String?       @db.ObjectId
+  message   String
+  linkUrl   String?
+  bgColor   String? // hex; falls back to the studio's primary color
+  textColor String?
+  placement PromoPlacement @default(BOTH)
+  active    Boolean       @default(true)
+  order     Int           @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([studioId])
+  @@map("promo_banners")
 }
 
 // ------------------- Tenant-owned models -------------------
