@@ -7,7 +7,7 @@ import { paystack } from "../payment/paystackClient";
 
 // Slugs that can never belong to a studio: they collide with platform routes,
 // reserved subdomains, or the super-admin surface.
-const RESERVED_SLUGS = new Set([
+export const RESERVED_SLUGS = new Set([
   "platform",
   "admin",
   "api",
@@ -18,9 +18,43 @@ const RESERVED_SLUGS = new Set([
   "signup",
   "static",
   "assets",
+  "welcome",
+  "s",
+  "onboarding",
 ]);
 
-const SLUG_RE = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/;
+export const SLUG_RE = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/;
+
+export const normalizeSlug = (raw: string) =>
+  String(raw ?? "").trim().toLowerCase();
+
+// Validate a studio slug, returning the normalized value or throwing 400.
+export const validateStudioSlug = (raw: string): string => {
+  const slug = normalizeSlug(raw);
+  if (!SLUG_RE.test(slug) || slug.length < 2 || slug.length > 40) {
+    throw new ApiError(
+      "Slug must be 2-40 chars: lowercase letters, numbers and hyphens",
+      HttpCode.BAD_REQUEST,
+    );
+  }
+  if (RESERVED_SLUGS.has(slug)) {
+    throw new ApiError("That slug is reserved", HttpCode.BAD_REQUEST);
+  }
+  return slug;
+};
+
+type Plan = "STANDARD" | "PREMIUM";
+
+// Feature flags a plan unlocks. Booking is always on; Premium adds the shop.
+export const planFlags = (plan: Plan) => ({
+  commerce: plan === "PREMIUM",
+  productsInBooking: plan === "PREMIUM",
+  onlinePayments: true, // online booking payments are in both plans
+  loyalty: true,
+  referrals: true,
+  reviews: true,
+  gallery: true,
+});
 
 export interface StudioSettingsInput {
   commerce?: boolean;
@@ -39,13 +73,29 @@ export interface ProvisionStudioInput {
   ownerPassword: string;
   ownerFullName?: string;
   customDomain?: string;
+  plan?: Plan;
   settings?: StudioSettingsInput;
 }
 
-type StudioStatus = "ACTIVE" | "SUSPENDED" | "TRIAL";
+export interface ProvisionCoreInput {
+  name: string;
+  slug: string; // already validated + normalized
+  ownerEmail: string; // already normalized
+  ownerPasswordHash: string;
+  ownerFullName?: string;
+  customDomain?: string;
+  plan: Plan;
+  cadence?: "MONTHLY" | "YEARLY";
+  subscription?: {
+    customerCode?: string | null;
+    subscriptionCode?: string | null;
+    status?: string | null;
+    currentPeriodEnd?: Date | null;
+  };
+  settingsOverride?: StudioSettingsInput;
+}
 
-const normalizeSlug = (raw: string) =>
-  String(raw ?? "").trim().toLowerCase();
+type StudioStatus = "ACTIVE" | "SUSPENDED" | "TRIAL";
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -94,20 +144,80 @@ export class PlatformService extends Connection {
     const usersByStudio = countBy(userCounts);
     const apptsByStudio = countBy(apptCounts);
 
+    // Revenue = paid booking payments + paid/fulfilled product orders, per studio.
+    const revenueByStudio = await this.revenueByStudio();
+
     return studios.map((s) => ({
       id: s.id,
       name: s.name,
       slug: s.slug,
       status: s.status,
+      plan: s.plan,
+      billingCadence: s.billingCadence,
+      subscriptionStatus: s.subscriptionStatus,
+      currentPeriodEnd: s.currentPeriodEnd,
       customDomain: s.customDomain,
       ownerEmail: s.ownerUserId
         ? ownerEmailById.get(s.ownerUserId) ?? null
         : null,
       userCount: usersByStudio.get(s.id) ?? 0,
       appointmentCount: apptsByStudio.get(s.id) ?? 0,
+      revenue: revenueByStudio.get(s.id) ?? 0,
       settings: s.settings,
       createdAt: s.createdAt,
     }));
+  }
+
+  // Paid GMV per studio (booking payments + product orders), rounded to 2dp.
+  private async revenueByStudio(): Promise<Map<string, number>> {
+    const [payments, orders] = await Promise.all([
+      this.payment.groupBy({
+        by: ["studioId"],
+        where: { status: "PAID" },
+        _sum: { amount: true },
+      }),
+      this.order.groupBy({
+        by: ["studioId"],
+        where: { status: { in: ["PAID", "FULFILLED"] } },
+        _sum: { total: true },
+      }),
+    ]);
+    const m = new Map<string, number>();
+    for (const p of payments) {
+      if (p.studioId) m.set(p.studioId, (m.get(p.studioId) ?? 0) + (p._sum.amount ?? 0));
+    }
+    for (const o of orders) {
+      if (o.studioId) m.set(o.studioId, (m.get(o.studioId) ?? 0) + (o._sum.total ?? 0));
+    }
+    for (const [k, v] of m) m.set(k, Math.round(v * 100) / 100);
+    return m;
+  }
+
+  // Platform-wide totals for the super-admin dashboard.
+  public async getAnalytics() {
+    const [studios, totalUsers] = await Promise.all([
+      this.studio.findMany({ select: { id: true, status: true } }),
+      this.user.count(),
+    ]);
+    const revenueByStudio = await this.revenueByStudio();
+    let totalRevenue = 0;
+    for (const v of revenueByStudio.values()) totalRevenue += v;
+
+    const active = studios.filter((s) => s.status === "ACTIVE").length;
+    const suspended = studios.filter((s) => s.status === "SUSPENDED").length;
+    const trial = studios.filter((s) => s.status === "TRIAL").length;
+
+    return {
+      message: "Platform analytics",
+      data: {
+        totalStudios: studios.length,
+        activeStudios: active,
+        suspendedStudios: suspended,
+        trialStudios: trial,
+        totalUsers,
+        totalRevenue: Math.round(totalRevenue * 100) / 100,
+      },
+    };
   }
 
   public async getStudio(id: string) {
@@ -143,23 +253,14 @@ export class PlatformService extends Connection {
 
   // ---- Provisioning -----------------------------------------------------
 
+  // Super-admin manual provisioning (bypasses payment). Validates input, hashes
+  // the password, then delegates to the shared core.
   public async provisionStudio(input: ProvisionStudioInput) {
     const name = String(input.name ?? "").trim();
     if (name.length < 2 || name.length > 60) {
       throw new ApiError("Studio name must be 2-60 characters", HttpCode.BAD_REQUEST);
     }
-
-    const slug = normalizeSlug(input.slug);
-    if (!SLUG_RE.test(slug) || slug.length < 2 || slug.length > 40) {
-      throw new ApiError(
-        "Slug must be 2-40 chars: lowercase letters, numbers and hyphens",
-        HttpCode.BAD_REQUEST,
-      );
-    }
-    if (RESERVED_SLUGS.has(slug)) {
-      throw new ApiError("That slug is reserved", HttpCode.BAD_REQUEST);
-    }
-
+    const slug = validateStudioSlug(input.slug);
     const ownerEmail = String(input.ownerEmail ?? "").trim().toLowerCase();
     if (!EMAIL_RE.test(ownerEmail)) {
       throw new ApiError("A valid owner email is required", HttpCode.BAD_REQUEST);
@@ -171,15 +272,33 @@ export class PlatformService extends Connection {
         HttpCode.BAD_REQUEST,
       );
     }
+    const ownerPasswordHash = await getPasswordHash(ownerPassword);
 
+    return this.provisionStudioCore({
+      name,
+      slug,
+      ownerEmail,
+      ownerPasswordHash,
+      ...(input.ownerFullName ? { ownerFullName: input.ownerFullName } : {}),
+      ...(input.customDomain ? { customDomain: input.customDomain } : {}),
+      plan: input.plan ?? "STANDARD",
+      ...(input.settings ? { settingsOverride: input.settings } : {}),
+    });
+  }
+
+  /**
+   * Shared studio creation used by both super-admin provisioning and paid
+   * self-serve onboarding. MUST run in the super-admin tenant context (so the
+   * scoped models — user/profile — take the explicit studioId, not the caller's
+   * studio). Callers that aren't already super-admin wrap this in runAsSuperAdmin.
+   */
+  public async provisionStudioCore(input: ProvisionCoreInput) {
     // Slug uniqueness (globally unique in the schema).
-    const slugTaken = await this.studio.findUnique({ where: { slug } });
+    const slugTaken = await this.studio.findUnique({ where: { slug: input.slug } });
     if (slugTaken) {
       throw new ApiError("A studio with that slug already exists", HttpCode.CONFLICT);
     }
 
-    // Custom domain uniqueness is enforced here (the column can't be @unique in
-    // Mongo because multiple nulls would collide).
     const customDomain = input.customDomain?.trim().toLowerCase() || undefined;
     if (customDomain) {
       const domainTaken = await this.studio.findFirst({ where: { customDomain } });
@@ -188,23 +307,26 @@ export class PlatformService extends Connection {
       }
     }
 
-    // 1. The studio itself.
+    const sub = input.subscription;
     const studio = await this.studio.create({
       data: {
-        name,
-        slug,
+        name: input.name,
+        slug: input.slug,
         status: "ACTIVE",
+        plan: input.plan,
+        ...(input.cadence ? { billingCadence: input.cadence } : {}),
+        ...(sub?.customerCode ? { paystackCustomerCode: sub.customerCode } : {}),
+        ...(sub?.subscriptionCode ? { subscriptionCode: sub.subscriptionCode } : {}),
+        ...(sub?.status ? { subscriptionStatus: sub.status } : {}),
+        ...(sub?.currentPeriodEnd ? { currentPeriodEnd: sub.currentPeriodEnd } : {}),
         ...(customDomain ? { customDomain } : {}),
       },
     });
 
-    // 2. Owner ADMIN user (studioId stamped explicitly — extension is bypassed
-    //    under superAdmin context).
-    const hashedPassword = await getPasswordHash(ownerPassword);
     const owner = await this.user.create({
       data: {
-        email: ownerEmail,
-        password: hashedPassword,
+        email: input.ownerEmail,
+        password: input.ownerPasswordHash,
         role: "ADMIN",
         studioId: studio.id,
       },
@@ -214,39 +336,25 @@ export class PlatformService extends Connection {
     await this.profile.create({
       data: {
         userId: owner.id,
-        email: ownerEmail,
+        email: input.ownerEmail,
         studioId: studio.id,
         ...(ownerFullName ? { fullName: ownerFullName } : {}),
       },
     });
 
-    // 3. Point the studio at its owner.
     await this.studio.update({
       where: { id: studio.id },
       data: { ownerUserId: owner.id },
     });
 
-    // 4. Feature flags, branding + content shells.
-    const s = input.settings ?? {};
+    // Feature flags from the plan, with any explicit override on top.
+    const flags = { ...planFlags(input.plan), ...(input.settingsOverride ?? {}) };
     await this.studioSettings.create({
-      data: {
-        studioId: studio.id,
-        commerce: s.commerce ?? false,
-        loyalty: s.loyalty ?? true,
-        referrals: s.referrals ?? true,
-        reviews: s.reviews ?? true,
-        gallery: s.gallery ?? true,
-        onlinePayments: s.onlinePayments ?? false,
-        productsInBooking: s.productsInBooking ?? false,
-      },
+      data: { studioId: studio.id, ...flags },
     });
     await this.studioBranding.create({ data: { studioId: studio.id } });
     await this.studioContent.create({
-      data: {
-        studioId: studio.id,
-        heroHeadline: name,
-        showTestimonials: true,
-      },
+      data: { studioId: studio.id, heroHeadline: input.name, showTestimonials: true },
     });
 
     return this.getStudio(studio.id);
