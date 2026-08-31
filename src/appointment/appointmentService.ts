@@ -35,9 +35,9 @@ export class AppointmentService extends Connection {
   private s3 = new S3BucketService();
   private email = new EmailService();
 
-  // Loyalty value + discount cap for booking-time redemption.
+  // Loyalty value for booking-time redemption. The discount cap ratio comes
+  // from the studio's settings (loyaltyCapRatio()).
   private static readonly POINTS_PER_GHS = 10; // 10 points = GHS 1 off
-  private static readonly MAX_DISCOUNT_RATIO = 0.3; // never more than 30% off
 
   public async create(
     data: CreateAppointmentInput,
@@ -69,10 +69,9 @@ export class AppointmentService extends Connection {
       const balance = await this.loyaltyPoints.findUnique({ where: { userId } });
       const available = balance?.points ?? 0;
       if (available > 0) {
+        const capRatio = await this.loyaltyCapRatio();
         const maxPointsByCap = Math.floor(
-          effectivePrice *
-            AppointmentService.MAX_DISCOUNT_RATIO *
-            AppointmentService.POINTS_PER_GHS,
+          effectivePrice * capRatio * AppointmentService.POINTS_PER_GHS,
         );
         pointsRedeemed = Math.min(available, maxPointsByCap);
         discountAmount = pointsRedeemed / AppointmentService.POINTS_PER_GHS;
