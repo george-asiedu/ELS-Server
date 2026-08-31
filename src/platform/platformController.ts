@@ -47,6 +47,19 @@ export class PlatformController {
 
   // ---- Studios ----------------------------------------------------------
 
+  public static analytics = async (
+    _req: Request,
+    res: Response,
+    next: NextFunction,
+  ) => {
+    try {
+      const result = await platformService.getAnalytics();
+      return res.status(200).json(result);
+    } catch (error) {
+      return next(error);
+    }
+  };
+
   public static listStudios = async (
     _req: Request,
     res: Response,
