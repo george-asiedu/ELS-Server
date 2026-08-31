@@ -74,6 +74,18 @@ export class Connection {
     return studio?.paystackSubaccountCode ?? null;
   }
 
+  // Max share of a booking/order payable with loyalty points, as a ratio, from
+  // the current studio's settings (studio-admin controlled). Defaults to 0.3.
+  protected async loyaltyCapRatio(): Promise<number> {
+    const studioId = getTenantContext()?.studioId;
+    if (!studioId) return 0.3;
+    const s = await this.studioSettings.findFirst({
+      where: { studioId },
+      select: { loyaltyCapPercent: true },
+    });
+    return (s?.loyaltyCapPercent ?? 30) / 100;
+  }
+
   // ---- Platform models (not auto-scoped; used by super-admin/onboarding) ----
   get studio() { return this.db.studio; }
   get studioBranding() { return this.db.studioBranding; }
@@ -81,4 +93,6 @@ export class Connection {
   get studioSettings() { return this.db.studioSettings; }
   get featureRequest() { return this.db.featureRequest; }
   get auditLog() { return this.db.auditLog; }
+  get studioSignup() { return this.db.studioSignup; }
+  get platformReview() { return this.db.platformReview; }
 }
