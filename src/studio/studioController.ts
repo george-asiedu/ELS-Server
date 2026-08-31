@@ -2,6 +2,7 @@ import { Request, Response, NextFunction } from "express";
 import { StudioService } from "./studioService";
 import { S3BucketService } from "../bucket/s3BucketService";
 import { AuditService } from "../audit/auditService";
+import { ApiError } from "../middleware/apiError";
 
 const studioService = new StudioService(new S3BucketService());
 const audit = new AuditService();
@@ -47,6 +48,141 @@ export class StudioController {
         req.body ?? {},
         req.file,
       );
+      return res.status(200).json(result);
+    } catch (error) {
+      return next(error);
+    }
+  };
+
+  // ---- Custom domain ----------------------------------------------------
+
+  public static resolveDomain = async (
+    req: Request,
+    res: Response,
+    next: NextFunction,
+  ) => {
+    try {
+      const host = String(req.query.host ?? "");
+      if (!host) throw new ApiError("host is required", 400);
+      const result = await studioService.resolveByDomain(host);
+      return res.status(200).json(result);
+    } catch (error) {
+      return next(error);
+    }
+  };
+
+  public static getDomain = async (
+    req: Request,
+    res: Response,
+    next: NextFunction,
+  ) => {
+    try {
+      const result = await studioService.getDomain(req.studioId);
+      return res.status(200).json(result);
+    } catch (error) {
+      return next(error);
+    }
+  };
+
+  public static setDomain = async (
+    req: Request,
+    res: Response,
+    next: NextFunction,
+  ) => {
+    try {
+      const result = await studioService.setDomain(req.studioId, String(req.body?.domain ?? ""));
+      return res.status(200).json(result);
+    } catch (error) {
+      return next(error);
+    }
+  };
+
+  public static verifyDomain = async (
+    req: Request,
+    res: Response,
+    next: NextFunction,
+  ) => {
+    try {
+      const result = await studioService.verifyDomain(req.studioId);
+      return res.status(200).json(result);
+    } catch (error) {
+      return next(error);
+    }
+  };
+
+  public static getBilling = async (
+    req: Request,
+    res: Response,
+    next: NextFunction,
+  ) => {
+    try {
+      const result = await studioService.getBilling(req.studioId);
+      return res.status(200).json(result);
+    } catch (error) {
+      return next(error);
+    }
+  };
+
+  public static startBillingChange = async (
+    req: Request,
+    res: Response,
+    next: NextFunction,
+  ) => {
+    try {
+      const plan = String(req.body?.plan ?? "");
+      const cadence = String(req.body?.cadence ?? "");
+      const result = await studioService.startBillingChange(
+        req.studioId,
+        plan,
+        cadence,
+      );
+      return res.status(200).json(result);
+    } catch (error) {
+      return next(error);
+    }
+  };
+
+  public static applyBillingChange = async (
+    req: Request,
+    res: Response,
+    next: NextFunction,
+  ) => {
+    try {
+      const reference = String(req.body?.reference ?? "");
+      const plan = String(req.body?.plan ?? "");
+      const cadence = String(req.body?.cadence ?? "");
+      const result = await studioService.applyBillingChange(
+        req.studioId,
+        reference,
+        plan,
+        cadence,
+      );
+      return res.status(200).json(result);
+    } catch (error) {
+      return next(error);
+    }
+  };
+
+  public static getLoyalty = async (
+    req: Request,
+    res: Response,
+    next: NextFunction,
+  ) => {
+    try {
+      const result = await studioService.getLoyalty(req.studioId);
+      return res.status(200).json(result);
+    } catch (error) {
+      return next(error);
+    }
+  };
+
+  public static updateLoyalty = async (
+    req: Request,
+    res: Response,
+    next: NextFunction,
+  ) => {
+    try {
+      const result = await studioService.updateLoyalty(req.studioId, req.body ?? {});
       return res.status(200).json(result);
     } catch (error) {
       return next(error);
