@@ -26,7 +26,8 @@ const studioSlugFromRequest = (req: Request): string => {
 // Requests that operate outside any single studio (super-admin surface) or that
 // must resolve their studio internally (the Paystack webhook, which finds the
 // studio via the globally-unique payment reference).
-const isPlatformPath = (path: string) => path.startsWith("/platform");
+const isPlatformPath = (path: string) =>
+  path.startsWith("/platform") || path.startsWith("/onboarding");
 const isWebhookPath = (path: string) => path.endsWith("/webhook");
 
 /**
