@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { PlatformController } from "./platformController";
 import { FeatureRequestController } from "../featureRequest/featureRequestController";
+import { PlatformReviewController } from "../platformReview/platformReviewController";
 import { authenticate, requireSuperAdmin } from "../middleware/auth";
 
 const router: Router = Router();
@@ -12,6 +13,7 @@ router.post("/auth/login", PlatformController.login);
 router.use(authenticate, requireSuperAdmin);
 
 router.get("/me", PlatformController.me);
+router.get("/analytics", PlatformController.analytics);
 
 router.get("/studios", PlatformController.listStudios);
 router.post("/studios", PlatformController.createStudio);
@@ -20,6 +22,11 @@ router.patch("/studios/:id", PlatformController.updateStudio);
 router.patch("/studios/:id/status", PlatformController.setStatus);
 router.patch("/studios/:id/settings", PlatformController.updateSettings);
 router.post("/studios/:id/impersonate", PlatformController.impersonate);
+
+// Testimonials moderation (studio-submitted → approved for the landing).
+router.get("/reviews", PlatformReviewController.listAll);
+router.patch("/reviews/:id", PlatformReviewController.setApproved);
+router.delete("/reviews/:id", PlatformReviewController.remove);
 
 // Audit trail of platform actions.
 router.get("/audit-logs", PlatformController.listAudit);
