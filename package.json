@@ -17,7 +17,8 @@
     "format": "prettier --write .",
     "seed": "ts-node prisma/seed.ts",
     "backfill:tenants": "ts-node prisma/backfillTenants.ts",
-    "create:superadmin": "ts-node prisma/createSuperAdmin.ts"
+    "create:superadmin": "ts-node prisma/createSuperAdmin.ts",
+    "create:plans": "ts-node prisma/createPlans.ts"
   },
   "resolutions": {
     "@types/express-serve-static-core": "5.1.0"
