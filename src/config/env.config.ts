@@ -54,5 +54,13 @@ export const env = {
   paystack: {
     secretKey: process.env.PAYSTACK_SECRET_KEY as string,
     publicKey: process.env.PAYSTACK_PUBLIC_KEY as string,
+    // Subscription plan codes (created once on Paystack). Studio onboarding
+    // initializes a transaction with the plan code for the chosen tier+cadence.
+    plans: {
+      STANDARD_MONTHLY: (process.env.PAYSTACK_PLAN_STANDARD_MONTHLY as string) || "",
+      STANDARD_YEARLY: (process.env.PAYSTACK_PLAN_STANDARD_YEARLY as string) || "",
+      PREMIUM_MONTHLY: (process.env.PAYSTACK_PLAN_PREMIUM_MONTHLY as string) || "",
+      PREMIUM_YEARLY: (process.env.PAYSTACK_PLAN_PREMIUM_YEARLY as string) || "",
+    },
   },
 };
