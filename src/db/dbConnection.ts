@@ -95,4 +95,5 @@ export class Connection {
   get auditLog() { return this.db.auditLog; }
   get studioSignup() { return this.db.studioSignup; }
   get platformReview() { return this.db.platformReview; }
+  get platformConfig() { return this.db.platformConfig; }
 }
