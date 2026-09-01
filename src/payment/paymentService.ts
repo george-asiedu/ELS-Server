@@ -6,6 +6,8 @@ import { env } from "../config/env.config";
 import { paystack, PaystackVerifyData } from "./paystackClient";
 import { EmailService } from "../email/emailService";
 import { OrderService } from "../order/orderService";
+import { OnboardingService, isSignupReference } from "../onboarding/onboardingService";
+import { forgetStudioSlug } from "../tenant/studioResolver";
 
 type PaymentType = "FULL" | "PARTIAL";
 
@@ -33,6 +35,7 @@ interface PaymentWithAppointment {
 export class PaymentService extends Connection {
   private email = new EmailService();
   private orders = new OrderService();
+  private onboarding = new OnboardingService();
 
   private async settings() {
     const existing = await this.paymentSettings.findFirst();
@@ -328,19 +331,106 @@ export class PaymentService extends Connection {
     }
 
     const event = JSON.parse(rawBody.toString("utf8"));
-    if (event?.event === "charge.success" && event?.data?.reference) {
-      const reference: string = event.data.reference;
-      try {
-        const data = await paystack.verify(reference);
-        // One webhook covers appointment payments, product orders, and combined
-        // booking+product charges (which share a reference) — finalize both;
-        // each is a no-op when nothing matches.
-        await this.processVerification(reference, data);
-        await this.orders.finalizeByReference(reference, data);
-      } catch (error) {
-        console.error("Webhook processing error:", error);
+    const type: string = event?.event ?? "";
+    const data = event?.data ?? {};
+
+    try {
+      if (type === "charge.success" && data.reference) {
+        const reference: string = data.reference;
+        if (isSignupReference(reference)) {
+          // A studio-subscription first payment → provision the studio.
+          await this.onboarding.finalize(reference);
+        } else {
+          // Appointment payments, product orders, and combined booking+product
+          // charges (which share a reference) — finalize both; each is a no-op
+          // when nothing matches.
+          const vd = await paystack.verify(reference);
+          await this.processVerification(reference, vd);
+          await this.orders.finalizeByReference(reference, vd);
+        }
+      } else if (type.startsWith("subscription.") || type.startsWith("invoice.")) {
+        await this.handleBillingEvent(type, data);
       }
+    } catch (error) {
+      console.error("Webhook processing error:", error);
     }
     return { received: true };
+  }
+
+  // Keep a studio's subscription status in sync with Paystack billing events.
+  // Runs in the webhook's super-admin context, so studio/user reads are unscoped.
+  private async handleBillingEvent(
+    type: string,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    data: any,
+  ) {
+    if (type === "subscription.create") {
+      const email = String(data?.customer?.email ?? "").toLowerCase();
+      const studio = await this.findStudioByOwnerEmail(email);
+      if (!studio) return;
+      const nextPay = data?.next_payment_date
+        ? new Date(data.next_payment_date)
+        : null;
+      await this.studio.update({
+        where: { id: studio.id },
+        data: {
+          subscriptionCode: data?.subscription_code ?? null,
+          subscriptionStatus: "active",
+          ...(nextPay ? { currentPeriodEnd: nextPay } : {}),
+        },
+      });
+      return;
+    }
+
+    const subCode = data?.subscription_code ?? data?.subscription?.subscription_code;
+    const studio = subCode
+      ? await this.studio.findFirst({ where: { subscriptionCode: subCode } })
+      : null;
+    if (!studio) return;
+
+    if (type === "subscription.disable") {
+      await this.studio.update({
+        where: { id: studio.id },
+        data: { subscriptionStatus: "cancelled", status: "SUSPENDED" },
+      });
+      forgetStudioSlug(studio.slug);
+    } else if (type === "subscription.not_renew") {
+      await this.studio.update({
+        where: { id: studio.id },
+        data: { subscriptionStatus: "non-renewing" },
+      });
+    } else if (type === "invoice.payment_failed") {
+      await this.studio.update({
+        where: { id: studio.id },
+        data: { subscriptionStatus: "past_due" },
+      });
+    } else if (type === "invoice.update" || type === "invoice.create") {
+      // Renewal invoice — if paid, keep active and reactivate a suspended studio.
+      if (data?.paid === true || data?.status === "success") {
+        const nextPay = data?.subscription?.next_payment_date
+          ? new Date(data.subscription.next_payment_date)
+          : null;
+        await this.studio.update({
+          where: { id: studio.id },
+          data: {
+            subscriptionStatus: "active",
+            ...(studio.status === "SUSPENDED" ? { status: "ACTIVE" } : {}),
+            ...(nextPay ? { currentPeriodEnd: nextPay } : {}),
+          },
+        });
+        forgetStudioSlug(studio.slug);
+      }
+    }
+  }
+
+  private async findStudioByOwnerEmail(email: string) {
+    if (!email) return null;
+    const admin = await this.user.findFirst({
+      where: { email, role: "ADMIN" },
+      orderBy: { createdAt: "desc" },
+      select: { studioId: true },
+    });
+    if (!admin?.studioId) return null;
+    return this.studio.findUnique({ where: { id: admin.studioId } });
   }
 }

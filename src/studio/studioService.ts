@@ -4,6 +4,22 @@ import { ApiError } from "../middleware/apiError";
 import { HttpCode } from "../models/status_codes";
 import { UploadedFile } from "../models/user";
 import { paystack } from "../payment/paystackClient";
+import { env } from "../config/env.config";
+import { randomUUID } from "crypto";
+import { promises as dns } from "dns";
+import { planFlags } from "../platform/platformService";
+import {
+  resolveStudioByDomain,
+  forgetStudioDomain,
+} from "../tenant/studioResolver";
+
+const DOMAIN_RE = /^(?!-)[a-z0-9-]{1,63}(\.[a-z0-9-]{1,63})+$/;
+const normalizeDomain = (raw: string) =>
+  String(raw ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/^https?:\/\//, "")
+    .replace(/\/.*$/, "");
 
 const HEX_RE = /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/;
 const MAX_FEATURE_CARDS = 6;
@@ -103,6 +119,7 @@ export class StudioService extends Connection {
         gallery: studio.settings?.gallery ?? true,
         onlinePayments: studio.settings?.onlinePayments ?? false,
         productsInBooking: studio.settings?.productsInBooking ?? false,
+        loyaltyCapPercent: studio.settings?.loyaltyCapPercent ?? 30,
       },
     };
   }
@@ -163,6 +180,290 @@ export class StudioService extends Connection {
       create: { studioId: id, ...data },
     });
     return { message: "Branding updated", data: branding };
+  }
+
+  // ---- Custom domain ----------------------------------------------------
+
+  private domainPayload(studio: {
+    customDomain: string | null;
+    customDomainVerified: boolean;
+    customDomainVerifyToken: string | null;
+  }) {
+    const token = studio.customDomainVerifyToken;
+    return {
+      domain: studio.customDomain,
+      verified: studio.customDomainVerified,
+      // The DNS record the studio must add to prove ownership.
+      txt: token
+        ? { name: `_zuri-verify.${studio.customDomain}`, value: `zuri-verify=${token}` }
+        : null,
+    };
+  }
+
+  public async getDomain(studioId: string | null | undefined) {
+    const id = this.requireStudioId(studioId);
+    const studio = await this.studio.findUnique({
+      where: { id },
+      select: {
+        customDomain: true,
+        customDomainVerified: true,
+        customDomainVerifyToken: true,
+      },
+    });
+    if (!studio) throw new ApiError("Studio not found", HttpCode.NOT_FOUND);
+    return { message: "Custom domain", data: this.domainPayload(studio) };
+  }
+
+  public async setDomain(
+    studioId: string | null | undefined,
+    rawDomain: string,
+  ) {
+    const id = this.requireStudioId(studioId);
+    const domain = normalizeDomain(rawDomain);
+    if (!DOMAIN_RE.test(domain)) {
+      throw new ApiError("Enter a valid domain (e.g. book.mystudio.com)", HttpCode.BAD_REQUEST);
+    }
+    const taken = await this.studio.findFirst({
+      where: { customDomain: domain, id: { not: id } },
+    });
+    if (taken) {
+      throw new ApiError("That domain is already in use", HttpCode.CONFLICT);
+    }
+    const token = randomUUID().replace(/-/g, "").slice(0, 24);
+    const updated = await this.studio.update({
+      where: { id },
+      data: {
+        customDomain: domain,
+        customDomainVerifyToken: token,
+        customDomainVerified: false,
+      },
+      select: {
+        customDomain: true,
+        customDomainVerified: true,
+        customDomainVerifyToken: true,
+      },
+    });
+    forgetStudioDomain(domain);
+    return { message: "Domain saved — add the DNS record, then verify", data: this.domainPayload(updated) };
+  }
+
+  public async verifyDomain(studioId: string | null | undefined) {
+    const id = this.requireStudioId(studioId);
+    const studio = await this.studio.findUnique({
+      where: { id },
+      select: { customDomain: true, customDomainVerifyToken: true },
+    });
+    if (!studio?.customDomain || !studio.customDomainVerifyToken) {
+      throw new ApiError("Add a domain first", HttpCode.BAD_REQUEST);
+    }
+    const expected = `zuri-verify=${studio.customDomainVerifyToken}`;
+    let found = false;
+    try {
+      const records = await dns.resolveTxt(`_zuri-verify.${studio.customDomain}`);
+      found = records.some((chunks) => chunks.join("").includes(expected));
+    } catch {
+      found = false;
+    }
+    if (!found) {
+      throw new ApiError(
+        "TXT record not found yet. DNS changes can take a few minutes to propagate.",
+        HttpCode.BAD_REQUEST,
+      );
+    }
+    const updated = await this.studio.update({
+      where: { id },
+      data: { customDomainVerified: true },
+      select: {
+        customDomain: true,
+        customDomainVerified: true,
+        customDomainVerifyToken: true,
+      },
+    });
+    forgetStudioDomain(studio.customDomain);
+    return { message: "Domain verified", data: this.domainPayload(updated) };
+  }
+
+  // Public: map a host to a studio slug (for a SPA served from a custom domain).
+  public async resolveByDomain(host: string) {
+    const studio = await resolveStudioByDomain(host);
+    if (!studio) throw new ApiError("No studio for this domain", HttpCode.NOT_FOUND);
+    return { message: "Resolved", data: { slug: studio.slug } };
+  }
+
+  // ---- Admin: billing (plan / cadence change) --------------------------
+
+  private planCode(plan: string, cadence: string): string {
+    const key = `${plan}_${cadence}` as keyof typeof env.paystack.plans;
+    return env.paystack.plans[key];
+  }
+
+  public async getBilling(studioId: string | null | undefined) {
+    const id = this.requireStudioId(studioId);
+    const s = await this.studio.findUnique({
+      where: { id },
+      select: {
+        plan: true,
+        billingCadence: true,
+        subscriptionStatus: true,
+        currentPeriodEnd: true,
+      },
+    });
+    if (!s) throw new ApiError("Studio not found", HttpCode.NOT_FOUND);
+    return {
+      message: "Billing",
+      data: {
+        plan: s.plan,
+        cadence: s.billingCadence,
+        subscriptionStatus: s.subscriptionStatus,
+        currentPeriodEnd: s.currentPeriodEnd,
+      },
+    };
+  }
+
+  // Start a plan/cadence change: initialize a new subscription for the target
+  // plan. On successful payment the frontend calls applyBillingChange().
+  public async startBillingChange(
+    studioId: string | null | undefined,
+    plan: string,
+    cadence: string,
+  ) {
+    const id = this.requireStudioId(studioId);
+    if (!["STANDARD", "PREMIUM"].includes(plan)) {
+      throw new ApiError("Invalid plan", HttpCode.BAD_REQUEST);
+    }
+    if (!["MONTHLY", "YEARLY"].includes(cadence)) {
+      throw new ApiError("Invalid cadence", HttpCode.BAD_REQUEST);
+    }
+    const studio = await this.studio.findUnique({
+      where: { id },
+      select: { plan: true, billingCadence: true, ownerUserId: true },
+    });
+    if (!studio) throw new ApiError("Studio not found", HttpCode.NOT_FOUND);
+    if (studio.plan === plan && studio.billingCadence === cadence) {
+      throw new ApiError("You're already on this plan", HttpCode.BAD_REQUEST);
+    }
+    const owner = studio.ownerUserId
+      ? await this.user.findUnique({
+          where: { id: studio.ownerUserId },
+          select: { email: true },
+        })
+      : null;
+    if (!owner?.email) {
+      throw new ApiError("Studio owner email is missing", HttpCode.BAD_REQUEST);
+    }
+    const code = this.planCode(plan, cadence);
+    if (!code) {
+      throw new ApiError("Billing is not configured for that plan", HttpCode.BAD_GATEWAY);
+    }
+    const reference = `ZURI-BILLING-${randomUUID()}`;
+    const init = await paystack.initializeSubscription({
+      email: owner.email,
+      planCode: code,
+      reference,
+      callbackUrl: `${env.clientUrl}/admin/billing`,
+      metadata: { kind: "billing", studioId: id, plan, cadence },
+    });
+    return {
+      message: "Plan change started",
+      data: {
+        reference,
+        accessCode: init.access_code,
+        publicKey: env.paystack.publicKey,
+      },
+    };
+  }
+
+  // Apply the change after the new subscription's first payment succeeds:
+  // switch plan + feature flags, and cancel the old subscription.
+  public async applyBillingChange(
+    studioId: string | null | undefined,
+    reference: string,
+    plan: string,
+    cadence: string,
+  ) {
+    const id = this.requireStudioId(studioId);
+    if (!reference.startsWith("ZURI-BILLING-")) {
+      throw new ApiError("Invalid reference", HttpCode.BAD_REQUEST);
+    }
+    let paid = false;
+    try {
+      const data = await paystack.verify(reference);
+      paid = data.status === "success";
+    } catch {
+      paid = false;
+    }
+    if (!paid) throw new ApiError("Payment not confirmed", HttpCode.BAD_REQUEST);
+    if (!["STANDARD", "PREMIUM"].includes(plan)) {
+      throw new ApiError("Invalid plan", HttpCode.BAD_REQUEST);
+    }
+    const targetCadence = cadence === "YEARLY" ? "YEARLY" : "MONTHLY";
+
+    const studio = await this.studio.findUnique({ where: { id } });
+    if (!studio) throw new ApiError("Studio not found", HttpCode.NOT_FOUND);
+
+    // Cancel the previous subscription so it doesn't keep billing (best-effort).
+    if (studio.subscriptionCode) {
+      try {
+        const sub = await paystack.getSubscription(studio.subscriptionCode);
+        await paystack.disableSubscription({
+          code: studio.subscriptionCode,
+          token: sub.email_token,
+        });
+      } catch (error) {
+        console.error("Failed to disable old subscription:", error);
+      }
+    }
+
+    await this.studio.update({
+      where: { id },
+      data: {
+        plan: plan as "STANDARD" | "PREMIUM",
+        billingCadence: targetCadence,
+        subscriptionStatus: "active",
+      },
+    });
+    const flags = planFlags(plan as "STANDARD" | "PREMIUM");
+    await this.studioSettings.upsert({
+      where: { studioId: id },
+      update: flags,
+      create: { studioId: id, ...flags },
+    });
+    return this.getBilling(id);
+  }
+
+  // ---- Admin: loyalty cap ----------------------------------------------
+
+  public async getLoyalty(studioId: string | null | undefined) {
+    const id = this.requireStudioId(studioId);
+    const settings = await this.studioSettings.upsert({
+      where: { studioId: id },
+      update: {},
+      create: { studioId: id },
+    });
+    return {
+      message: "Loyalty settings",
+      data: { loyaltyCapPercent: settings.loyaltyCapPercent },
+    };
+  }
+
+  public async updateLoyalty(
+    studioId: string | null | undefined,
+    input: { loyaltyCapPercent?: unknown },
+  ) {
+    const id = this.requireStudioId(studioId);
+    const pct = Math.round(Number(input.loyaltyCapPercent));
+    if (!Number.isFinite(pct) || pct < 0 || pct > 100) {
+      throw new ApiError(
+        "Loyalty cap must be between 0 and 100",
+        HttpCode.BAD_REQUEST,
+      );
+    }
+    await this.studioSettings.upsert({
+      where: { studioId: id },
+      update: { loyaltyCapPercent: pct },
+      create: { studioId: id, loyaltyCapPercent: pct },
+    });
+    return this.getLoyalty(id);
   }
 
   // ---- Admin: content ---------------------------------------------------

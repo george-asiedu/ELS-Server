@@ -79,6 +79,25 @@ enum PromoPlacement {
   BOTH
 }
 
+// Subscription plan a studio is on. Premium = Standard + the online shop.
+enum StudioPlan {
+  STANDARD
+  PREMIUM
+}
+
+enum BillingCadence {
+  MONTHLY
+  YEARLY
+}
+
+// A paid self-serve signup, held until Paystack confirms the first payment,
+// then turned into a real Studio.
+enum SignupStatus {
+  PENDING
+  PROVISIONED
+  FAILED
+}
+
 // ------------------- Multi-tenant platform -------------------
 // A Studio is a tenant. Every customer-facing model carries a `studioId`
 // discriminator (a plain indexed scalar, not a Prisma relation, to keep this
@@ -90,10 +109,13 @@ model Studio {
   name         String
   // URL slug that maps a subdomain to this studio, e.g. "els" -> els.app.com
   slug         String       @unique
-  // Optional vanity domain pointed at the platform (added in a later phase).
-  // Not @unique: Mongo rejects multiple null docs on a unique index, and most
-  // studios have no custom domain. Uniqueness is enforced in provisioning code.
-  customDomain String?
+  // Optional vanity domain pointed at the platform. Not @unique: Mongo rejects
+  // multiple null docs on a unique index, and most studios have no custom
+  // domain. Uniqueness is enforced in code. Only routes traffic once verified
+  // via a DNS TXT record.
+  customDomain            String?
+  customDomainVerifyToken String?
+  customDomainVerified    Boolean @default(false)
   status       StudioStatus @default(ACTIVE)
   // The studio's primary ADMIN user (its owner).
   ownerUserId  String?      @db.ObjectId
@@ -108,6 +130,14 @@ model Studio {
   payoutProvider         String? // e.g. "MTN", "VOD"/"TGO" bank code label
   payoutAccountNumber    String? // MoMo number
   payoutAccountName      String?
+
+  // Subscription / billing (platform revenue; the studio's plan gates features).
+  plan                   StudioPlan     @default(STANDARD)
+  billingCadence         BillingCadence @default(MONTHLY)
+  paystackCustomerCode   String?
+  subscriptionCode       String?
+  subscriptionStatus     String? // active | non-renewing | cancelled | past_due
+  currentPeriodEnd       DateTime?
 
   branding        StudioBranding?
   content         StudioContent?
@@ -170,6 +200,9 @@ model StudioSettings {
   onlinePayments    Boolean @default(false)
   productsInBooking Boolean @default(false)
 
+  // Max share of a booking a customer can pay with loyalty points (percent).
+  loyaltyCapPercent Int @default(30)
+
   studio Studio @relation(fields: [studioId], references: [id], onDelete: Cascade)
 
   createdAt DateTime @default(now())
@@ -214,6 +247,48 @@ model AuditLog {
   @@index([createdAt])
   @@index([studioId])
   @@map("audit_logs")
+}
+
+// A testimonial a studio submits about the platform, shown on the marketing
+// landing page after the super admin approves it. Not tenant-scoped.
+model PlatformReview {
+  id              String   @id @default(auto()) @map("_id") @db.ObjectId
+  studioId        String?  @db.ObjectId
+  authorName      String
+  authorRole      String?
+  content         String
+  rating          Int      @default(5)
+  approved        Boolean  @default(false)
+  createdByUserId String?  @db.ObjectId
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([approved])
+  @@index([studioId])
+  @@map("platform_reviews")
+}
+
+// A paid self-serve studio signup, held until Paystack confirms payment, then
+// provisioned into a real Studio. Not tenant-scoped (platform-level).
+model StudioSignup {
+  id               String         @id @default(auto()) @map("_id") @db.ObjectId
+  name             String
+  slug             String
+  ownerEmail       String
+  ownerPasswordHash String
+  ownerFullName    String?
+  plan             StudioPlan     @default(STANDARD)
+  cadence          BillingCadence @default(MONTHLY)
+  reference        String         @unique
+  status           SignupStatus   @default(PENDING)
+  studioId         String?        @db.ObjectId
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status])
+  @@map("studio_signups")
 }
 
 // A studio's scrolling promo banner (advertised on the shop and/or booking

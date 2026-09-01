@@ -34,3 +34,25 @@ export const resolveStudioBySlug = async (
 
 // Invalidate a cached slug (e.g. after a studio is renamed or suspended).
 export const forgetStudioSlug = (slug: string) => cache.delete(slug);
+
+// ---- Custom domain resolution (verified domains only) ----
+const domainCache = new Map<string, { value: ResolvedStudio | null; at: number }>();
+
+export const resolveStudioByDomain = async (
+  host: string,
+): Promise<ResolvedStudio | null> => {
+  const domain = host.trim().toLowerCase();
+  const hit = domainCache.get(domain);
+  if (hit && Date.now() - hit.at < TTL_MS) return hit.value;
+
+  const studio = await client.studio.findFirst({
+    where: { customDomain: domain, customDomainVerified: true },
+    select: { id: true, slug: true, status: true },
+  });
+  const value = (studio as ResolvedStudio | null) ?? null;
+  if (value) domainCache.set(domain, { value, at: Date.now() });
+  return value;
+};
+
+export const forgetStudioDomain = (domain: string) =>
+  domainCache.delete(domain.trim().toLowerCase());

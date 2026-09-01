@@ -89,6 +89,28 @@ export const paystack = {
     );
   },
 
+  // Start a subscription payment: initializing a transaction with a `plan` code
+  // makes Paystack create the customer + subscription and recur automatically on
+  // the first successful charge. No amount — Paystack takes it from the plan.
+  async initializeSubscription(args: {
+    email: string;
+    planCode: string;
+    reference: string;
+    callbackUrl: string;
+    metadata?: Record<string, unknown>;
+  }): Promise<InitializeResult> {
+    return call<InitializeResult>("/transaction/initialize", {
+      method: "POST",
+      body: JSON.stringify({
+        email: args.email,
+        plan: args.planCode,
+        reference: args.reference,
+        callback_url: args.callbackUrl,
+        metadata: args.metadata ?? {},
+      }),
+    });
+  },
+
   // ---- Mobile money direct charge (Ghana): prompts the user's phone ----
 
   async chargeMobileMoney(args: {
@@ -121,6 +143,25 @@ export const paystack = {
     return call<PaystackChargeData>("/charge/submit_otp", {
       method: "POST",
       body: JSON.stringify({ reference: args.reference, otp: args.otp }),
+    });
+  },
+
+  async getSubscription(
+    code: string,
+  ): Promise<{ subscription_code: string; email_token: string; status: string }> {
+    return call<{ subscription_code: string; email_token: string; status: string }>(
+      `/subscription/${encodeURIComponent(code)}`,
+    );
+  },
+
+  // Cancel a subscription (used when a studio switches plan/cadence).
+  async disableSubscription(args: {
+    code: string;
+    token: string;
+  }): Promise<unknown> {
+    return call<unknown>("/subscription/disable", {
+      method: "POST",
+      body: JSON.stringify({ code: args.code, token: args.token }),
     });
   },
 

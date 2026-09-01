@@ -19,6 +19,8 @@ import platformRoutes from "../platform/routes";
 import studioRoutes from "../studio/routes";
 import featureRequestRoutes from "../featureRequest/routes";
 import promoRoutes from "../promo/routes";
+import onboardingRoutes from "../onboarding/routes";
+import platformReviewRoutes from "../platformReview/routes";
 
 const router: Router = Router();
 
@@ -47,5 +49,7 @@ router.use("/orders", orderRoutes);
 router.use("/commerce", commerceRoutes);
 router.use("/feature-requests", featureRequestRoutes);
 router.use("/promo-banners", promoRoutes);
+router.use("/onboarding", onboardingRoutes);
+router.use("/platform-reviews", platformReviewRoutes);
 
 export default router;

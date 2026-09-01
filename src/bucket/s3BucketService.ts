@@ -8,6 +8,7 @@ import { ApiError } from '../middleware/apiError';
 import path from 'path';
 import { v4 as uuidv4 } from 'uuid';
 import { processImage, ImageProcessOptions } from './imageProcessor';
+import { getTenantContext } from '../tenant/context';
 
 export interface SafeFile {
   originalname: string;
@@ -44,7 +45,10 @@ export class S3BucketService {
     }
 
     const cleanFileName = processed.originalname.replace(/\s+/g, '-');
-    const key = `uploads/${uuidv4()}-${cleanFileName}`;
+    // Group uploads per studio so each tenant's media is separable in S3.
+    const studioId = getTenantContext()?.studioId;
+    const prefix = studioId ? `studios/${studioId}` : 'platform';
+    const key = `${prefix}/${uuidv4()}-${cleanFileName}`;
 
     const params = {
       Bucket: bucketName,

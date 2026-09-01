@@ -54,7 +54,6 @@ export class OrderService extends Connection {
   private email = new EmailService();
 
   private static readonly POINTS_PER_GHS = 10; // 10 pts = GHS 1
-  private static readonly MAX_DISCOUNT_RATIO = 0.3; // ≤30% of subtotal
   private static readonly REFERRAL_ORDER_BONUS = 50;
 
   private async settings() {
@@ -155,10 +154,9 @@ export class OrderService extends Connection {
       });
       const available = balance?.points ?? 0;
       if (available > 0) {
+        const capRatio = await this.loyaltyCapRatio();
         const maxByCap = Math.floor(
-          subtotal *
-            OrderService.MAX_DISCOUNT_RATIO *
-            OrderService.POINTS_PER_GHS,
+          subtotal * capRatio * OrderService.POINTS_PER_GHS,
         );
         pointsRedeemed = Math.min(available, maxByCap);
         discountAmount = pointsRedeemed / OrderService.POINTS_PER_GHS;

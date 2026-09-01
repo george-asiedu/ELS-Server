@@ -37,6 +37,14 @@ const uploadLogo = (req: Request, res: Response, next: NextFunction) => {
 // Public: the current studio's branding/content/feature config for the SPA.
 router.get("/", StudioController.config);
 
+// Public: resolve a custom domain (host) to a studio slug (SPA bootstrap).
+router.get("/resolve-domain", StudioController.resolveDomain);
+
+// Admin: custom domain management.
+router.get("/domain", authenticate, requireAdmin, StudioController.getDomain);
+router.put("/domain", authenticate, requireAdmin, StudioController.setDomain);
+router.post("/domain/verify", authenticate, requireAdmin, StudioController.verifyDomain);
+
 // Admin: the studio owner edits their own branding + landing content.
 router.get("/branding", authenticate, requireAdmin, StudioController.getBranding);
 router.put(
@@ -51,6 +59,13 @@ router.get("/content", authenticate, requireAdmin, StudioController.getContent);
 router.put("/content", authenticate, requireAdmin, StudioController.updateContent);
 
 // Admin: payout account (Paystack subaccount) for split settlement.
+// Billing: view + change plan/cadence.
+router.get("/billing", authenticate, requireAdmin, StudioController.getBilling);
+router.post("/billing/change", authenticate, requireAdmin, StudioController.startBillingChange);
+router.post("/billing/apply", authenticate, requireAdmin, StudioController.applyBillingChange);
+
+router.get("/loyalty", authenticate, requireAdmin, StudioController.getLoyalty);
+router.put("/loyalty", authenticate, requireAdmin, StudioController.updateLoyalty);
 router.get("/payout", authenticate, requireAdmin, StudioController.getPayout);
 router.get("/payout/resolve", authenticate, requireAdmin, StudioController.resolvePayout);
 router.put("/payout", authenticate, requireAdmin, StudioController.updatePayout);
