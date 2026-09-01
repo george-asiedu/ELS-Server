@@ -20,6 +20,19 @@ export class OnboardingController {
     }
   };
 
+  public static config = async (
+    _req: Request,
+    res: Response,
+    next: NextFunction,
+  ) => {
+    try {
+      const result = await onboardingService.config();
+      return res.status(200).json(result);
+    } catch (error) {
+      return next(error);
+    }
+  };
+
   public static start = async (
     req: Request,
     res: Response,
