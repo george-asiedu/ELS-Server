@@ -14,6 +14,8 @@ router.use(authenticate, requireSuperAdmin);
 
 router.get("/me", PlatformController.me);
 router.get("/analytics", PlatformController.analytics);
+router.get("/billing-config", PlatformController.getBillingConfig);
+router.patch("/billing-config", PlatformController.updateBillingConfig);
 
 router.get("/studios", PlatformController.listStudios);
 router.post("/studios", PlatformController.createStudio);
