@@ -8,6 +8,7 @@ import { EmailService } from "../email/emailService";
 import { OrderService } from "../order/orderService";
 import { OnboardingService, isSignupReference } from "../onboarding/onboardingService";
 import { forgetStudioSlug } from "../tenant/studioResolver";
+import { AuditService } from "../audit/auditService";
 
 type PaymentType = "FULL" | "PARTIAL";
 
@@ -36,6 +37,7 @@ export class PaymentService extends Connection {
   private email = new EmailService();
   private orders = new OrderService();
   private onboarding = new OnboardingService();
+  private audit = new AuditService();
 
   private async settings() {
     const existing = await this.paymentSettings.findFirst();
@@ -280,18 +282,71 @@ export class PaymentService extends Connection {
         include: appointmentInclude,
       });
       await this.sendReceipt(updated);
+      await this.auditPayment("payment.booking.succeeded", updated, data);
       return updated;
     }
 
     if (!succeeded && payment.status === "PENDING") {
-      return this.payment.update({
+      const failed = await this.payment.update({
         where: { id: payment.id },
         data: { status: "FAILED" },
         include: appointmentInclude,
       });
+      await this.auditPayment("payment.booking.failed", failed, data);
+      return failed;
     }
 
     return payment;
+  }
+
+  // Append a per-studio audit entry for a booking payment. Best-effort; the
+  // actor is the customer who paid (falling back to "system" for webhooks).
+  private async auditPayment(
+    action: string,
+    payment: {
+      id: string;
+      studioId: string | null;
+      amount: number;
+      totalAmount: number;
+      type: string;
+      currency?: string;
+      reference: string | null;
+      channel: string | null;
+      transactionId: string | null;
+      appointmentId?: string;
+      appointment: {
+        email: string | null;
+        fullName: string;
+        service: { name: string } | null;
+      } | null;
+    },
+    data: PaystackVerifyData,
+  ) {
+    await this.audit.record({
+      actor: {
+        email: payment.appointment?.email ?? "system",
+        role: "customer",
+      },
+      action,
+      targetType: "Payment",
+      targetId: payment.id,
+      studioId: payment.studioId ?? undefined,
+      metadata: {
+        kind: "booking",
+        reference: payment.reference,
+        transactionId: payment.transactionId ?? String(data.id),
+        amount: payment.amount,
+        totalAmount: payment.totalAmount,
+        currency: payment.currency ?? "GHS",
+        paymentType: payment.type,
+        channel: payment.channel ?? data.channel ?? null,
+        status: data.status,
+        appointmentId: payment.appointmentId,
+        customerName: payment.appointment?.fullName ?? null,
+        customerEmail: payment.appointment?.email ?? null,
+        serviceName: payment.appointment?.service?.name ?? null,
+      },
+    });
   }
 
   private async sendReceipt(payment: PaymentWithAppointment) {
