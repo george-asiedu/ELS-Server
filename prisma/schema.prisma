@@ -90,6 +90,11 @@ enum BillingCadence {
   YEARLY
 }
 
+enum BillingMode {
+  SUBSCRIPTION
+  REVENUE_SHARE
+}
+
 // A paid self-serve signup, held until Paystack confirms the first payment,
 // then turned into a real Studio.
 enum SignupStatus {
@@ -127,16 +132,22 @@ model Studio {
   platformFeePercent     Float   @default(0)
   // Mobile-money settlement account the subaccount pays out to (display only;
   // the authoritative copy lives on Paystack).
-  payoutProvider         String? // e.g. "MTN", "VOD"/"TGO" bank code label
-  payoutAccountNumber    String? // MoMo number
+  // Settlement account type: "momo" (mobile money) or "bank".
+  payoutType             String? @default("momo")
+  payoutProvider         String? // Paystack bank/momo settlement code
+  payoutAccountNumber    String? // MoMo number or bank account number
   payoutAccountName      String?
 
   // Subscription / billing (platform revenue; the studio's plan gates features).
   plan                   StudioPlan     @default(STANDARD)
   billingCadence         BillingCadence @default(MONTHLY)
+  // How the platform earns from this studio: a recurring plan fee
+  // (SUBSCRIPTION) or a percentage cut of each customer transaction
+  // (REVENUE_SHARE, where the plan sets the commission %). Chosen at signup.
+  billingMode            BillingMode    @default(SUBSCRIPTION)
   paystackCustomerCode   String?
   subscriptionCode       String?
-  subscriptionStatus     String? // active | non-renewing | cancelled | past_due
+  subscriptionStatus     String? // active | lapsed | revenue_share | ...
   currentPeriodEnd       DateTime?
 
   branding        StudioBranding?
@@ -280,6 +291,7 @@ model StudioSignup {
   ownerFullName    String?
   plan             StudioPlan     @default(STANDARD)
   cadence          BillingCadence @default(MONTHLY)
+  billingMode      BillingMode    @default(SUBSCRIPTION)
   reference        String         @unique
   status           SignupStatus   @default(PENDING)
   studioId         String?        @db.ObjectId
@@ -289,6 +301,27 @@ model StudioSignup {
 
   @@index([status])
   @@map("studio_signups")
+}
+
+// Singleton platform-wide billing config, editable by the super admin. Holds
+// the revenue-share commission % and one-time setup fee for each plan tier.
+model PlatformConfig {
+  id                        String @id @default(auto()) @map("_id") @db.ObjectId
+  // Master switch: when off, onboarding only offers subscription billing and the
+  // revenue-share (% cut) option is hidden entirely. Subscription is always the
+  // default; the super admin opts in to revenue-share.
+  revenueShareEnabled       Boolean @default(false)
+  // Commission the platform takes per customer transaction in REVENUE_SHARE.
+  commissionStandardPercent Float  @default(5)
+  commissionPremiumPercent  Float  @default(8)
+  // One-time activation fee (GHS) charged at signup for REVENUE_SHARE studios.
+  setupFeeStandard          Float  @default(0)
+  setupFeePremium           Float  @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("platform_config")
 }
 
 // A studio's scrolling promo banner (advertised on the shop and/or booking

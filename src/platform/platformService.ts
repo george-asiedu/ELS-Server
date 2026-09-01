@@ -56,6 +56,22 @@ export const planFlags = (plan: Plan) => ({
   gallery: true,
 });
 
+export interface BillingConfig {
+  revenueShareEnabled: boolean;
+  commissionStandardPercent: number;
+  commissionPremiumPercent: number;
+  setupFeeStandard: number;
+  setupFeePremium: number;
+}
+
+// Commission % the platform takes per transaction for a plan (REVENUE_SHARE).
+export const commissionFor = (plan: Plan, cfg: BillingConfig): number =>
+  plan === "PREMIUM" ? cfg.commissionPremiumPercent : cfg.commissionStandardPercent;
+
+// One-time setup fee (GHS) charged at signup for a plan (REVENUE_SHARE).
+export const setupFeeFor = (plan: Plan, cfg: BillingConfig): number =>
+  plan === "PREMIUM" ? cfg.setupFeePremium : cfg.setupFeeStandard;
+
 export interface StudioSettingsInput {
   commerce?: boolean;
   loyalty?: boolean;
@@ -86,6 +102,10 @@ export interface ProvisionCoreInput {
   customDomain?: string;
   plan: Plan;
   cadence?: "MONTHLY" | "YEARLY";
+  billingMode?: "SUBSCRIPTION" | "REVENUE_SHARE";
+  // Platform's per-transaction cut (subaccount percentage_charge). Set for
+  // REVENUE_SHARE studios from the plan's configured commission; 0 otherwise.
+  platformFeePercent?: number;
   subscription?: {
     customerCode?: string | null;
     subscriptionCode?: string | null;
@@ -105,6 +125,64 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
  * studioId must be set explicitly on the documents we create.
  */
 export class PlatformService extends Connection {
+  // ---- Platform billing config (singleton) ------------------------------
+
+  // Read the singleton config, creating it with defaults on first access.
+  public async getBillingConfig(): Promise<BillingConfig> {
+    const existing = await this.platformConfig.findFirst();
+    const row = existing ?? (await this.platformConfig.create({ data: {} }));
+    return {
+      revenueShareEnabled: row.revenueShareEnabled,
+      commissionStandardPercent: row.commissionStandardPercent,
+      commissionPremiumPercent: row.commissionPremiumPercent,
+      setupFeeStandard: row.setupFeeStandard,
+      setupFeePremium: row.setupFeePremium,
+    };
+  }
+
+  public async updateBillingConfig(input: Partial<BillingConfig>) {
+    const existing = await this.platformConfig.findFirst();
+    const id = existing?.id ?? (await this.platformConfig.create({ data: {} })).id;
+    const clampPct = (n: unknown, fallback: number) => {
+      const v = Number(n);
+      return Number.isFinite(v) ? Math.min(100, Math.max(0, v)) : fallback;
+    };
+    const nonNeg = (n: unknown, fallback: number) => {
+      const v = Number(n);
+      return Number.isFinite(v) ? Math.max(0, v) : fallback;
+    };
+    const current = await this.getBillingConfig();
+    const row = await this.platformConfig.update({
+      where: { id },
+      data: {
+        revenueShareEnabled:
+          typeof input.revenueShareEnabled === "boolean"
+            ? input.revenueShareEnabled
+            : current.revenueShareEnabled,
+        commissionStandardPercent: clampPct(
+          input.commissionStandardPercent,
+          current.commissionStandardPercent,
+        ),
+        commissionPremiumPercent: clampPct(
+          input.commissionPremiumPercent,
+          current.commissionPremiumPercent,
+        ),
+        setupFeeStandard: nonNeg(input.setupFeeStandard, current.setupFeeStandard),
+        setupFeePremium: nonNeg(input.setupFeePremium, current.setupFeePremium),
+      },
+    });
+    return {
+      message: "Billing config updated",
+      data: {
+        revenueShareEnabled: row.revenueShareEnabled,
+        commissionStandardPercent: row.commissionStandardPercent,
+        commissionPremiumPercent: row.commissionPremiumPercent,
+        setupFeeStandard: row.setupFeeStandard,
+        setupFeePremium: row.setupFeePremium,
+      },
+    };
+  }
+
   // ---- Listing / detail -------------------------------------------------
 
   public async listStudios() {
@@ -315,6 +393,10 @@ export class PlatformService extends Connection {
         status: "ACTIVE",
         plan: input.plan,
         ...(input.cadence ? { billingCadence: input.cadence } : {}),
+        ...(input.billingMode ? { billingMode: input.billingMode } : {}),
+        ...(input.platformFeePercent !== undefined
+          ? { platformFeePercent: input.platformFeePercent }
+          : {}),
         ...(sub?.customerCode ? { paystackCustomerCode: sub.customerCode } : {}),
         ...(sub?.subscriptionCode ? { subscriptionCode: sub.subscriptionCode } : {}),
         ...(sub?.status ? { subscriptionStatus: sub.status } : {}),

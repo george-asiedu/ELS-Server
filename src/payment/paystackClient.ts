@@ -173,6 +173,12 @@ export const paystack = {
     );
   },
 
+  // Regular banks for GHS settlement (excludes mobile money).
+  async listBanks(): Promise<PaystackBank[]> {
+    const banks = await call<PaystackBank[]>("/bank?currency=GHS");
+    return banks.filter((b) => b.type !== "mobile_money");
+  },
+
   // Resolve an account number to its registered name (bank or mobile money).
   async resolveAccount(args: {
     accountNumber: string;

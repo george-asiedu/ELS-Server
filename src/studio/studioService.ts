@@ -9,6 +9,13 @@ import { randomUUID } from "crypto";
 import { promises as dns } from "dns";
 import { planFlags } from "../platform/platformService";
 import {
+  Plan,
+  Cadence,
+  pricePesewas,
+  extendPeriod,
+  isLapsed,
+} from "../billing/billingPlans";
+import {
   resolveStudioByDomain,
   forgetStudioDomain,
 } from "../tenant/studioResolver";
@@ -290,11 +297,27 @@ export class StudioService extends Connection {
     return { message: "Resolved", data: { slug: studio.slug } };
   }
 
-  // ---- Admin: billing (plan / cadence change) --------------------------
+  // ---- Admin: billing (one-time Mobile Money charge + manual renewal) ----
+  //
+  // Paystack subscriptions can only auto-charge a card. Ghana studios pay by
+  // Mobile Money, which can't be tokenized for recurring billing, so a studio
+  // pays for a period up front and renews manually before it lapses.
 
-  private planCode(plan: string, cadence: string): string {
-    const key = `${plan}_${cadence}` as keyof typeof env.paystack.plans;
-    return env.paystack.plans[key];
+  private async ownerEmail(studioId: string): Promise<string> {
+    const studio = await this.studio.findUnique({
+      where: { id: studioId },
+      select: { ownerUserId: true },
+    });
+    const owner = studio?.ownerUserId
+      ? await this.user.findUnique({
+          where: { id: studio.ownerUserId },
+          select: { email: true },
+        })
+      : null;
+    if (!owner?.email) {
+      throw new ApiError("Studio owner email is missing", HttpCode.BAD_REQUEST);
+    }
+    return owner.email;
   }
 
   public async getBilling(studioId: string | null | undefined) {
@@ -304,24 +327,39 @@ export class StudioService extends Connection {
       select: {
         plan: true,
         billingCadence: true,
+        billingMode: true,
+        platformFeePercent: true,
         subscriptionStatus: true,
         currentPeriodEnd: true,
       },
     });
     if (!s) throw new ApiError("Studio not found", HttpCode.NOT_FOUND);
+    // Revenue-share studios have no billing period, so they never "lapse" —
+    // the platform earns its cut per transaction instead.
+    const revenueShare = s.billingMode === "REVENUE_SHARE";
+    const lapsed = revenueShare ? false : isLapsed(s.currentPeriodEnd);
     return {
       message: "Billing",
       data: {
         plan: s.plan,
         cadence: s.billingCadence,
-        subscriptionStatus: s.subscriptionStatus,
+        billingMode: s.billingMode,
+        commissionPercent: revenueShare ? s.platformFeePercent : 0,
+        // Derived from the period end so the UI always reflects reality even if
+        // no webhook fired: "active" while paid, "lapsed" once the period ends.
+        subscriptionStatus: revenueShare
+          ? "revenue_share"
+          : lapsed
+            ? "lapsed"
+            : "active",
         currentPeriodEnd: s.currentPeriodEnd,
+        lapsed,
       },
     };
   }
 
-  // Start a plan/cadence change: initialize a new subscription for the target
-  // plan. On successful payment the frontend calls applyBillingChange().
+  // Start a plan/cadence change: charge the new plan's price once. On success
+  // the frontend calls applyBillingChange().
   public async startBillingChange(
     studioId: string | null | undefined,
     plan: string,
@@ -336,29 +374,27 @@ export class StudioService extends Connection {
     }
     const studio = await this.studio.findUnique({
       where: { id },
-      select: { plan: true, billingCadence: true, ownerUserId: true },
+      select: { plan: true, billingCadence: true, billingMode: true },
     });
     if (!studio) throw new ApiError("Studio not found", HttpCode.NOT_FOUND);
+    if (studio.billingMode === "REVENUE_SHARE") {
+      throw new ApiError(
+        "Your account bills per transaction; plan changes are handled by the Zuri team.",
+        HttpCode.BAD_REQUEST,
+      );
+    }
     if (studio.plan === plan && studio.billingCadence === cadence) {
       throw new ApiError("You're already on this plan", HttpCode.BAD_REQUEST);
     }
-    const owner = studio.ownerUserId
-      ? await this.user.findUnique({
-          where: { id: studio.ownerUserId },
-          select: { email: true },
-        })
-      : null;
-    if (!owner?.email) {
-      throw new ApiError("Studio owner email is missing", HttpCode.BAD_REQUEST);
-    }
-    const code = this.planCode(plan, cadence);
-    if (!code) {
+    const email = await this.ownerEmail(id);
+    const amountPesewas = pricePesewas(plan as Plan, cadence as Cadence);
+    if (!amountPesewas) {
       throw new ApiError("Billing is not configured for that plan", HttpCode.BAD_GATEWAY);
     }
     const reference = `ZURI-BILLING-${randomUUID()}`;
-    const init = await paystack.initializeSubscription({
-      email: owner.email,
-      planCode: code,
+    const init = await paystack.initialize({
+      email,
+      amountPesewas,
       reference,
       callbackUrl: `${env.clientUrl}/admin/billing`,
       metadata: { kind: "billing", studioId: id, plan, cadence },
@@ -373,8 +409,8 @@ export class StudioService extends Connection {
     };
   }
 
-  // Apply the change after the new subscription's first payment succeeds:
-  // switch plan + feature flags, and cancel the old subscription.
+  // Apply the change after payment succeeds: switch plan + feature flags and
+  // start a fresh billing period.
   public async applyBillingChange(
     studioId: string | null | undefined,
     reference: string,
@@ -385,6 +421,110 @@ export class StudioService extends Connection {
     if (!reference.startsWith("ZURI-BILLING-")) {
       throw new ApiError("Invalid reference", HttpCode.BAD_REQUEST);
     }
+    if (!["STANDARD", "PREMIUM"].includes(plan)) {
+      throw new ApiError("Invalid plan", HttpCode.BAD_REQUEST);
+    }
+    const targetCadence: Cadence = cadence === "YEARLY" ? "YEARLY" : "MONTHLY";
+    await this.assertPaid(reference);
+
+    const studio = await this.studio.findUnique({ where: { id } });
+    if (!studio) throw new ApiError("Studio not found", HttpCode.NOT_FOUND);
+
+    // A plan change starts a fresh period from now.
+    await this.studio.update({
+      where: { id },
+      data: {
+        plan: plan as Plan,
+        billingCadence: targetCadence,
+        subscriptionStatus: "active",
+        currentPeriodEnd: extendPeriod(null, targetCadence),
+      },
+    });
+    const flags = planFlags(plan as Plan);
+    await this.studioSettings.upsert({
+      where: { studioId: id },
+      update: flags,
+      create: { studioId: id, ...flags },
+    });
+    return this.getBilling(id);
+  }
+
+  // Renew the current plan for another period (manual, before/after lapse).
+  public async startRenewal(studioId: string | null | undefined) {
+    const id = this.requireStudioId(studioId);
+    const studio = await this.studio.findUnique({
+      where: { id },
+      select: { plan: true, billingCadence: true, billingMode: true },
+    });
+    if (!studio) throw new ApiError("Studio not found", HttpCode.NOT_FOUND);
+    if (studio.billingMode === "REVENUE_SHARE") {
+      throw new ApiError(
+        "Your account bills per transaction — there's nothing to renew.",
+        HttpCode.BAD_REQUEST,
+      );
+    }
+    const email = await this.ownerEmail(id);
+    const amountPesewas = pricePesewas(
+      studio.plan as Plan,
+      studio.billingCadence as Cadence,
+    );
+    if (!amountPesewas) {
+      throw new ApiError("Billing is not configured for that plan", HttpCode.BAD_GATEWAY);
+    }
+    const reference = `ZURI-RENEW-${randomUUID()}`;
+    const init = await paystack.initialize({
+      email,
+      amountPesewas,
+      reference,
+      callbackUrl: `${env.clientUrl}/admin/billing`,
+      metadata: {
+        kind: "renewal",
+        studioId: id,
+        plan: studio.plan,
+        cadence: studio.billingCadence,
+      },
+    });
+    return {
+      message: "Renewal started",
+      data: {
+        reference,
+        accessCode: init.access_code,
+        publicKey: env.paystack.publicKey,
+      },
+    };
+  }
+
+  // Apply a renewal after payment succeeds: extend the period (keeping any
+  // unused days) and re-activate the studio if it had been suspended.
+  public async applyRenewal(
+    studioId: string | null | undefined,
+    reference: string,
+  ) {
+    const id = this.requireStudioId(studioId);
+    if (!reference.startsWith("ZURI-RENEW-")) {
+      throw new ApiError("Invalid reference", HttpCode.BAD_REQUEST);
+    }
+    await this.assertPaid(reference);
+    const studio = await this.studio.findUnique({
+      where: { id },
+      select: { billingCadence: true, currentPeriodEnd: true, status: true },
+    });
+    if (!studio) throw new ApiError("Studio not found", HttpCode.NOT_FOUND);
+    await this.studio.update({
+      where: { id },
+      data: {
+        subscriptionStatus: "active",
+        currentPeriodEnd: extendPeriod(
+          studio.currentPeriodEnd,
+          studio.billingCadence as Cadence,
+        ),
+        ...(studio.status === "SUSPENDED" ? { status: "ACTIVE" } : {}),
+      },
+    });
+    return this.getBilling(id);
+  }
+
+  private async assertPaid(reference: string) {
     let paid = false;
     try {
       const data = await paystack.verify(reference);
@@ -393,42 +533,6 @@ export class StudioService extends Connection {
       paid = false;
     }
     if (!paid) throw new ApiError("Payment not confirmed", HttpCode.BAD_REQUEST);
-    if (!["STANDARD", "PREMIUM"].includes(plan)) {
-      throw new ApiError("Invalid plan", HttpCode.BAD_REQUEST);
-    }
-    const targetCadence = cadence === "YEARLY" ? "YEARLY" : "MONTHLY";
-
-    const studio = await this.studio.findUnique({ where: { id } });
-    if (!studio) throw new ApiError("Studio not found", HttpCode.NOT_FOUND);
-
-    // Cancel the previous subscription so it doesn't keep billing (best-effort).
-    if (studio.subscriptionCode) {
-      try {
-        const sub = await paystack.getSubscription(studio.subscriptionCode);
-        await paystack.disableSubscription({
-          code: studio.subscriptionCode,
-          token: sub.email_token,
-        });
-      } catch (error) {
-        console.error("Failed to disable old subscription:", error);
-      }
-    }
-
-    await this.studio.update({
-      where: { id },
-      data: {
-        plan: plan as "STANDARD" | "PREMIUM",
-        billingCadence: targetCadence,
-        subscriptionStatus: "active",
-      },
-    });
-    const flags = planFlags(plan as "STANDARD" | "PREMIUM");
-    await this.studioSettings.upsert({
-      where: { studioId: id },
-      update: flags,
-      create: { studioId: id, ...flags },
-    });
-    return this.getBilling(id);
   }
 
   // ---- Admin: loyalty cap ----------------------------------------------
@@ -487,6 +591,7 @@ export class StudioService extends Connection {
       select: {
         paystackSubaccountCode: true,
         platformFeePercent: true,
+        payoutType: true,
         payoutProvider: true,
         payoutAccountNumber: true,
         payoutAccountName: true,
@@ -494,13 +599,19 @@ export class StudioService extends Connection {
     });
     if (!studio) throw new ApiError("Studio not found", HttpCode.NOT_FOUND);
 
-    // Available mobile-money providers for the settlement dropdown.
+    // Settlement options: mobile-money networks and regular banks. Fetched in
+    // parallel; either may be empty if Paystack is unreachable.
     let providers: { name: string; code: string }[] = [];
-    try {
-      const banks = await paystack.listMobileMoneyBanks();
-      providers = banks.map((b) => ({ name: b.name, code: b.code }));
-    } catch {
-      providers = [];
+    let banks: { name: string; code: string }[] = [];
+    const [momoRes, bankRes] = await Promise.allSettled([
+      paystack.listMobileMoneyBanks(),
+      paystack.listBanks(),
+    ]);
+    if (momoRes.status === "fulfilled") {
+      providers = momoRes.value.map((b) => ({ name: b.name, code: b.code }));
+    }
+    if (bankRes.status === "fulfilled") {
+      banks = bankRes.value.map((b) => ({ name: b.name, code: b.code }));
     }
 
     return {
@@ -508,10 +619,12 @@ export class StudioService extends Connection {
       data: {
         connected: Boolean(studio.paystackSubaccountCode),
         platformFeePercent: studio.platformFeePercent,
+        type: studio.payoutType ?? "momo",
         provider: studio.payoutProvider,
         accountNumber: studio.payoutAccountNumber,
         accountName: studio.payoutAccountName,
         providers,
+        banks,
       },
     };
   }
@@ -526,11 +639,11 @@ export class StudioService extends Connection {
     this.requireStudioId(studioId);
     const number = String(accountNumber ?? "").trim();
     const bankCode = String(provider ?? "").trim();
-    if (!/^\d{9,15}$/.test(number)) {
-      throw new ApiError("Enter a valid mobile-money number", HttpCode.BAD_REQUEST);
+    if (!/^\d{9,20}$/.test(number)) {
+      throw new ApiError("Enter a valid account number", HttpCode.BAD_REQUEST);
     }
     if (!bankCode) {
-      throw new ApiError("A provider is required", HttpCode.BAD_REQUEST);
+      throw new ApiError("Select a provider or bank", HttpCode.BAD_REQUEST);
     }
     try {
       const res = await paystack.resolveAccount({
@@ -550,18 +663,32 @@ export class StudioService extends Connection {
 
   public async updatePayout(
     studioId: string | null | undefined,
-    input: { provider?: unknown; accountNumber?: unknown; accountName?: unknown },
+    input: {
+      type?: unknown;
+      provider?: unknown;
+      accountNumber?: unknown;
+      accountName?: unknown;
+    },
   ) {
     const id = this.requireStudioId(studioId);
-    const provider = String(input.provider ?? "").trim(); // momo bank code
+    const type = String(input.type ?? "momo").trim() === "bank" ? "bank" : "momo";
+    const provider = String(input.provider ?? "").trim(); // Paystack settlement code
     const accountNumber = String(input.accountNumber ?? "").trim();
     const accountName = String(input.accountName ?? "").trim();
 
     if (!provider) {
-      throw new ApiError("A mobile-money provider is required", HttpCode.BAD_REQUEST);
+      throw new ApiError(
+        type === "bank" ? "Select a bank" : "Select a mobile-money network",
+        HttpCode.BAD_REQUEST,
+      );
     }
-    if (!/^\d{9,15}$/.test(accountNumber)) {
-      throw new ApiError("Enter a valid mobile-money number", HttpCode.BAD_REQUEST);
+    if (!/^\d{9,20}$/.test(accountNumber)) {
+      throw new ApiError(
+        type === "bank"
+          ? "Enter a valid bank account number"
+          : "Enter a valid mobile-money number",
+        HttpCode.BAD_REQUEST,
+      );
     }
     if (accountName.length < 2) {
       throw new ApiError("An account name is required", HttpCode.BAD_REQUEST);
@@ -619,6 +746,7 @@ export class StudioService extends Connection {
       where: { id },
       data: {
         paystackSubaccountCode: code,
+        payoutType: type,
         payoutProvider: provider,
         payoutAccountNumber: accountNumber,
         payoutAccountName: accountName,

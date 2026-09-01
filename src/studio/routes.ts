@@ -63,6 +63,8 @@ router.put("/content", authenticate, requireAdmin, StudioController.updateConten
 router.get("/billing", authenticate, requireAdmin, StudioController.getBilling);
 router.post("/billing/change", authenticate, requireAdmin, StudioController.startBillingChange);
 router.post("/billing/apply", authenticate, requireAdmin, StudioController.applyBillingChange);
+router.post("/billing/renew", authenticate, requireAdmin, StudioController.startRenewal);
+router.post("/billing/renew/apply", authenticate, requireAdmin, StudioController.applyRenewal);
 
 router.get("/loyalty", authenticate, requireAdmin, StudioController.getLoyalty);
 router.put("/loyalty", authenticate, requireAdmin, StudioController.updateLoyalty);

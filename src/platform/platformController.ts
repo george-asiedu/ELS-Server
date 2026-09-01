@@ -60,6 +60,32 @@ export class PlatformController {
     }
   };
 
+  public static getBillingConfig = async (
+    _req: Request,
+    res: Response,
+    next: NextFunction,
+  ) => {
+    try {
+      const data = await platformService.getBillingConfig();
+      return res.status(200).json({ message: "Billing config", data });
+    } catch (error) {
+      return next(error);
+    }
+  };
+
+  public static updateBillingConfig = async (
+    req: Request,
+    res: Response,
+    next: NextFunction,
+  ) => {
+    try {
+      const result = await platformService.updateBillingConfig(req.body ?? {});
+      return res.status(200).json(result);
+    } catch (error) {
+      return next(error);
+    }
+  };
+
   public static listStudios = async (
     _req: Request,
     res: Response,

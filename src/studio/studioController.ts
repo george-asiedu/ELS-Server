@@ -163,6 +163,33 @@ export class StudioController {
     }
   };
 
+  public static startRenewal = async (
+    req: Request,
+    res: Response,
+    next: NextFunction,
+  ) => {
+    try {
+      const result = await studioService.startRenewal(req.studioId);
+      return res.status(200).json(result);
+    } catch (error) {
+      return next(error);
+    }
+  };
+
+  public static applyRenewal = async (
+    req: Request,
+    res: Response,
+    next: NextFunction,
+  ) => {
+    try {
+      const reference = String(req.body?.reference ?? "");
+      const result = await studioService.applyRenewal(req.studioId, reference);
+      return res.status(200).json(result);
+    } catch (error) {
+      return next(error);
+    }
+  };
+
   public static getLoyalty = async (
     req: Request,
     res: Response,

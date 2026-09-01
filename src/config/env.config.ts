@@ -54,13 +54,23 @@ export const env = {
   paystack: {
     secretKey: process.env.PAYSTACK_SECRET_KEY as string,
     publicKey: process.env.PAYSTACK_PUBLIC_KEY as string,
-    // Subscription plan codes (created once on Paystack). Studio onboarding
-    // initializes a transaction with the plan code for the chosen tier+cadence.
+    // Subscription plan codes (created once on Paystack). Retained for reference
+    // but no longer used for billing: Paystack subscriptions can only be charged
+    // to a card, and Ghana studios pay by Mobile Money, which cannot auto-recur.
+    // Billing is therefore a one-time charge per period + manual renewal.
     plans: {
       STANDARD_MONTHLY: (process.env.PAYSTACK_PLAN_STANDARD_MONTHLY as string) || "",
       STANDARD_YEARLY: (process.env.PAYSTACK_PLAN_STANDARD_YEARLY as string) || "",
       PREMIUM_MONTHLY: (process.env.PAYSTACK_PLAN_PREMIUM_MONTHLY as string) || "",
       PREMIUM_YEARLY: (process.env.PAYSTACK_PLAN_PREMIUM_YEARLY as string) || "",
+    },
+    // Plan prices in GHS per period. Charged as a one-time Mobile Money payment
+    // at signup/renewal; keep in sync with the frontend PLANS display prices.
+    prices: {
+      STANDARD_MONTHLY: Number(process.env.PLAN_STANDARD_MONTHLY) || 150,
+      STANDARD_YEARLY: Number(process.env.PLAN_STANDARD_YEARLY) || 1500,
+      PREMIUM_MONTHLY: Number(process.env.PLAN_PREMIUM_MONTHLY) || 350,
+      PREMIUM_YEARLY: Number(process.env.PLAN_PREMIUM_YEARLY) || 3500,
     },
   },
 };
