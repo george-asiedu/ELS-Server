@@ -8,6 +8,7 @@ import { env } from "../config/env.config";
 import { randomUUID } from "crypto";
 import { promises as dns } from "dns";
 import { planFlags } from "../platform/platformService";
+import { AuditService } from "../audit/auditService";
 import {
   Plan,
   Cadence,
@@ -78,6 +79,8 @@ const sanitizeFeatureCards = (value: unknown): FeatureCard[] | undefined => {
  * id (they aren't auto-scoped by the tenant extension).
  */
 export class StudioService extends Connection {
+  private audit = new AuditService();
+
   constructor(private s3: S3BucketService) {
     super();
   }
@@ -446,6 +449,20 @@ export class StudioService extends Connection {
       update: flags,
       create: { studioId: id, ...flags },
     });
+    await this.audit.record({
+      action: "payment.plan_change.succeeded",
+      targetType: "Studio",
+      targetId: id,
+      studioId: id,
+      metadata: {
+        kind: "plan_change",
+        reference,
+        plan,
+        cadence: targetCadence,
+        amount: pricePesewas(plan as Plan, targetCadence) / 100,
+        currency: "GHS",
+      },
+    });
     return this.getBilling(id);
   }
 
@@ -519,6 +536,18 @@ export class StudioService extends Connection {
           studio.billingCadence as Cadence,
         ),
         ...(studio.status === "SUSPENDED" ? { status: "ACTIVE" } : {}),
+      },
+    });
+    await this.audit.record({
+      action: "payment.renewal.succeeded",
+      targetType: "Studio",
+      targetId: id,
+      studioId: id,
+      metadata: {
+        kind: "renewal",
+        reference,
+        cadence: studio.billingCadence,
+        currency: "GHS",
       },
     });
     return this.getBilling(id);
