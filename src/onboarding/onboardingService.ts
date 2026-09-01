@@ -6,6 +6,7 @@ import { env } from "../config/env.config";
 import { getPasswordHash } from "../utils/helper";
 import { runAsSuperAdmin } from "../tenant/context";
 import { paystack } from "../payment/paystackClient";
+import { AuditService } from "../audit/auditService";
 import {
   PlatformService,
   validateStudioSlug,
@@ -36,6 +37,7 @@ export const isSignupReference = (ref: string) => ref.startsWith(SIGNUP_PREFIX);
  */
 export class OnboardingService extends Connection {
   private platform = new PlatformService();
+  private audit = new AuditService();
 
   public async availability(rawSlug: string) {
     let slug: string;
@@ -250,6 +252,28 @@ export class OnboardingService extends Connection {
     await this.studioSignup.update({
       where: { id: signup.id },
       data: { status: "PROVISIONED", studioId: studio.id },
+    });
+
+    // Per-studio payment audit for the signup charge (setup fee or first period).
+    const amount = revenueShare
+      ? setupFeeFor(plan, cfg)
+      : pricePesewas(plan, cadence) / 100;
+    await this.audit.record({
+      actor: { email: signup.ownerEmail, role: "customer" },
+      action: "payment.signup.succeeded",
+      targetType: "Studio",
+      targetId: studio.id,
+      studioId: studio.id,
+      metadata: {
+        kind: "signup",
+        reference,
+        plan,
+        cadence,
+        billingMode,
+        amount,
+        currency: "GHS",
+        ownerEmail: signup.ownerEmail,
+      },
     });
 
     return {

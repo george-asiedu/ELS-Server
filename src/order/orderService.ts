@@ -4,6 +4,7 @@ import { ApiError } from "../middleware/apiError";
 import { env } from "../config/env.config";
 import { paystack, PaystackVerifyData } from "../payment/paystackClient";
 import { EmailService } from "../email/emailService";
+import { AuditService } from "../audit/auditService";
 
 type FulfillmentType = "PICKUP" | "DELIVERY";
 
@@ -52,6 +53,7 @@ const effectivePrice = (p: { price: number; promoPrice: number | null }) =>
 
 export class OrderService extends Connection {
   private email = new EmailService();
+  private audit = new AuditService();
 
   private static readonly POINTS_PER_GHS = 10; // 10 pts = GHS 1
   private static readonly REFERRAL_ORDER_BONUS = 50;
@@ -549,6 +551,29 @@ export class OrderService extends Connection {
         paidAt: data.paid_at ? new Date(data.paid_at) : new Date(),
       },
       include: orderInclude,
+    });
+
+    // Per-studio payment audit trail (best-effort).
+    await this.audit.record({
+      actor: { email: paid.customerEmail ?? "system", role: "customer" },
+      action: "payment.order.succeeded",
+      targetType: "Order",
+      targetId: paid.id,
+      studioId: paid.studioId ?? undefined,
+      metadata: {
+        kind: "order",
+        reference: paid.reference,
+        transactionId: paid.transactionId ?? String(data.id),
+        orderNumber: paid.orderNumber,
+        amount: paid.total,
+        currency: "GHS",
+        channel: paid.channel ?? data.channel ?? null,
+        status: data.status,
+        fulfillment: paid.fulfillment,
+        customerName: paid.customerName ?? null,
+        customerEmail: paid.customerEmail ?? null,
+        itemCount: paid.items.length,
+      },
     });
 
     // Decrement stock (never below zero).

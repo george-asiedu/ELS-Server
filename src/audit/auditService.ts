@@ -47,11 +47,17 @@ export class AuditService extends Connection {
     limit?: number | undefined;
     studioId?: string | undefined;
     action?: string | undefined;
+    // Prefix match, e.g. "payment." to return every payment-related entry.
+    actionPrefix?: string | undefined;
   }) {
     const take = Math.min(Math.max(opts.limit ?? 100, 1), 500);
-    const where: { studioId?: string; action?: string } = {};
+    const where: {
+      studioId?: string;
+      action?: string | { startsWith: string };
+    } = {};
     if (opts.studioId) where.studioId = opts.studioId;
     if (opts.action) where.action = opts.action;
+    else if (opts.actionPrefix) where.action = { startsWith: opts.actionPrefix };
 
     const logs = await this.auditLog.findMany({
       where,
