@@ -17,6 +17,7 @@ router.post(
   OrderController.bookingCheckout,
 );
 router.get("/me", authenticate, requireCustomer, OrderController.listMine);
+router.post("/:id/repay", authenticate, requireCustomer, OrderController.repay);
 
 // Guest checkout (no account) — anyone can buy a product.
 router.post("/guest-checkout", OrderController.guestCheckout);

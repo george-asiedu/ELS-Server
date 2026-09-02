@@ -525,6 +525,57 @@ export class PlatformService extends Connection {
     return this.getStudio(id);
   }
 
+  // Permanently delete a studio and ALL of its data. Irreversible. Runs against
+  // the raw (unscoped) client, deleting every tenant-scoped collection by
+  // studioId plus the studio's own branding/content/settings/signup rows, then
+  // the studio itself. Audit logs are kept as an immutable record.
+  public async deleteStudio(id: string) {
+    const studio = await this.studio.findUnique({ where: { id } });
+    if (!studio) throw new ApiError("Studio not found", HttpCode.NOT_FOUND);
+
+    const where = { studioId: id };
+    // Order doesn't matter in MongoDB (no FK constraints); child rows carry the
+    // studioId discriminator too (injected by the tenant extension on create).
+    await Promise.all([
+      this.raw.cartItem.deleteMany({ where }),
+      this.raw.cart.deleteMany({ where }),
+      this.raw.orderItem.deleteMany({ where }),
+      this.raw.order.deleteMany({ where }),
+      this.raw.referralOrderReward.deleteMany({ where }),
+      this.raw.payment.deleteMany({ where }),
+      this.raw.appointment.deleteMany({ where }),
+      this.raw.serviceAddOn.deleteMany({ where }),
+      this.raw.service.deleteMany({ where }),
+      this.raw.review.deleteMany({ where }),
+      this.raw.gallery.deleteMany({ where }),
+      this.raw.category.deleteMany({ where }),
+      this.raw.productCategory.deleteMany({ where }),
+      this.raw.product.deleteMany({ where }),
+      this.raw.businessHours.deleteMany({ where }),
+      this.raw.blockedDate.deleteMany({ where }),
+      this.raw.contactInfo.deleteMany({ where }),
+      this.raw.loyaltyTransaction.deleteMany({ where }),
+      this.raw.loyaltyPoints.deleteMany({ where }),
+      this.raw.referral.deleteMany({ where }),
+      this.raw.referralCode.deleteMany({ where }),
+      this.raw.commerceSettings.deleteMany({ where }),
+      this.raw.paymentSettings.deleteMany({ where }),
+      this.raw.promoBanner.deleteMany({ where }),
+      this.raw.profile.deleteMany({ where }),
+      this.raw.featureRequest.deleteMany({ where }),
+      this.raw.studioBranding.deleteMany({ where }),
+      this.raw.studioContent.deleteMany({ where }),
+      this.raw.studioSettings.deleteMany({ where }),
+      this.raw.studioSignup.deleteMany({ where }),
+    ]);
+    // Users last (owner + any staff/customers of this studio).
+    await this.raw.user.deleteMany({ where });
+    await this.raw.studio.delete({ where: { id } });
+
+    forgetStudioSlug(studio.slug);
+    return { message: "Studio deleted", data: { id, slug: studio.slug } };
+  }
+
   public async updateSettings(id: string, settings: StudioSettingsInput) {
     const studio = await this.studio.findUnique({ where: { id } });
     if (!studio) throw new ApiError("Studio not found", HttpCode.NOT_FOUND);

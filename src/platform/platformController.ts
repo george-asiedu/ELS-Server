@@ -158,6 +158,29 @@ export class PlatformController {
     }
   };
 
+  public static deleteStudio = async (
+    req: Request,
+    res: Response,
+    next: NextFunction,
+  ) => {
+    try {
+      const { id } = req.params;
+      if (!id) throw new ApiError("Studio id is required", HttpCode.BAD_REQUEST);
+      const result = await platformService.deleteStudio(id);
+      await audit.record({
+        actor: actor(req),
+        action: "studio.deleted",
+        targetType: "Studio",
+        targetId: id,
+        studioId: id,
+        metadata: { slug: result.data.slug },
+      });
+      return res.status(200).json(result);
+    } catch (error) {
+      return next(error);
+    }
+  };
+
   public static setStatus = async (
     req: Request,
     res: Response,

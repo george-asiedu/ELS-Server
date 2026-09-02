@@ -117,6 +117,22 @@ export class OrderController {
     }
   };
 
+  public static repay = async (
+    req: Request,
+    res: Response,
+    next: NextFunction,
+  ) => {
+    try {
+      const userId = req.user?.id;
+      if (!userId) throw new ApiError("Authentication required", 401);
+      const { id } = req.params;
+      if (!id) throw new ApiError("Order id is required", 400);
+      return res.status(200).json(await orderService.repay(userId, id));
+    } catch (error) {
+      return next(error);
+    }
+  };
+
   public static listAll = async (
     _req: Request,
     res: Response,
