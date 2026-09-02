@@ -527,6 +527,58 @@ export class OrderService extends Connection {
     return { message: "Order payment verified", data: order };
   }
 
+  // Re-initialize payment for the customer's own still-unpaid order (retry after
+  // a failed/abandoned charge). Issues a fresh reference and returns a new
+  // Paystack access code for the inline popup.
+  public async repay(userId: string, orderId: string) {
+    const order = await this.order.findUnique({ where: { id: orderId } });
+    if (!order || order.userId !== userId) {
+      throw new ApiError("Order not found", 404);
+    }
+    if (order.status !== "PENDING_PAYMENT") {
+      throw new ApiError("This order is no longer awaiting payment", 400);
+    }
+    const email = order.customerEmail ?? (await this.userEmail(userId));
+    if (!email) throw new ApiError("An email is required to pay", 400);
+
+    const reference = `ORD-${randomUUID()}`;
+    const subaccount = await this.currentStudioSubaccount();
+    const init = await paystack.initialize({
+      email,
+      amountPesewas: Math.round(order.total * 100),
+      reference,
+      callbackUrl: `${env.clientUrl}/order/callback`,
+      metadata: { orderId: order.id, orderNumber: order.orderNumber, kind: "order" },
+      subaccount,
+    });
+    await this.order.update({
+      where: { id: order.id },
+      data: { reference },
+    });
+    await this.audit.record({
+      actor: { email, role: "customer" },
+      action: "payment.order.retried",
+      targetType: "Order",
+      targetId: order.id,
+      studioId: order.studioId ?? undefined,
+      metadata: {
+        kind: "order",
+        reference,
+        orderNumber: order.orderNumber,
+        amount: order.total,
+        currency: "GHS",
+      },
+    });
+    return {
+      message: "Order payment restarted",
+      data: {
+        accessCode: init.access_code,
+        reference,
+        publicKey: env.paystack.publicKey,
+      },
+    };
+  }
+
   // Idempotently marks a paid order: stock, cart, loyalty earn, referral, email.
   // Returns null when no order matches the reference (combined booking charges).
   public async finalizeByReference(
@@ -540,7 +592,30 @@ export class OrderService extends Connection {
     if (!order) return null;
 
     const succeeded = data.status === "success";
-    if (!succeeded || order.status !== "PENDING_PAYMENT") return order;
+    if (!succeeded || order.status !== "PENDING_PAYMENT") {
+      // Record a definitive failure (not a still-pending/abandoned check) so the
+      // studio + platform have a trail of failed order payments.
+      if (data.status === "failed" && order.status === "PENDING_PAYMENT") {
+        await this.audit.record({
+          actor: { email: order.customerEmail ?? "system", role: "customer" },
+          action: "payment.order.failed",
+          targetType: "Order",
+          targetId: order.id,
+          studioId: order.studioId ?? undefined,
+          metadata: {
+            kind: "order",
+            reference: order.reference,
+            orderNumber: order.orderNumber,
+            amount: order.total,
+            currency: "GHS",
+            status: data.status,
+            customerName: order.customerName ?? null,
+            customerEmail: order.customerEmail ?? null,
+          },
+        });
+      }
+      return order;
+    }
 
     const paid = await this.order.update({
       where: { id: order.id },
