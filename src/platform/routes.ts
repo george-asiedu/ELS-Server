@@ -22,6 +22,7 @@ router.post("/studios", PlatformController.createStudio);
 router.get("/studios/:id", PlatformController.getStudio);
 router.patch("/studios/:id", PlatformController.updateStudio);
 router.patch("/studios/:id/status", PlatformController.setStatus);
+router.delete("/studios/:id", PlatformController.deleteStudio);
 router.patch("/studios/:id/settings", PlatformController.updateSettings);
 router.post("/studios/:id/impersonate", PlatformController.impersonate);
 
