@@ -706,19 +706,23 @@ export class OrderService extends Connection {
     // Receipt email (best-effort).
     if (paid.customerEmail) {
       try {
-        await this.email.sendOrderReceipt(paid.customerEmail, {
-          orderNumber: paid.orderNumber,
-          items: paid.items.map((i) => ({
-            name: i.name,
-            quantity: i.quantity,
-            unitPrice: i.unitPrice,
-          })),
-          subtotal: paid.subtotal,
-          deliveryFee: paid.deliveryFee,
-          total: paid.total,
-          fulfillment: paid.fulfillment,
-          reference: paid.reference ?? "",
-        });
+        await this.email.sendOrderReceipt(
+          paid.customerEmail,
+          {
+            orderNumber: paid.orderNumber,
+            items: paid.items.map((i) => ({
+              name: i.name,
+              quantity: i.quantity,
+              unitPrice: i.unitPrice,
+            })),
+            subtotal: paid.subtotal,
+            deliveryFee: paid.deliveryFee,
+            total: paid.total,
+            fulfillment: paid.fulfillment,
+            reference: paid.reference ?? "",
+          },
+          await this.currentStudioName(),
+        );
       } catch (error) {
         console.error("Failed to send order receipt email:", error);
       }

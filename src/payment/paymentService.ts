@@ -356,17 +356,21 @@ export class PaymentService extends Connection {
     if (!appt?.email) return;
     const balance = Math.max(0, payment.totalAmount - payment.amount);
     try {
-      await this.email.sendPaymentReceipt(appt.email, {
-        fullName: appt.fullName,
-        serviceName: appt.service?.name ?? "your service",
-        reference: payment.reference ?? "",
-        amountPaid: payment.amount,
-        totalAmount: payment.totalAmount,
-        type: payment.type as PaymentType,
-        balance,
-        date: appt.appointmentDate.toISOString().slice(0, 10),
-        time: appt.appointmentTime,
-      });
+      await this.email.sendPaymentReceipt(
+        appt.email,
+        {
+          fullName: appt.fullName,
+          serviceName: appt.service?.name ?? "your service",
+          reference: payment.reference ?? "",
+          amountPaid: payment.amount,
+          totalAmount: payment.totalAmount,
+          type: payment.type as PaymentType,
+          balance,
+          date: appt.appointmentDate.toISOString().slice(0, 10),
+          time: appt.appointmentTime,
+        },
+        await this.currentStudioName(),
+      );
     } catch (error) {
       console.error("Failed to send payment receipt email:", error);
     }

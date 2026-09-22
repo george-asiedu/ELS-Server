@@ -132,7 +132,11 @@ export class AuthService extends UserRepository {
     const resetUrl = `${env.clientUrl}/reset-password/${resetToken}`;
 
     try {
-      await emailService.sendPasswordReset(user.email, resetUrl);
+      await emailService.sendPasswordReset(
+        user.email,
+        resetUrl,
+        await this.currentStudioName(),
+      );
     } catch (error) {
       // Roll back the token if the email couldn't be delivered.
       await this.setResetTokenForUser(user.id, "", new Date(0));
