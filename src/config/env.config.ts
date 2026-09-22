@@ -15,7 +15,7 @@ const requiredVars = [
   "AWS_ACCESS_KEY_ID",
   "AWS_SECRET_ACCESS_KEY",
   "AWS_REGION",
-  "SENDGRID_API_KEY",
+  "PLUNK_SECRET_KEY",
   "SENDER_EMAIL",
   "CLIENT_URL",
   "PAYSTACK_SECRET_KEY",
@@ -42,8 +42,15 @@ export const env = {
     secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY as string,
     region: process.env.AWS_REGION as string,
   },
-  sendGridApiKey: process.env.SENDGRID_API_KEY as string,
   senderEmail: process.env.SENDER_EMAIL as string,
+  // Plunk transactional email (replaces SendGrid). apiUrl is overridable in case
+  // the account is on a different Plunk host.
+  plunk: {
+    secretKey: process.env.PLUNK_SECRET_KEY as string,
+    apiUrl:
+      (process.env.PLUNK_API_URL as string) ||
+      "https://next-api.useplunk.com/v1/send",
+  },
   clientUrl: process.env.CLIENT_URL as string,
   // Studio slug used when a request carries no studio hint (subdomain/header).
   // Bridges the existing single-tenant frontend during the multi-tenant rollout.
