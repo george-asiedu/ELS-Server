@@ -4,7 +4,7 @@ generator client {
 }
 
 datasource db {
-  provider = "mongodb"
+  provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 
@@ -110,7 +110,7 @@ enum SignupStatus {
 // layer via the tenant Prisma extension — see src/tenant.
 
 model Studio {
-  id           String       @id @default(auto()) @map("_id") @db.ObjectId
+  id           String       @id @default(cuid())
   name         String
   // URL slug that maps a subdomain to this studio, e.g. "els" -> els.app.com
   slug         String       @unique
@@ -123,7 +123,7 @@ model Studio {
   customDomainVerified    Boolean @default(false)
   status       StudioStatus @default(ACTIVE)
   // The studio's primary ADMIN user (its owner).
-  ownerUserId  String?      @db.ObjectId
+  ownerUserId  String?     
 
   // Paystack subaccount code for split settlement (money -> the studio).
   paystackSubaccountCode String?
@@ -164,8 +164,8 @@ model Studio {
 // Per-studio look and feel. Colors are stored as raw HSL channels
 // (e.g. "330 81% 60%") so they drop straight into the CSS design tokens.
 model StudioBranding {
-  id           String  @id @default(auto()) @map("_id") @db.ObjectId
-  studioId     String  @unique @db.ObjectId
+  id           String  @id @default(cuid())
+  studioId     String  @unique
   logoUrl      String?
   primaryColor String?
   accentColor  String?
@@ -181,8 +181,8 @@ model StudioBranding {
 
 // Per-studio editable page content (a fixed set of fields).
 model StudioContent {
-  id               String  @id @default(auto()) @map("_id") @db.ObjectId
-  studioId         String  @unique @db.ObjectId
+  id               String  @id @default(cuid())
+  studioId         String  @unique
   heroHeadline     String?
   heroSubtext      String?
   aboutText        String?
@@ -201,8 +201,8 @@ model StudioContent {
 // Per-studio feature flags. Whole modules are hidden when disabled. Studio
 // admins toggle these; the super admin can gate them at the plan level.
 model StudioSettings {
-  id                String  @id @default(auto()) @map("_id") @db.ObjectId
-  studioId          String  @unique @db.ObjectId
+  id                String  @id @default(cuid())
+  studioId          String  @unique
   commerce          Boolean @default(false)
   loyalty           Boolean @default(true)
   referrals         Boolean @default(true)
@@ -224,12 +224,12 @@ model StudioSettings {
 
 // A feature a studio requests; surfaced in the super-admin triage queue.
 model FeatureRequest {
-  id              String               @id @default(auto()) @map("_id") @db.ObjectId
-  studioId        String               @db.ObjectId
+  id              String               @id @default(cuid())
+  studioId        String              
   title           String
   description     String
   status          FeatureRequestStatus @default(NEW)
-  createdByUserId String?              @db.ObjectId
+  createdByUserId String?             
 
   studio Studio @relation(fields: [studioId], references: [id], onDelete: Cascade)
 
@@ -243,14 +243,14 @@ model FeatureRequest {
 // Platform/admin action trail. Not tenant-scoped: it spans studios and is read
 // by the super admin. Written best-effort (never blocks the action it records).
 model AuditLog {
-  id         String   @id @default(auto()) @map("_id") @db.ObjectId
-  actorId    String?  @db.ObjectId
+  id         String   @id @default(cuid())
+  actorId    String? 
   actorEmail String
   actorRole  String
   action     String // e.g. "studio.provisioned", "studio.suspended"
   targetType String? // e.g. "Studio"
   targetId   String?
-  studioId   String?  @db.ObjectId // studio the action relates to, when applicable
+  studioId   String?  // studio the action relates to, when applicable
   metadata   Json?
 
   createdAt DateTime @default(now())
@@ -263,14 +263,14 @@ model AuditLog {
 // A testimonial a studio submits about the platform, shown on the marketing
 // landing page after the super admin approves it. Not tenant-scoped.
 model PlatformReview {
-  id              String   @id @default(auto()) @map("_id") @db.ObjectId
-  studioId        String?  @db.ObjectId
+  id              String   @id @default(cuid())
+  studioId        String? 
   authorName      String
   authorRole      String?
   content         String
   rating          Int      @default(5)
   approved        Boolean  @default(false)
-  createdByUserId String?  @db.ObjectId
+  createdByUserId String? 
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -283,7 +283,7 @@ model PlatformReview {
 // A paid self-serve studio signup, held until Paystack confirms payment, then
 // provisioned into a real Studio. Not tenant-scoped (platform-level).
 model StudioSignup {
-  id               String         @id @default(auto()) @map("_id") @db.ObjectId
+  id               String         @id @default(cuid())
   name             String
   slug             String
   ownerEmail       String
@@ -294,7 +294,7 @@ model StudioSignup {
   billingMode      BillingMode    @default(SUBSCRIPTION)
   reference        String         @unique
   status           SignupStatus   @default(PENDING)
-  studioId         String?        @db.ObjectId
+  studioId         String?       
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -306,7 +306,7 @@ model StudioSignup {
 // Singleton platform-wide billing config, editable by the super admin. Holds
 // the revenue-share commission % and one-time setup fee for each plan tier.
 model PlatformConfig {
-  id                        String @id @default(auto()) @map("_id") @db.ObjectId
+  id                        String @id @default(cuid())
   // Master switch: when off, onboarding only offers subscription billing and the
   // revenue-share (% cut) option is hidden entirely. Subscription is always the
   // default; the super admin opts in to revenue-share.
@@ -327,8 +327,8 @@ model PlatformConfig {
 // A studio's scrolling promo banner (advertised on the shop and/or booking
 // pages). Tenant-scoped like the rest of the storefront content.
 model PromoBanner {
-  id        String        @id @default(auto()) @map("_id") @db.ObjectId
-  studioId  String?       @db.ObjectId
+  id        String        @id @default(cuid())
+  studioId  String?      
   message   String
   linkUrl   String?
   bgColor   String? // hex; falls back to the studio's primary color
@@ -347,9 +347,9 @@ model PromoBanner {
 // ------------------- Tenant-owned models -------------------
 
 model User {
-  id       String  @id @default(auto()) @map("_id") @db.ObjectId
+  id       String  @id @default(cuid())
   // Super admins belong to no studio (studioId is null); customers/admins do.
-  studioId String? @db.ObjectId
+  studioId String?
   email    String
   password String
   role     Role    @default(CUSTOMER)
@@ -380,9 +380,9 @@ model User {
 }
 
 model Profile {
-  id       String  @id @default(auto()) @map("_id") @db.ObjectId
-  studioId String?  @db.ObjectId
-  userId   String  @unique @db.ObjectId
+  id       String  @id @default(cuid())
+  studioId String? 
+  userId   String  @unique
   fullName String?
   email    String?
   phone    String?
@@ -399,8 +399,8 @@ model Profile {
 }
 
 model Appointment {
-  id              String            @id @default(auto()) @map("_id") @db.ObjectId
-  studioId        String?            @db.ObjectId
+  id              String            @id @default(cuid())
+  studioId        String?           
   fullName        String
   phone           String
   email           String?
@@ -418,8 +418,8 @@ model Appointment {
   pointsRefunded Boolean @default(false)
 
   // Nullable so guests (not logged in) can book
-  userId    String? @db.ObjectId
-  serviceId String  @db.ObjectId
+  userId    String?
+  serviceId String 
 
   user    User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
   service Service @relation(fields: [serviceId], references: [id], onDelete: Cascade)
@@ -441,8 +441,8 @@ model Appointment {
 }
 
 model Service {
-  id          String  @id @default(auto()) @map("_id") @db.ObjectId
-  studioId    String?  @db.ObjectId
+  id          String  @id @default(cuid())
+  studioId    String? 
   name        String
   category    String // Category slug (see Category model)
   description String?
@@ -466,12 +466,12 @@ model Service {
 }
 
 model ServiceAddOn {
-  id        String  @id @default(auto()) @map("_id") @db.ObjectId
-  studioId  String?  @db.ObjectId
+  id        String  @id @default(cuid())
+  studioId  String? 
   name      String
   price     Float
   duration  Int // Additional minutes
-  serviceId String  @db.ObjectId
+  serviceId String 
   service   Service @relation(fields: [serviceId], references: [id], onDelete: Cascade)
 
   @@index([studioId])
@@ -479,8 +479,8 @@ model ServiceAddOn {
 }
 
 model Payment {
-  id            String        @id @default(auto()) @map("_id") @db.ObjectId
-  studioId      String?        @db.ObjectId
+  id            String        @id @default(cuid())
+  studioId      String?       
   // Amount charged in this Paystack transaction (deposit or full), in GHS.
   amount        Float
   // Full amount due for the booking (for a partial payment, the balance is
@@ -498,7 +498,7 @@ model Payment {
   channel       String?
   paidAt        DateTime?
 
-  appointmentId String      @unique @db.ObjectId
+  appointmentId String      @unique
   appointment   Appointment @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
 
   createdAt DateTime @default(now())
@@ -512,8 +512,8 @@ model Payment {
 // When enabled, a booking must be paid (full and/or partial, per the flags)
 // before it's finalized; when disabled, bookings are created payment-pending.
 model PaymentSettings {
-  id             String  @id @default(auto()) @map("_id") @db.ObjectId
-  studioId       String?  @unique @db.ObjectId
+  id             String  @id @default(cuid())
+  studioId       String?  @unique
   enabled        Boolean @default(false)
   allowFull      Boolean @default(true)
   allowPartial   Boolean @default(false)
@@ -526,15 +526,15 @@ model PaymentSettings {
 }
 
 model Review {
-  id       String  @id @default(auto()) @map("_id") @db.ObjectId
-  studioId String?  @db.ObjectId
+  id       String  @id @default(cuid())
+  studioId String? 
   rating   Int // 1-5
   content  String?
   approved Boolean @default(false)
 
-  userId        String  @db.ObjectId
-  serviceId     String? @db.ObjectId
-  appointmentId String? @db.ObjectId
+  userId        String 
+  serviceId     String?
+  appointmentId String?
 
   user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
   service     Service?     @relation(fields: [serviceId], references: [id], onDelete: Cascade)
@@ -548,8 +548,8 @@ model Review {
 }
 
 model Gallery {
-  id        String    @id @default(auto()) @map("_id") @db.ObjectId
-  studioId  String?    @db.ObjectId
+  id        String    @id @default(cuid())
+  studioId  String?   
   title     String?
   imageUrl  String
   mediaType MediaType @default(IMAGE)
@@ -563,8 +563,8 @@ model Gallery {
 
 // Per-studio service/gallery categories with public visibility control.
 model Category {
-  id       String  @id @default(auto()) @map("_id") @db.ObjectId
-  studioId String?  @db.ObjectId
+  id       String  @id @default(cuid())
+  studioId String? 
   name     String
   slug     String
   active   Boolean @default(true)
@@ -579,8 +579,8 @@ model Category {
 }
 
 model BusinessHours {
-  id        String  @id @default(auto()) @map("_id") @db.ObjectId
-  studioId  String?  @db.ObjectId
+  id        String  @id @default(cuid())
+  studioId  String? 
   dayOfWeek Int // 0 (Sunday) to 6 (Saturday)
   openTime  String? // e.g., "09:00"
   closeTime String? // e.g., "17:00"
@@ -592,8 +592,8 @@ model BusinessHours {
 }
 
 model BlockedDate {
-  id       String   @id @default(auto()) @map("_id") @db.ObjectId
-  studioId String?   @db.ObjectId
+  id       String   @id @default(cuid())
+  studioId String?  
   date     DateTime
   reason   String?
 
@@ -603,8 +603,8 @@ model BlockedDate {
 
 // Per-studio contact details (one document per studio).
 model ContactInfo {
-  id        String  @id @default(auto()) @map("_id") @db.ObjectId
-  studioId  String?  @unique @db.ObjectId
+  id        String  @id @default(cuid())
+  studioId  String?  @unique
   phone     String?
   whatsapp  String?
   email     String?
@@ -626,9 +626,9 @@ model ContactInfo {
 }
 
 model LoyaltyPoints {
-  id             String @id @default(auto()) @map("_id") @db.ObjectId
-  studioId       String? @db.ObjectId
-  userId         String @unique @db.ObjectId
+  id             String @id @default(cuid())
+  studioId       String?
+  userId         String @unique
   points         Int    @default(0)
   lifetimePoints Int    @default(0)
 
@@ -642,13 +642,13 @@ model LoyaltyPoints {
 }
 
 model LoyaltyTransaction {
-  id            String                 @id @default(auto()) @map("_id") @db.ObjectId
-  studioId      String?                 @db.ObjectId
-  userId        String                 @db.ObjectId
+  id            String                 @id @default(cuid())
+  studioId      String?                
+  userId        String                
   points        Int
   type          LoyaltyTransactionType
   description   String?
-  appointmentId String?                @db.ObjectId
+  appointmentId String?               
 
   user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
   appointment Appointment? @relation(fields: [appointmentId], references: [id], onDelete: SetNull)
@@ -661,9 +661,9 @@ model LoyaltyTransaction {
 }
 
 model ReferralCode {
-  id       String @id @default(auto()) @map("_id") @db.ObjectId
-  studioId String? @db.ObjectId
-  userId   String @unique @db.ObjectId
+  id       String @id @default(cuid())
+  studioId String?
+  userId   String @unique
   code     String
   uses     Int    @default(0)
 
@@ -678,11 +678,11 @@ model ReferralCode {
 }
 
 model Referral {
-  id             String  @id @default(auto()) @map("_id") @db.ObjectId
-  studioId       String?  @db.ObjectId
-  referrerId     String  @db.ObjectId
-  referredId     String  @unique @db.ObjectId
-  referralCodeId String  @db.ObjectId
+  id             String  @id @default(cuid())
+  studioId       String? 
+  referrerId     String 
+  referredId     String  @unique
+  referralCodeId String 
   rewarded       Boolean @default(false)
 
   referrer     User         @relation("Referrer", fields: [referrerId], references: [id], onDelete: Cascade)
@@ -699,8 +699,8 @@ model Referral {
 // ------------------- Commerce (mini shop) -------------------
 
 model Product {
-  id          String  @id @default(auto()) @map("_id") @db.ObjectId
-  studioId    String?  @db.ObjectId
+  id          String  @id @default(cuid())
+  studioId    String? 
   name        String
   description String?
   price       Float
@@ -727,8 +727,8 @@ model Product {
 
 // Per-studio product categories, independent of service categories.
 model ProductCategory {
-  id       String  @id @default(auto()) @map("_id") @db.ObjectId
-  studioId String?  @db.ObjectId
+  id       String  @id @default(cuid())
+  studioId String? 
   name     String
   slug     String
   active   Boolean @default(true)
@@ -743,9 +743,9 @@ model ProductCategory {
 }
 
 model Cart {
-  id       String     @id @default(auto()) @map("_id") @db.ObjectId
-  studioId String?     @db.ObjectId
-  userId   String     @unique @db.ObjectId
+  id       String     @id @default(cuid())
+  studioId String?    
+  userId   String     @unique
   user     User       @relation(fields: [userId], references: [id], onDelete: Cascade)
   items    CartItem[]
 
@@ -757,10 +757,10 @@ model Cart {
 }
 
 model CartItem {
-  id        String @id @default(auto()) @map("_id") @db.ObjectId
-  studioId  String? @db.ObjectId
-  cartId    String @db.ObjectId
-  productId String @db.ObjectId
+  id        String @id @default(cuid())
+  studioId  String?
+  cartId    String
+  productId String
   quantity  Int    @default(1)
 
   cart    Cart    @relation(fields: [cartId], references: [id], onDelete: Cascade)
@@ -774,11 +774,11 @@ model CartItem {
 }
 
 model Order {
-  id          String      @id @default(auto()) @map("_id") @db.ObjectId
-  studioId    String?      @db.ObjectId
+  id          String      @id @default(cuid())
+  studioId    String?     
   orderNumber String
   // Null for guest orders (purchases without an account).
-  userId      String?     @db.ObjectId
+  userId      String?    
   user        User?       @relation(fields: [userId], references: [id], onDelete: SetNull)
   items       OrderItem[]
 
@@ -806,7 +806,7 @@ model Order {
   // When products are bought as part of a booking, the order links here so
   // revenue can be split (service -> booking, products -> product). Not unique
   // (Mongo rejects multiple null values); at most one is enforced in code.
-  appointmentId String?      @db.ObjectId
+  appointmentId String?     
   appointment   Appointment? @relation(fields: [appointmentId], references: [id], onDelete: SetNull)
 
   // Paystack payment fields (reference always set to a generated UUID; shared
@@ -826,10 +826,10 @@ model Order {
 }
 
 model OrderItem {
-  id        String  @id @default(auto()) @map("_id") @db.ObjectId
-  studioId  String?  @db.ObjectId
-  orderId   String  @db.ObjectId
-  productId String? @db.ObjectId
+  id        String  @id @default(cuid())
+  studioId  String? 
+  orderId   String 
+  productId String?
   // Snapshot so order history is stable if the product later changes/deletes.
   name      String
   unitPrice Float
@@ -845,9 +845,9 @@ model OrderItem {
 
 // De-dups the referral reward so a referrer earns 50 pts once per new buyer.
 model ReferralOrderReward {
-  id             String   @id @default(auto()) @map("_id") @db.ObjectId
-  studioId       String?   @db.ObjectId
-  referralCodeId String   @db.ObjectId
+  id             String   @id @default(cuid())
+  studioId       String?  
+  referralCodeId String  
   buyerEmail     String
   createdAt      DateTime @default(now())
 
@@ -858,8 +858,8 @@ model ReferralOrderReward {
 
 // Per-studio shop policy (one document per studio).
 model CommerceSettings {
-  id             String  @id @default(auto()) @map("_id") @db.ObjectId
-  studioId       String?  @unique @db.ObjectId
+  id             String  @id @default(cuid())
+  studioId       String?  @unique
   enabled        Boolean @default(true) // show the shop publicly
   enablePickup   Boolean @default(true)
   enableDelivery Boolean @default(true)
