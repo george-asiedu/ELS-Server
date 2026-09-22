@@ -116,12 +116,16 @@ export class AppointmentService extends Connection {
     // Automated confirmation email (best-effort — never block the booking).
     if (appointment.email) {
       try {
-        await this.email.sendAppointmentReceived(appointment.email, {
-          fullName: appointment.fullName,
-          serviceName: appointment.service?.name ?? "your service",
-          date: data.appointmentDate,
-          time: appointment.appointmentTime,
-        });
+        await this.email.sendAppointmentReceived(
+          appointment.email,
+          {
+            fullName: appointment.fullName,
+            serviceName: appointment.service?.name ?? "your service",
+            date: data.appointmentDate,
+            time: appointment.appointmentTime,
+          },
+          await this.currentStudioName(),
+        );
       } catch (error) {
         console.error("Failed to send appointment confirmation email:", error);
       }

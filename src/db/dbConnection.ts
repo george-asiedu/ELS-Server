@@ -74,6 +74,18 @@ export class Connection {
     return studio?.paystackSubaccountCode ?? null;
   }
 
+  // The current studio's display name, for customer-facing emails/receipts.
+  // Falls back to the platform name when there's no studio in context.
+  protected async currentStudioName(): Promise<string> {
+    const studioId = getTenantContext()?.studioId;
+    if (!studioId) return "Zuri Studios";
+    const studio = await this.studio.findUnique({
+      where: { id: studioId },
+      select: { name: true },
+    });
+    return studio?.name ?? "Zuri Studios";
+  }
+
   // Max share of a booking/order payable with loyalty points, as a ratio, from
   // the current studio's settings (studio-admin controlled). Defaults to 0.3.
   protected async loyaltyCapRatio(): Promise<number> {
