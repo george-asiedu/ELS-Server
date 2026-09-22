@@ -5,6 +5,35 @@ import { randomBytes } from "crypto";
 import { Payload, AuthToken } from "../models/user";
 import { env } from "../config/env.config";
 
+// The base URL a payment redirect should return to. Multi-tenant studios are
+// served from their own subdomain (e.g. nailedbyzara.zuristudios.com), so a
+// hosted-checkout redirect must come back to THAT origin — otherwise the
+// callback page loads on the apex with the wrong (default) studio context. We
+// trust the browser-sent Origin only when it's the platform apex or a subdomain
+// of ROOT_DOMAIN; anything else falls back to the configured client URL.
+export const safeClientOrigin = (origin?: string | null): string => {
+  const fallback = env.clientUrl.replace(/\/$/, "");
+  if (!origin) return fallback;
+  let host: string;
+  try {
+    host = new URL(origin).hostname.toLowerCase();
+  } catch {
+    return fallback;
+  }
+  const root = env.rootDomain?.toLowerCase();
+  let clientHost = "";
+  try {
+    clientHost = new URL(fallback).hostname.toLowerCase();
+  } catch {
+    /* ignore */
+  }
+  const allowed =
+    (clientHost && host === clientHost) ||
+    (!!root &&
+      (host === root || host === `www.${root}` || host.endsWith(`.${root}`)));
+  return allowed ? origin.replace(/\/$/, "") : fallback;
+};
+
 // Short, shareable referral code — random uppercase alphanumeric (default 6 chars).
 export const generateReferralCode = (length = 6): string => {
   const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
