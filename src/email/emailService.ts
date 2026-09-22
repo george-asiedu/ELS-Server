@@ -1,40 +1,44 @@
-import sgMail from "@sendgrid/mail";
 import { env } from "../config/env.config";
-
-let configured = false;
-
-const ensureConfigured = () => {
-  if (!configured) {
-    sgMail.setApiKey(env.sendGridApiKey);
-    configured = true;
-  }
-};
 
 interface SendArgs {
   to: string;
   subject: string;
   html: string;
-  text: string;
+  // Kept for call-site compatibility; Plunk's API takes a single HTML body.
+  text?: string;
 }
 
 export class EmailService {
-  private async send({ to, subject, html, text }: SendArgs) {
-    ensureConfigured();
-    await sgMail.send({
-      to,
-      from: env.senderEmail,
-      subject,
-      text,
-      html,
+  private async send({ to, subject, html }: SendArgs) {
+    const res = await fetch(env.plunk.apiUrl, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${env.plunk.secretKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        to,
+        subject,
+        body: html,
+        from: env.senderEmail,
+      }),
     });
+    if (!res.ok) {
+      const detail = await res.text().catch(() => "");
+      throw new Error(`Plunk email send failed (${res.status}): ${detail}`);
+    }
   }
 
-  public async sendPasswordReset(to: string, resetUrl: string) {
-    const subject = "Reset your EL Beauty Studio password";
+  public async sendPasswordReset(
+    to: string,
+    resetUrl: string,
+    brand = "Zuri Studios",
+  ) {
+    const subject = `Reset your ${brand} password`;
     const text = `You requested a password reset.\n\nReset your password using this link (valid for 1 hour):\n${resetUrl}\n\nIf you didn't request this, you can safely ignore this email.`;
     const html = `
       <div style="font-family: Arial, sans-serif; max-width: 480px; margin: 0 auto; color: #1f2937;">
-        <h2 style="color: #be185d;">EL Beauty Studio</h2>
+        <h2 style="color: #be185d;">${brand}</h2>
         <p>You requested to reset your password.</p>
         <p>Click the button below to choose a new password. This link is valid for <strong>1 hour</strong>.</p>
         <p style="text-align: center; margin: 32px 0;">
@@ -63,21 +67,22 @@ export class EmailService {
       date: string;
       time: string;
     },
+    brand = "Zuri Studios",
   ) {
     const { fullName, serviceName, date, time } = details;
     const subject = "We've received your appointment request";
     const text =
       `Hi ${fullName},\n\n` +
-      `Thank you for booking with EL Beauty Studio! We've received your request:\n\n` +
+      `Thank you for booking with ${brand}! We've received your request:\n\n` +
       `Service: ${serviceName}\n` +
       `Date: ${date}\n` +
       `Time: ${time}\n` +
       `Status: Pending confirmation\n\n` +
       `We'll confirm your appointment shortly. See you soon!\n\n` +
-      `— EL Beauty Studio`;
+      `— ${brand}`;
     const html = `
       <div style="font-family: Arial, sans-serif; max-width: 480px; margin: 0 auto; color: #1f2937;">
-        <h2 style="color: #be185d;">EL Beauty Studio</h2>
+        <h2 style="color: #be185d;">${brand}</h2>
         <p>Hi ${fullName},</p>
         <p>Thank you for booking with us! We've received your appointment request:</p>
         <table style="width: 100%; border-collapse: collapse; margin: 16px 0;">
@@ -87,7 +92,7 @@ export class EmailService {
           <tr><td style="padding: 6px 0; color: #6b7280;">Status</td><td style="padding: 6px 0; font-weight: 600; color: #d97706;">Pending confirmation</td></tr>
         </table>
         <p>We'll confirm your appointment shortly. See you soon! 💅</p>
-        <p style="font-size: 12px; color: #6b7280;">— EL Beauty Studio</p>
+        <p style="font-size: 12px; color: #6b7280;">— ${brand}</p>
       </div>
     `;
     await this.send({ to, subject, html, text });
@@ -106,6 +111,7 @@ export class EmailService {
       date: string;
       time: string;
     },
+    brand = "Zuri Studios",
   ) {
     const {
       fullName,
@@ -119,7 +125,7 @@ export class EmailService {
       time,
     } = details;
     const label = type === "PARTIAL" ? "Deposit paid" : "Amount paid";
-    const subject = "Your EL Beauty Studio payment receipt";
+    const subject = `Your ${brand} payment receipt`;
     const balanceLine =
       balance > 0
         ? `Balance due at studio: GHS ${balance}\n`
@@ -134,10 +140,10 @@ export class EmailService {
       `Total: GHS ${totalAmount}\n` +
       balanceLine +
       `Reference: ${reference}\n\n` +
-      `See you soon!\n\n— EL Beauty Studio`;
+      `See you soon!\n\n— ${brand}`;
     const html = `
       <div style="font-family: Arial, sans-serif; max-width: 480px; margin: 0 auto; color: #1f2937;">
-        <h2 style="color: #be185d;">EL Beauty Studio</h2>
+        <h2 style="color: #be185d;">${brand}</h2>
         <p>Hi ${fullName},</p>
         <p>Thank you for your payment. Here is your receipt:</p>
         <table style="width: 100%; border-collapse: collapse; margin: 16px 0;">
@@ -154,7 +160,7 @@ export class EmailService {
           <tr><td style="padding: 6px 0; color: #6b7280;">Reference</td><td style="padding: 6px 0; font-weight: 600;">${reference}</td></tr>
         </table>
         <p>See you soon! 💅</p>
-        <p style="font-size: 12px; color: #6b7280;">— EL Beauty Studio</p>
+        <p style="font-size: 12px; color: #6b7280;">— ${brand}</p>
       </div>
     `;
     await this.send({ to, subject, html, text });
@@ -171,10 +177,11 @@ export class EmailService {
       fulfillment: string;
       reference: string;
     },
+    brand = "Zuri Studios",
   ) {
     const { orderNumber, items, subtotal, deliveryFee, total, fulfillment, reference } =
       details;
-    const subject = `Your EL Beauty Studio order ${orderNumber}`;
+    const subject = `Your ${brand} order ${orderNumber}`;
     const itemsText = items
       .map((i) => `- ${i.name} x${i.quantity} — GHS ${i.unitPrice * i.quantity}`)
       .join("\n");
@@ -187,7 +194,7 @@ export class EmailService {
       (deliveryFee > 0 ? `Delivery: GHS ${deliveryFee}\n` : "") +
       `Total: GHS ${total}\n` +
       `Reference: ${reference}\n\n` +
-      `— EL Beauty Studio`;
+      `— ${brand}`;
     const itemsHtml = items
       .map(
         (i) =>
@@ -196,7 +203,7 @@ export class EmailService {
       .join("");
     const html = `
       <div style="font-family: Arial, sans-serif; max-width: 480px; margin: 0 auto; color: #1f2937;">
-        <h2 style="color: #be185d;">EL Beauty Studio</h2>
+        <h2 style="color: #be185d;">${brand}</h2>
         <p>Thank you for your order!</p>
         <p style="color:#6b7280; margin:0;">Order</p>
         <p style="font-weight:600; margin-top:2px;">${orderNumber}</p>
@@ -211,7 +218,7 @@ export class EmailService {
           <tr><td style="padding:6px 0; font-weight:700; color:#be185d;">Total</td><td style="padding:6px 0; text-align:right; font-weight:700; color:#be185d;">GHS ${total}</td></tr>
         </table>
         <p style="font-size: 12px; color: #6b7280;">Reference: ${reference}</p>
-        <p style="font-size: 12px; color: #6b7280;">— EL Beauty Studio</p>
+        <p style="font-size: 12px; color: #6b7280;">— ${brand}</p>
       </div>
     `;
     await this.send({ to, subject, html, text });
