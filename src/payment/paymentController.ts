@@ -56,6 +56,7 @@ export class PaymentController {
         appointmentId,
         paymentType,
         req.user.id,
+        req.headers.origin,
       );
       return res.status(200).json(result);
     } catch (error) {

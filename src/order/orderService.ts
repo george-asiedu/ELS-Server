@@ -5,6 +5,7 @@ import { env } from "../config/env.config";
 import { paystack, PaystackVerifyData } from "../payment/paystackClient";
 import { EmailService } from "../email/emailService";
 import { AuditService } from "../audit/auditService";
+import { safeClientOrigin } from "../utils/helper";
 
 type FulfillmentType = "PICKUP" | "DELIVERY";
 
@@ -118,6 +119,7 @@ export class OrderService extends Connection {
     applyPoints?: boolean | undefined;
     appointmentId?: string | undefined;
     callbackPath: string;
+    origin?: string | undefined;
   }) {
     const settings = await this.settings();
     if (!settings.enabled) {
@@ -228,7 +230,7 @@ export class OrderService extends Connection {
       email: params.contact.email,
       amountPesewas: Math.round(total * 100),
       reference,
-      callbackUrl: `${env.clientUrl}${params.callbackPath}`,
+      callbackUrl: `${safeClientOrigin(params.origin)}${params.callbackPath}`,
       metadata: { orderId: order.id, orderNumber, kind: "order" },
       subaccount,
     });
@@ -250,7 +252,7 @@ export class OrderService extends Connection {
   }
 
   // Logged-in customer checkout from their saved cart.
-  public async checkout(userId: string, input: CheckoutInput) {
+  public async checkout(userId: string, input: CheckoutInput, origin?: string) {
     const cart = await this.cart.findUnique({
       where: { userId },
       include: { items: true },
@@ -276,11 +278,12 @@ export class OrderService extends Connection {
       referralCode: input.referralCode,
       applyPoints: input.applyPoints,
       callbackPath: "/order/callback",
+      origin,
     });
   }
 
   // Guest checkout (no account) for one or more products.
-  public async guestCheckout(input: GuestCheckoutInput) {
+  public async guestCheckout(input: GuestCheckoutInput, origin?: string) {
     if (!input.email?.trim() || !input.name?.trim() || !input.phone?.trim()) {
       throw new ApiError("Name, email and phone are required", 400);
     }
@@ -297,6 +300,7 @@ export class OrderService extends Connection {
       deliveryPhone: input.deliveryPhone,
       referralCode: input.referralCode,
       callbackPath: "/order/callback",
+      origin,
     });
   }
 
@@ -312,6 +316,7 @@ export class OrderService extends Connection {
       serviceType?: "FULL" | "PARTIAL";
       referralCode?: string;
     },
+    origin?: string,
   ) {
     const appt = await this.appointment.findUnique({
       where: { id: input.appointmentId },
@@ -428,7 +433,7 @@ export class OrderService extends Connection {
       email,
       amountPesewas: Math.round(combined * 100),
       reference,
-      callbackUrl: `${env.clientUrl}/booking/callback`,
+      callbackUrl: `${safeClientOrigin(origin)}/booking/callback`,
       metadata: { orderId: order.id, appointmentId: appt.id, kind: "booking" },
       subaccount,
     });
@@ -530,7 +535,7 @@ export class OrderService extends Connection {
   // Re-initialize payment for the customer's own still-unpaid order (retry after
   // a failed/abandoned charge). Issues a fresh reference and returns a new
   // Paystack access code for the inline popup.
-  public async repay(userId: string, orderId: string) {
+  public async repay(userId: string, orderId: string, origin?: string) {
     const order = await this.order.findUnique({ where: { id: orderId } });
     if (!order || order.userId !== userId) {
       throw new ApiError("Order not found", 404);
@@ -547,7 +552,7 @@ export class OrderService extends Connection {
       email,
       amountPesewas: Math.round(order.total * 100),
       reference,
-      callbackUrl: `${env.clientUrl}/order/callback`,
+      callbackUrl: `${safeClientOrigin(origin)}/order/callback`,
       metadata: { orderId: order.id, orderNumber: order.orderNumber, kind: "order" },
       subaccount,
     });

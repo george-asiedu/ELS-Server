@@ -19,7 +19,44 @@ app.use(
     contentSecurityPolicy: false,
   }),
 );
-app.use(cors());
+
+// CORS: allow only the platform apex + its studio subdomains (e.g.
+// zuristudios.com and <slug>.zuristudios.com), localhost in dev, and any hosts
+// explicitly listed in ALLOWED_ORIGINS (comma-separated — e.g. a studio's
+// verified custom domain or the *.vercel.app preview). Everything else is
+// rejected. No credentials are used (Bearer-token auth), so this is safe.
+const extraOrigins = (process.env.ALLOWED_ORIGINS ?? "")
+  .split(",")
+  .map((o) => o.trim().toLowerCase().replace(/\/$/, ""))
+  .filter(Boolean);
+
+const isAllowedOrigin = (origin: string): boolean => {
+  let host: string;
+  try {
+    host = new URL(origin).hostname.toLowerCase();
+  } catch {
+    return false;
+  }
+  if (host === "localhost" || host.startsWith("127.") || host.endsWith(".local")) {
+    return true;
+  }
+  const root = env.rootDomain?.toLowerCase();
+  if (root && (host === root || host === `www.${root}` || host.endsWith(`.${root}`))) {
+    return true;
+  }
+  return extraOrigins.includes(origin.toLowerCase().replace(/\/$/, ""));
+};
+
+app.use(
+  cors({
+    origin: (origin, cb) => {
+      // No Origin header = same-origin, curl, or server-to-server (e.g. the
+      // Paystack webhook) — allow; browsers always send Origin on cross-site.
+      if (!origin) return cb(null, true);
+      return cb(null, isAllowedOrigin(origin));
+    },
+  }),
+);
 app.use(hpp());
 
 const limiter = rateLimit({

@@ -18,13 +18,17 @@ export class OrderController {
         applyPoints,
         referralCode,
       } = req.body ?? {};
-      const result = await orderService.checkout(req.user.id, {
-        fulfillment: fulfillment === "DELIVERY" ? "DELIVERY" : "PICKUP",
-        deliveryAddress,
-        deliveryPhone,
-        applyPoints: applyPoints === true || applyPoints === "true",
-        referralCode,
-      });
+      const result = await orderService.checkout(
+        req.user.id,
+        {
+          fulfillment: fulfillment === "DELIVERY" ? "DELIVERY" : "PICKUP",
+          deliveryAddress,
+          deliveryPhone,
+          applyPoints: applyPoints === true || applyPoints === "true",
+          referralCode,
+        },
+        req.headers.origin,
+      );
       return res.status(201).json(result);
     } catch (error) {
       return next(error);
@@ -51,16 +55,19 @@ export class OrderController {
       if (!Array.isArray(items) || items.length === 0) {
         throw new ApiError("At least one product is required", 400);
       }
-      const result = await orderService.guestCheckout({
-        items,
-        name,
-        email,
-        phone,
-        fulfillment: fulfillment === "DELIVERY" ? "DELIVERY" : "PICKUP",
-        deliveryAddress,
-        deliveryPhone,
-        referralCode,
-      });
+      const result = await orderService.guestCheckout(
+        {
+          items,
+          name,
+          email,
+          phone,
+          fulfillment: fulfillment === "DELIVERY" ? "DELIVERY" : "PICKUP",
+          deliveryAddress,
+          deliveryPhone,
+          referralCode,
+        },
+        req.headers.origin,
+      );
       return res.status(201).json(result);
     } catch (error) {
       return next(error);
@@ -79,12 +86,16 @@ export class OrderController {
       if (!Array.isArray(items) || items.length === 0) {
         throw new ApiError("At least one product is required", 400);
       }
-      const result = await orderService.bookingCheckout(req.user.id, {
-        appointmentId,
-        items,
-        serviceType: serviceType === "PARTIAL" ? "PARTIAL" : "FULL",
-        referralCode,
-      });
+      const result = await orderService.bookingCheckout(
+        req.user.id,
+        {
+          appointmentId,
+          items,
+          serviceType: serviceType === "PARTIAL" ? "PARTIAL" : "FULL",
+          referralCode,
+        },
+        req.headers.origin,
+      );
       return res.status(201).json(result);
     } catch (error) {
       return next(error);
@@ -127,7 +138,9 @@ export class OrderController {
       if (!userId) throw new ApiError("Authentication required", 401);
       const { id } = req.params;
       if (!id) throw new ApiError("Order id is required", 400);
-      return res.status(200).json(await orderService.repay(userId, id));
+      return res
+        .status(200)
+        .json(await orderService.repay(userId, id, req.headers.origin));
     } catch (error) {
       return next(error);
     }

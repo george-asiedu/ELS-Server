@@ -9,6 +9,7 @@ import { OrderService } from "../order/orderService";
 import { OnboardingService, isSignupReference } from "../onboarding/onboardingService";
 import { forgetStudioSlug } from "../tenant/studioResolver";
 import { AuditService } from "../audit/auditService";
+import { safeClientOrigin } from "../utils/helper";
 
 type PaymentType = "FULL" | "PARTIAL";
 
@@ -129,6 +130,7 @@ export class PaymentService extends Connection {
     appointmentId: string,
     type: PaymentType,
     userId: string,
+    origin?: string,
   ) {
     const { reference, charge, email } = await this.prepareBookingCharge(
       appointmentId,
@@ -141,7 +143,7 @@ export class PaymentService extends Connection {
       email,
       amountPesewas: Math.round(charge * 100),
       reference,
-      callbackUrl: `${env.clientUrl}/payment/callback`,
+      callbackUrl: `${safeClientOrigin(origin)}/payment/callback`,
       metadata: { appointmentId, type },
       subaccount,
     });
