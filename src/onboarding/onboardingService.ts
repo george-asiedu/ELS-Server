@@ -23,6 +23,10 @@ import {
 type BillingMode = "SUBSCRIPTION" | "REVENUE_SHARE";
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+// Min 8 chars with an uppercase, lowercase, number, and special character —
+// matches the login/signup validators so a new owner can sign in right after.
+const PASSWORD_RE =
+  /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[!@#$%^&*()_+\-=[\]{};'"\\|,.<>/?]).{8,}$/;
 
 // Signup references are prefixed so the shared Paystack webhook can tell a
 // studio-billing payment apart from a booking/order payment.
@@ -96,8 +100,13 @@ export class OnboardingService extends Connection {
       throw new ApiError("A valid email is required", HttpCode.BAD_REQUEST);
     }
     const ownerPassword = String(input.ownerPassword ?? "");
-    if (ownerPassword.length < 8) {
-      throw new ApiError("Password must be at least 8 characters", HttpCode.BAD_REQUEST);
+    // Enforce the SAME rules the login/signup validators use, so an owner can
+    // actually sign in afterwards with the password they set here.
+    if (!PASSWORD_RE.test(ownerPassword)) {
+      throw new ApiError(
+        "Password must be at least 8 characters and include an uppercase letter, a lowercase letter, a number, and a special character.",
+        HttpCode.BAD_REQUEST,
+      );
     }
     const plan: Plan = input.plan === "PREMIUM" ? "PREMIUM" : "STANDARD";
     const cadence: Cadence = input.cadence === "YEARLY" ? "YEARLY" : "MONTHLY";
