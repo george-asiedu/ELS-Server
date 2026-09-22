@@ -80,7 +80,7 @@ app.use(xss());
 app.use(compression());
 
 app.get("/", (_req: Request, res: Response) => {
-  res.send("Welcome to EL Beauty Studio API!");
+  res.send("Welcome to the Zuri Studios API!");
 });
 
 // Health check endpoint
