@@ -18,18 +18,16 @@ const loginSchema: JSONSchemaType<Login> = {
         format: "Email must be a valid email address",
       },
     },
+    // Login only checks that a password was provided — it must NOT re-apply the
+    // signup complexity rules, or an account whose (valid) password predates a
+    // rule change, or was set through a flow with different rules, could never
+    // sign in. Correctness is decided by the hash comparison in the service.
     password: {
       type: "string",
-      minLength: 8,
-      maxLength: 32,
-      pattern:
-        "^(?=.*[a-z])(?=.*[A-Z])(?=.*\\d)(?=.*[!@#$%^&*()_+\\-=[\\]{};'\"\\\\|,.<>/?]).+$",
+      minLength: 1,
       errorMessage: {
         type: "Password must be a string",
-        minLength: "Password must be at least 8 characters long",
-        maxLength: "Password must not exceed 32 characters",
-        pattern:
-          "Password must contain at least one uppercase letter, one lowercase letter, one number, and one special character",
+        minLength: "Password is required",
       },
     },
   },
