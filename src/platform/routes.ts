@@ -3,6 +3,7 @@ import { PlatformController } from "./platformController";
 import { FeatureRequestController } from "../featureRequest/featureRequestController";
 import { PlatformReviewController } from "../platformReview/platformReviewController";
 import { authenticate, requireSuperAdmin } from "../middleware/auth";
+import { getQueueStatus } from "../queue/queueStatus";
 
 const router: Router = Router();
 
@@ -35,6 +36,9 @@ router.delete("/reviews/:id", PlatformReviewController.remove);
 
 // Audit trail of platform actions.
 router.get("/audit-logs", PlatformController.listAudit);
+
+// Background job queues (email sending, payment reconciliation) — read-only.
+router.get("/queues", getQueueStatus);
 
 // Feature-request triage across all studios.
 router.get("/feature-requests", FeatureRequestController.platformList);
