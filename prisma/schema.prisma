@@ -610,6 +610,7 @@ model ContactInfo {
   email     String?
   instagram String?
   tiktok    String?
+  facebook  String?
   address   String?
 
   showPhone     Boolean @default(true)
@@ -617,6 +618,7 @@ model ContactInfo {
   showEmail     Boolean @default(true)
   showInstagram Boolean @default(true)
   showTiktok    Boolean @default(true)
+  showFacebook  Boolean @default(true)
   showAddress   Boolean @default(true)
 
   createdAt DateTime @default(now())
