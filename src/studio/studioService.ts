@@ -6,6 +6,7 @@ import { UploadedFile } from "../models/user";
 import { paystack } from "../payment/paystackClient";
 import { env } from "../config/env.config";
 import { randomUUID } from "crypto";
+import { shortId } from "../utils/shortId";
 import { promises as dns } from "dns";
 import { planFlags } from "../platform/platformService";
 import { AuditService } from "../audit/auditService";
@@ -409,7 +410,7 @@ export class StudioService extends Connection {
     if (!amountPesewas) {
       throw new ApiError("Billing is not configured for that plan", HttpCode.BAD_GATEWAY);
     }
-    const reference = `ZURI-BILLING-${randomUUID()}`;
+    const reference = `ZURI-BILLING-${shortId()}`;
     const init = await paystack.initialize({
       email,
       amountPesewas,
@@ -503,7 +504,7 @@ export class StudioService extends Connection {
     if (!amountPesewas) {
       throw new ApiError("Billing is not configured for that plan", HttpCode.BAD_GATEWAY);
     }
-    const reference = `ZURI-RENEW-${randomUUID()}`;
+    const reference = `ZURI-RENEW-${shortId()}`;
     const init = await paystack.initialize({
       email,
       amountPesewas,
