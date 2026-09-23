@@ -10,6 +10,7 @@ import { OnboardingService, isSignupReference } from "../onboarding/onboardingSe
 import { forgetStudioSlug } from "../tenant/studioResolver";
 import { AuditService } from "../audit/auditService";
 import { safeClientOrigin } from "../utils/helper";
+import { runAsSuperAdmin } from "../tenant/context";
 
 type PaymentType = "FULL" | "PARTIAL";
 
@@ -255,6 +256,105 @@ export class PaymentService extends Connection {
           : "pending";
 
     return { message: "Charge status", data: { reference, status } };
+  }
+
+  // Background sweep (see queue/workers/reconcileWorker.ts, run on a cron
+  // schedule): catches payments/orders that never got a final status because
+  // the Paystack webhook was lost/delayed and the customer never returned to
+  // the callback page to trigger a client-side verify. Runs across every
+  // studio, so it must run in the super-admin context (bypasses tenant
+  // scoping — see src/tenant/tenantExtension.ts).
+  public async reconcilePendingPayments() {
+    return runAsSuperAdmin(async () => {
+      const now = Date.now();
+      // Give a checkout at least 15 minutes before treating it as abandoned —
+      // the customer may still be entering their card/MoMo PIN.
+      const graceCutoff = new Date(now - 15 * 60 * 1000);
+      // Beyond 3 days, Paystack's own transaction has expired; there's nothing
+      // left to verify, so these are marked FAILED directly (no API call).
+      const deadCutoff = new Date(now - 3 * 24 * 60 * 60 * 1000);
+
+      const [stalePayments, staleOrders] = await Promise.all([
+        this.payment.findMany({
+          where: {
+            status: "PENDING",
+            reference: { not: null },
+            createdAt: { lt: graceCutoff, gt: deadCutoff },
+          },
+          select: { reference: true },
+        }),
+        this.order.findMany({
+          where: {
+            status: "PENDING_PAYMENT",
+            reference: { not: null },
+            createdAt: { lt: graceCutoff, gt: deadCutoff },
+          },
+          select: { reference: true },
+        }),
+      ]);
+
+      // A combined booking+products charge shares one reference across a
+      // Payment and an Order — dedupe so we verify each transaction once.
+      const references = new Set(
+        [...stalePayments, ...staleOrders]
+          .map((r) => r.reference)
+          .filter((r): r is string => !!r),
+      );
+
+      let recovered = 0; // Paystack now says success — payment/order finalized.
+      let failed = 0; // Paystack has a definitive non-success outcome.
+      const errors: string[] = [];
+      for (const reference of references) {
+        try {
+          const data = await paystack.verify(reference);
+          await this.processVerification(reference, data);
+          await this.orders.finalizeByReference(reference, data);
+          if (data.status === "success") recovered++;
+          else failed++;
+        } catch (error) {
+          errors.push(
+            `${reference}: ${error instanceof Error ? error.message : "unknown error"}`,
+          );
+        }
+      }
+
+      // Anything past the dead cutoff gets marked FAILED without calling
+      // Paystack — the transaction window has closed on their side too.
+      const [expiredPayments, expiredOrders] = await Promise.all([
+        this.payment.updateMany({
+          where: { status: "PENDING", reference: { not: null }, createdAt: { lte: deadCutoff } },
+          data: { status: "FAILED" },
+        }),
+        this.order.updateMany({
+          where: {
+            status: "PENDING_PAYMENT",
+            reference: { not: null },
+            createdAt: { lte: deadCutoff },
+          },
+          data: { status: "CANCELLED" },
+        }),
+      ]);
+
+      const result = {
+        checked: references.size,
+        recovered,
+        failed,
+        expired: expiredPayments.count + expiredOrders.count,
+        errors,
+      };
+
+      // Only log a run that actually found/changed something — a clean sweep
+      // every 15 minutes would otherwise flood the platform activity log.
+      if (result.checked > 0 || result.expired > 0) {
+        await this.audit.record({
+          actor: { email: "system", role: "cron" },
+          action: "payments.reconciled",
+          metadata: result,
+        });
+      }
+
+      return result;
+    });
   }
 
   // Shared by verify + webhook. Idempotently marks the payment paid and emails
