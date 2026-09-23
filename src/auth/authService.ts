@@ -9,9 +9,13 @@ import {
 import { ApiError } from "../middleware/apiError";
 import { env } from "../config/env.config";
 import { randomBytes, createHash } from "crypto";
-import { EmailService } from "../email/emailService";
+import { getTenantContext } from "../tenant/context";
+import { NotificationService } from "../notifications/notificationService";
+import { NotificationTemplate } from "../notifications/registry";
+import { passwordResetRequested, passwordChanged, customerWelcome } from "../notifications/templates/auth";
+import { EmailBrand } from "../notifications/types";
 
-const emailService = new EmailService();
+const notifications = new NotificationService();
 
 export class AuthService extends UserRepository {
   public async signup(data: Signup) {
@@ -54,6 +58,30 @@ export class AuthService extends UserRepository {
       studioId: newUser.studioId,
     };
     const token = loginToken(payload);
+
+    // Best-effort welcome email — never blocks account creation if it fails.
+    try {
+      const studio = await this.currentStudioBranding();
+      const brand: EmailBrand = studio
+        ? { kind: "studio", studio }
+        : { kind: "zuri", zuri: { name: "Zuri Studios", websiteUrl: env.clientUrl, supportEmail: env.senderEmail } };
+      const { subject, html } = customerWelcome(brand, {
+        firstName: data.fullName?.split(" ")[0] || "there",
+        ...(studio?.name ? { studioName: studio.name } : {}),
+        ...(studio?.websiteUrl ? { studioUrl: studio.websiteUrl } : {}),
+      });
+      await notifications.send({
+        template: NotificationTemplate.CUSTOMER_WELCOME,
+        to: newUser.email,
+        subject,
+        html,
+        studioId: newUser.studioId ?? null,
+        entityType: "User",
+        entityId: newUser.id,
+      });
+    } catch (error) {
+      console.error("Failed to send welcome email:", error);
+    }
 
     return {
       message: "User created successfully",
@@ -132,11 +160,25 @@ export class AuthService extends UserRepository {
     const resetUrl = `${env.clientUrl}/reset-password/${resetToken}`;
 
     try {
-      await emailService.sendPasswordReset(
-        user.email,
+      const studio = await this.currentStudioBranding();
+      const brand: EmailBrand = studio
+        ? { kind: "studio", studio }
+        : { kind: "zuri", zuri: { name: "Zuri Studios", websiteUrl: env.clientUrl, supportEmail: env.senderEmail } };
+      const { subject, html } = passwordResetRequested(brand, {
         resetUrl,
-        await this.currentStudioName(),
-      );
+        expiresInMinutes: 60,
+      });
+      await notifications.send({
+        template: NotificationTemplate.AUTH_PASSWORD_RESET_REQUESTED,
+        to: user.email,
+        subject,
+        html,
+        studioId: getTenantContext()?.studioId ?? null,
+        entityType: "User",
+        // Keyed by the token hash, not the user id — each request is its own
+        // event (a user can legitimately request a reset more than once).
+        entityId: hashedToken,
+      });
     } catch (error) {
       // Roll back the token if the email couldn't even be queued/sent. Once a
       // queue is configured (REDIS_URL), "sent" here just means "enqueued" —
@@ -171,7 +213,31 @@ export class AuthService extends UserRepository {
       // hash new password and update user; clear reset token fields
       const newHashedPassword = await getPasswordHash(newPassword);
       await this.resetPasswordByUserId(user.id, newHashedPassword);
-  
+
+      // Best-effort security notification — never blocks the (already
+      // successful) password reset if it fails.
+      try {
+        const studio = await this.currentStudioBranding();
+        const brand: EmailBrand = studio
+          ? { kind: "studio", studio }
+          : { kind: "zuri", zuri: { name: "Zuri Studios", websiteUrl: env.clientUrl, supportEmail: env.senderEmail } };
+        const { subject, html } = passwordChanged(brand, {
+          email: user.email,
+          changedAt: new Date().toLocaleString("en-GB", { dateStyle: "medium", timeStyle: "short" }),
+        });
+        await notifications.send({
+          template: NotificationTemplate.AUTH_PASSWORD_CHANGED,
+          to: user.email,
+          subject,
+          html,
+          studioId: getTenantContext()?.studioId ?? null,
+          entityType: "User",
+          entityId: `${user.id}:${hashedToken}`,
+        });
+      } catch (error) {
+        console.error("Failed to send password-changed notification:", error);
+      }
+
       return { message: "Password has been reset successfully" };
     }
 }
