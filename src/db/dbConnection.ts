@@ -1,5 +1,7 @@
 import { createTenantClient, RawDb, TenantDb } from "../tenant/tenantClient";
 import { getTenantContext } from "../tenant/context";
+import { env } from "../config/env.config";
+import { StudioBrandingInfo } from "../notifications/types";
 
 /**
  * Base class every service extends. It exposes the Prisma model delegates as
@@ -86,6 +88,73 @@ export class Connection {
     return studio?.name ?? "Zuri Studios";
   }
 
+  // Full studio branding (name, logo, colour, storefront/booking URLs, contact
+  // details) — used to render studio-branded notification emails so one
+  // template works for every studio. Returns null when there's no studio to
+  // resolve.
+  //
+  // Pass `studioIdOverride` when calling from OUTSIDE that studio's own
+  // request context — e.g. a cron sweep running in the super-admin context
+  // (reconcilePendingPayments, billing reminders), which has to build the
+  // *payment/studio row's own* branding, not whatever's ambient. This matters
+  // because of how the tenant extension behaves (see tenantExtension.ts):
+  // in a normal per-request (non-super-admin) context it silently overwrites
+  // any `where.studioId` you pass with the ambient one, but in the
+  // super-admin context scoping is bypassed entirely and an explicit
+  // `where.studioId` is honoured as-is — so `contactInfo.findFirst` MUST be
+  // given it explicitly here, or a cron job would read an arbitrary studio's
+  // contact info instead of the one it's actually notifying.
+  protected async currentStudioBranding(
+    studioIdOverride?: string,
+  ): Promise<(StudioBrandingInfo & { slug: string }) | null> {
+    const studioId = studioIdOverride ?? getTenantContext()?.studioId;
+    if (!studioId) return null;
+    const [studio, branding, contact] = await Promise.all([
+      this.studio.findUnique({ where: { id: studioId }, select: { name: true, slug: true } }),
+      this.studioBranding.findUnique({ where: { studioId }, select: { logoUrl: true, primaryColor: true } }),
+      this.contactInfo.findFirst({ where: { studioId }, select: { email: true, phone: true, address: true } }),
+    ]);
+    if (!studio) return null;
+    const websiteUrl = env.rootDomain
+      ? `https://${studio.slug}.${env.rootDomain}`
+      : `${env.clientUrl}/s/${studio.slug}`;
+    return {
+      name: studio.name,
+      slug: studio.slug,
+      logoUrl: branding?.logoUrl ?? null,
+      primaryColor: branding?.primaryColor ?? null,
+      websiteUrl,
+      bookingUrl: `${websiteUrl}/book`,
+      email: contact?.email ?? null,
+      phone: contact?.phone ?? null,
+      address: contact?.address ?? null,
+    };
+  }
+
+  // Where to send a studio-owner notification (new booking request, etc): the
+  // studio's published contact email if set and shown, else the account
+  // owner's login email. Null when neither is available.
+  protected async currentStudioNotifyEmail(studioIdOverride?: string): Promise<string | null> {
+    const studioId = studioIdOverride ?? getTenantContext()?.studioId;
+    if (!studioId) return null;
+    const contact = await this.contactInfo.findFirst({
+      where: { studioId },
+      select: { email: true, showEmail: true },
+    });
+    if (contact?.showEmail && contact.email) return contact.email;
+
+    const studio = await this.studio.findUnique({
+      where: { id: studioId },
+      select: { ownerUserId: true },
+    });
+    if (!studio?.ownerUserId) return null;
+    const owner = await this.user.findUnique({
+      where: { id: studio.ownerUserId },
+      select: { email: true },
+    });
+    return owner?.email ?? null;
+  }
+
   // Max share of a booking/order payable with loyalty points, as a ratio, from
   // the current studio's settings (studio-admin controlled). Defaults to 0.3.
   protected async loyaltyCapRatio(): Promise<number> {
@@ -105,6 +174,7 @@ export class Connection {
   get studioSettings() { return this.db.studioSettings; }
   get featureRequest() { return this.db.featureRequest; }
   get auditLog() { return this.db.auditLog; }
+  get notificationLog() { return this.db.notificationLog; }
   get studioSignup() { return this.db.studioSignup; }
   get platformReview() { return this.db.platformReview; }
   get platformConfig() { return this.db.platformConfig; }

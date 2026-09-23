@@ -260,6 +260,33 @@ model AuditLog {
   @@map("audit_logs")
 }
 
+// Delivery record for every notification email the platform sends. Not
+// tenant-scoped (mirrors AuditLog) — background jobs (cron, webhooks) send
+// across studios with no request-scoped tenant context.
+//
+// The unique constraint is the idempotency guarantee: the same business event
+// (a template + the entity it's about + who it went to) can only ever create
+// one row, so a retried webhook/mutation/cron tick can't double-send a
+// financial or booking email even if it calls notificationService.send again.
+model NotificationLog {
+  id         String   @id @default(cuid())
+  studioId   String?
+  template   String // e.g. "PAYMENT_SUCCESS" — see notifications/registry.ts
+  recipient  String
+  entityType String? // e.g. "Payment", "Appointment", "Order", "Studio"
+  entityId   String?
+  status     String // QUEUED | SENT | FAILED
+  error      String?
+
+  createdAt DateTime  @default(now())
+  sentAt    DateTime?
+
+  @@unique([template, entityId, recipient])
+  @@index([studioId])
+  @@index([createdAt])
+  @@map("notification_logs")
+}
+
 // A testimonial a studio submits about the platform, shown on the marketing
 // landing page after the super admin approves it. Not tenant-scoped.
 model PlatformReview {

@@ -20,6 +20,19 @@ import {
   resolveStudioByDomain,
   forgetStudioDomain,
 } from "../tenant/studioResolver";
+import { runAsSuperAdmin } from "../tenant/context";
+import { NotificationService } from "../notifications/notificationService";
+import { NotificationTemplate } from "../notifications/registry";
+import {
+  subscriptionExpiringSoon,
+  subscriptionExpired,
+} from "../notifications/templates/subscription";
+import { EmailBrand } from "../notifications/types";
+
+const zuriBillingBrand: EmailBrand = {
+  kind: "zuri",
+  zuri: { name: "Zuri Studios", websiteUrl: env.clientUrl, supportEmail: env.senderEmail },
+};
 
 const DOMAIN_RE = /^(?!-)[a-z0-9-]{1,63}(\.[a-z0-9-]{1,63})+$/;
 const normalizeDomain = (raw: string) =>
@@ -79,6 +92,8 @@ const sanitizeFeatureCards = (value: unknown): FeatureCard[] | undefined => {
  * id (they aren't auto-scoped by the tenant extension).
  */
 export class StudioService extends Connection {
+  private notifications = new NotificationService();
+
   private audit = new AuditService();
 
   constructor(private s3: S3BucketService) {
@@ -829,5 +844,98 @@ export class StudioService extends Connection {
       create: { studioId: id, ...data },
     });
     return { message: "Content updated", data: content };
+  }
+
+  // Background sweep (see queue/workers/billingReminderWorker.ts, run on a
+  // cron schedule): emails SUBSCRIPTION-mode studio owners as their paid
+  // period approaches or has passed. Manual-renewal billing (see
+  // billing/billingPlans.ts) never auto-charges or auto-suspends — this is
+  // purely a reminder so an owner doesn't get caught out. Runs across every
+  // studio, so it must run in the super-admin context.
+  public async checkBillingReminders() {
+    return runAsSuperAdmin(async () => {
+      const now = new Date();
+      const soonCutoff = new Date(now.getTime() + 3 * 24 * 60 * 60 * 1000);
+
+      const studios = await this.studio.findMany({
+        where: {
+          billingMode: "SUBSCRIPTION",
+          currentPeriodEnd: { lt: soonCutoff },
+        },
+        select: {
+          id: true,
+          name: true,
+          plan: true,
+          billingCadence: true,
+          currentPeriodEnd: true,
+          ownerUserId: true,
+        },
+      });
+
+      let expiringSoon = 0;
+      let expired = 0;
+      for (const studio of studios) {
+        if (!studio.ownerUserId || !studio.currentPeriodEnd) continue;
+        const owner = await this.user.findUnique({
+          where: { id: studio.ownerUserId },
+          select: { email: true },
+        });
+        if (!owner?.email) continue;
+
+        const lapsed = isLapsed(studio.currentPeriodEnd);
+        const planName = studio.plan === "PREMIUM" ? "Premium" : "Standard";
+        const periodKey = studio.currentPeriodEnd.toISOString().slice(0, 10);
+
+        try {
+          if (lapsed) {
+            const { subject, html } = subscriptionExpired(zuriBillingBrand, {
+              planName,
+              expiredOn: studio.currentPeriodEnd.toLocaleDateString("en-GB", {
+                day: "numeric",
+                month: "long",
+                year: "numeric",
+              }),
+              reactivateUrl: `${env.clientUrl}/admin/billing`,
+            });
+            await this.notifications.send({
+              template: NotificationTemplate.SUBSCRIPTION_EXPIRED,
+              to: owner.email,
+              subject,
+              html,
+              studioId: studio.id,
+              entityType: "Studio",
+              entityId: `${studio.id}:expired:${periodKey}`,
+            });
+            expired++;
+          } else {
+            const amountDue = `GHS ${pricePesewas(studio.plan as Plan, studio.billingCadence as Cadence) / 100}`;
+            const { subject, html } = subscriptionExpiringSoon(zuriBillingBrand, {
+              planName,
+              renewsOn: studio.currentPeriodEnd.toLocaleDateString("en-GB", {
+                day: "numeric",
+                month: "long",
+                year: "numeric",
+              }),
+              amountDue,
+              manageUrl: `${env.clientUrl}/admin/billing`,
+            });
+            await this.notifications.send({
+              template: NotificationTemplate.SUBSCRIPTION_EXPIRING_SOON,
+              to: owner.email,
+              subject,
+              html,
+              studioId: studio.id,
+              entityType: "Studio",
+              entityId: `${studio.id}:expiring:${periodKey}`,
+            });
+            expiringSoon++;
+          }
+        } catch (error) {
+          console.error(`Failed to send billing reminder for studio ${studio.id}:`, error);
+        }
+      }
+
+      return { checked: studios.length, expiringSoon, expired };
+    });
   }
 }

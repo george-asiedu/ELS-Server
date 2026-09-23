@@ -19,6 +19,15 @@ import {
   pricePesewas,
   addPeriod,
 } from "../billing/billingPlans";
+import { NotificationService } from "../notifications/notificationService";
+import { NotificationTemplate } from "../notifications/registry";
+import { studioCreated } from "../notifications/templates/studio";
+import { EmailBrand } from "../notifications/types";
+
+const zuriBrand: EmailBrand = {
+  kind: "zuri",
+  zuri: { name: "Zuri Studios", websiteUrl: env.clientUrl, supportEmail: env.senderEmail },
+};
 
 type BillingMode = "SUBSCRIPTION" | "REVENUE_SHARE";
 
@@ -42,6 +51,7 @@ export const isSignupReference = (ref: string) => ref.startsWith(SIGNUP_PREFIX);
 export class OnboardingService extends Connection {
   private platform = new PlatformService();
   private audit = new AuditService();
+  private notifications = new NotificationService();
 
   public async availability(rawSlug: string) {
     let slug: string;
@@ -284,6 +294,30 @@ export class OnboardingService extends Connection {
         ownerEmail: signup.ownerEmail,
       },
     });
+
+    try {
+      const websiteUrl = env.rootDomain
+        ? `https://${studio.slug}.${env.rootDomain}`
+        : `${env.clientUrl}/s/${studio.slug}`;
+      const { subject, html } = studioCreated(zuriBrand, {
+        ownerFirstName: (signup.ownerFullName?.split(" ")[0]) || "there",
+        studioName: studio.name,
+        planName: plan === "PREMIUM" ? "Premium" : "Standard",
+        dashboardUrl: `${env.clientUrl}/admin/login`,
+        storefrontUrl: websiteUrl,
+      });
+      await this.notifications.send({
+        template: NotificationTemplate.STUDIO_CREATED,
+        to: signup.ownerEmail,
+        subject,
+        html,
+        studioId: studio.id,
+        entityType: "Studio",
+        entityId: studio.id,
+      });
+    } catch (error) {
+      console.error("Failed to send studio-created email:", error);
+    }
 
     return {
       message: "Provisioned",

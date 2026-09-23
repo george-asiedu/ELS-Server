@@ -4,12 +4,17 @@ import { Connection } from "../db/dbConnection";
 import { ApiError } from "../middleware/apiError";
 import { env } from "../config/env.config";
 import { paystack, PaystackVerifyData } from "./paystackClient";
-import { EmailService } from "../email/emailService";
 import { OrderService } from "../order/orderService";
 import { OnboardingService, isSignupReference } from "../onboarding/onboardingService";
 import { forgetStudioSlug } from "../tenant/studioResolver";
 import { AuditService } from "../audit/auditService";
 import { safeClientOrigin } from "../utils/helper";
+import { runAsSuperAdmin } from "../tenant/context";
+import { NotificationService } from "../notifications/notificationService";
+import { NotificationTemplate } from "../notifications/registry";
+import { paymentSuccess, paymentFailed } from "../notifications/templates/payment";
+import { EmailBrand, MoneyLine } from "../notifications/types";
+import { ghs } from "../notifications/format";
 
 type PaymentType = "FULL" | "PARTIAL";
 
@@ -25,6 +30,7 @@ interface PaymentWithAppointment {
   totalAmount: number;
   type: string;
   reference: string | null;
+  studioId: string | null;
   appointment: {
     email: string | null;
     fullName: string;
@@ -35,7 +41,7 @@ interface PaymentWithAppointment {
 }
 
 export class PaymentService extends Connection {
-  private email = new EmailService();
+  private notifications = new NotificationService();
   private orders = new OrderService();
   private onboarding = new OnboardingService();
   private audit = new AuditService();
@@ -257,6 +263,105 @@ export class PaymentService extends Connection {
     return { message: "Charge status", data: { reference, status } };
   }
 
+  // Background sweep (see queue/workers/reconcileWorker.ts, run on a cron
+  // schedule): catches payments/orders that never got a final status because
+  // the Paystack webhook was lost/delayed and the customer never returned to
+  // the callback page to trigger a client-side verify. Runs across every
+  // studio, so it must run in the super-admin context (bypasses tenant
+  // scoping — see src/tenant/tenantExtension.ts).
+  public async reconcilePendingPayments() {
+    return runAsSuperAdmin(async () => {
+      const now = Date.now();
+      // Give a checkout at least 15 minutes before treating it as abandoned —
+      // the customer may still be entering their card/MoMo PIN.
+      const graceCutoff = new Date(now - 15 * 60 * 1000);
+      // Beyond 3 days, Paystack's own transaction has expired; there's nothing
+      // left to verify, so these are marked FAILED directly (no API call).
+      const deadCutoff = new Date(now - 3 * 24 * 60 * 60 * 1000);
+
+      const [stalePayments, staleOrders] = await Promise.all([
+        this.payment.findMany({
+          where: {
+            status: "PENDING",
+            reference: { not: null },
+            createdAt: { lt: graceCutoff, gt: deadCutoff },
+          },
+          select: { reference: true },
+        }),
+        this.order.findMany({
+          where: {
+            status: "PENDING_PAYMENT",
+            reference: { not: null },
+            createdAt: { lt: graceCutoff, gt: deadCutoff },
+          },
+          select: { reference: true },
+        }),
+      ]);
+
+      // A combined booking+products charge shares one reference across a
+      // Payment and an Order — dedupe so we verify each transaction once.
+      const references = new Set(
+        [...stalePayments, ...staleOrders]
+          .map((r) => r.reference)
+          .filter((r): r is string => !!r),
+      );
+
+      let recovered = 0; // Paystack now says success — payment/order finalized.
+      let failed = 0; // Paystack has a definitive non-success outcome.
+      const errors: string[] = [];
+      for (const reference of references) {
+        try {
+          const data = await paystack.verify(reference);
+          await this.processVerification(reference, data);
+          await this.orders.finalizeByReference(reference, data);
+          if (data.status === "success") recovered++;
+          else failed++;
+        } catch (error) {
+          errors.push(
+            `${reference}: ${error instanceof Error ? error.message : "unknown error"}`,
+          );
+        }
+      }
+
+      // Anything past the dead cutoff gets marked FAILED without calling
+      // Paystack — the transaction window has closed on their side too.
+      const [expiredPayments, expiredOrders] = await Promise.all([
+        this.payment.updateMany({
+          where: { status: "PENDING", reference: { not: null }, createdAt: { lte: deadCutoff } },
+          data: { status: "FAILED" },
+        }),
+        this.order.updateMany({
+          where: {
+            status: "PENDING_PAYMENT",
+            reference: { not: null },
+            createdAt: { lte: deadCutoff },
+          },
+          data: { status: "CANCELLED" },
+        }),
+      ]);
+
+      const result = {
+        checked: references.size,
+        recovered,
+        failed,
+        expired: expiredPayments.count + expiredOrders.count,
+        errors,
+      };
+
+      // Only log a run that actually found/changed something — a clean sweep
+      // every 15 minutes would otherwise flood the platform activity log.
+      if (result.checked > 0 || result.expired > 0) {
+        await this.audit.record({
+          actor: { email: "system", role: "cron" },
+          action: "payments.reconciled",
+          metadata: result,
+        });
+      }
+
+      return result;
+    });
+  }
+
   // Shared by verify + webhook. Idempotently marks the payment paid and emails
   // the receipt the first time it transitions to PAID. Returns null when no
   // payment matches the reference (order-only / combined charges).
@@ -295,6 +400,7 @@ export class PaymentService extends Connection {
         include: appointmentInclude,
       });
       await this.auditPayment("payment.booking.failed", failed, data);
+      await this.sendPaymentFailedNotification(failed);
       return failed;
     }
 
@@ -351,28 +457,80 @@ export class PaymentService extends Connection {
     });
   }
 
-  private async sendReceipt(payment: PaymentWithAppointment) {
+  // `studioIdOverride` is required when called from outside the studio's own
+  // request context (e.g. the reconciliation cron, which runs in the
+  // super-admin context — see currentStudioBranding's doc comment).
+  private async brandForNotification(studioIdOverride?: string | null): Promise<EmailBrand> {
+    const studio = await this.currentStudioBranding(studioIdOverride ?? undefined);
+    return studio
+      ? { kind: "studio", studio }
+      : {
+          kind: "zuri",
+          zuri: { name: "Zuri Studios", websiteUrl: "https://zuristudios.com", supportEmail: "hello@zuristudios.com" },
+        };
+  }
+
+  private async sendReceipt(
+    payment: PaymentWithAppointment & { id: string },
+  ) {
     const appt = payment.appointment;
     if (!appt?.email) return;
-    const balance = Math.max(0, payment.totalAmount - payment.amount);
     try {
-      await this.email.sendPaymentReceipt(
-        appt.email,
-        {
-          fullName: appt.fullName,
-          serviceName: appt.service?.name ?? "your service",
-          reference: payment.reference ?? "",
-          amountPaid: payment.amount,
-          totalAmount: payment.totalAmount,
-          type: payment.type as PaymentType,
-          balance,
-          date: appt.appointmentDate.toISOString().slice(0, 10),
-          time: appt.appointmentTime,
-        },
-        await this.currentStudioName(),
-      );
+      const balance = Math.max(0, payment.totalAmount - payment.amount);
+      const isPartial = payment.type === "PARTIAL";
+      const lines: MoneyLine[] = [
+        { label: "Total", value: ghs(payment.totalAmount) },
+        { label: isPartial ? "Deposit paid" : "Amount paid", value: ghs(payment.amount) },
+        ...(balance > 0 ? [{ label: "Balance due at studio", value: ghs(balance), muted: true }] : []),
+      ];
+      const brand = await this.brandForNotification(payment.studioId);
+      const { subject, html } = paymentSuccess(brand, {
+        customerFirstName: appt.fullName.split(" ")[0] || appt.fullName,
+        serviceName: appt.service?.name ?? "your service",
+        reference: payment.reference ?? payment.id,
+        isPartial,
+        lines,
+        ...(brand.kind === "studio" && brand.studio.bookingUrl ? { viewUrl: brand.studio.bookingUrl } : {}),
+      });
+      await this.notifications.send({
+        template: NotificationTemplate.PAYMENT_SUCCESS,
+        to: appt.email,
+        subject,
+        html,
+        studioId: payment.studioId,
+        entityType: "Payment",
+        entityId: payment.id,
+      });
     } catch (error) {
       console.error("Failed to send payment receipt email:", error);
+    }
+  }
+
+  private async sendPaymentFailedNotification(
+    payment: PaymentWithAppointment & { id: string },
+  ) {
+    const appt = payment.appointment;
+    if (!appt?.email) return;
+    try {
+      const brand = await this.brandForNotification(payment.studioId);
+      const { subject, html } = paymentFailed(brand, {
+        customerFirstName: appt.fullName.split(" ")[0] || appt.fullName,
+        serviceName: appt.service?.name ?? "your service",
+        amountAttempted: ghs(payment.amount),
+        reference: payment.reference ?? payment.id,
+        ...(brand.kind === "studio" && brand.studio.bookingUrl ? { retryUrl: brand.studio.bookingUrl } : {}),
+      });
+      await this.notifications.send({
+        template: NotificationTemplate.PAYMENT_FAILED,
+        to: appt.email,
+        subject,
+        html,
+        studioId: payment.studioId,
+        entityType: "Payment",
+        entityId: payment.id,
+      });
+    } catch (error) {
+      console.error("Failed to send payment-failed email:", error);
     }
   }
 
