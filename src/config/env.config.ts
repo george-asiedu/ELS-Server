@@ -51,6 +51,11 @@ export const env = {
       (process.env.PLUNK_API_URL as string) ||
       "https://next-api.useplunk.com/v1/send",
   },
+  // Optional. When set, BullMQ queues (email sending, payment reconciliation)
+  // run against this Redis instance and jobs are processed in the background
+  // with retries. When unset, the app still works: emails send synchronously
+  // inline and there's no reconciliation sweep — see src/queue/README.md.
+  redisUrl: (process.env.REDIS_URL as string) || "",
   clientUrl: process.env.CLIENT_URL as string,
   // Studio slug used when a request carries no studio hint (subdomain/header).
   // Bridges the existing single-tenant frontend during the multi-tenant rollout.
