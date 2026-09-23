@@ -4,13 +4,17 @@ import { Connection } from "../db/dbConnection";
 import { ApiError } from "../middleware/apiError";
 import { env } from "../config/env.config";
 import { paystack, PaystackVerifyData } from "./paystackClient";
-import { EmailService } from "../email/emailService";
 import { OrderService } from "../order/orderService";
 import { OnboardingService, isSignupReference } from "../onboarding/onboardingService";
 import { forgetStudioSlug } from "../tenant/studioResolver";
 import { AuditService } from "../audit/auditService";
 import { safeClientOrigin } from "../utils/helper";
 import { runAsSuperAdmin } from "../tenant/context";
+import { NotificationService } from "../notifications/notificationService";
+import { NotificationTemplate } from "../notifications/registry";
+import { paymentSuccess, paymentFailed } from "../notifications/templates/payment";
+import { EmailBrand, MoneyLine } from "../notifications/types";
+import { ghs } from "../notifications/format";
 
 type PaymentType = "FULL" | "PARTIAL";
 
@@ -26,6 +30,7 @@ interface PaymentWithAppointment {
   totalAmount: number;
   type: string;
   reference: string | null;
+  studioId: string | null;
   appointment: {
     email: string | null;
     fullName: string;
@@ -36,7 +41,7 @@ interface PaymentWithAppointment {
 }
 
 export class PaymentService extends Connection {
-  private email = new EmailService();
+  private notifications = new NotificationService();
   private orders = new OrderService();
   private onboarding = new OnboardingService();
   private audit = new AuditService();
@@ -395,6 +400,7 @@ export class PaymentService extends Connection {
         include: appointmentInclude,
       });
       await this.auditPayment("payment.booking.failed", failed, data);
+      await this.sendPaymentFailedNotification(failed);
       return failed;
     }
 
@@ -451,28 +457,80 @@ export class PaymentService extends Connection {
     });
   }
 
-  private async sendReceipt(payment: PaymentWithAppointment) {
+  // `studioIdOverride` is required when called from outside the studio's own
+  // request context (e.g. the reconciliation cron, which runs in the
+  // super-admin context — see currentStudioBranding's doc comment).
+  private async brandForNotification(studioIdOverride?: string | null): Promise<EmailBrand> {
+    const studio = await this.currentStudioBranding(studioIdOverride ?? undefined);
+    return studio
+      ? { kind: "studio", studio }
+      : {
+          kind: "zuri",
+          zuri: { name: "Zuri Studios", websiteUrl: "https://zuristudios.com", supportEmail: "hello@zuristudios.com" },
+        };
+  }
+
+  private async sendReceipt(
+    payment: PaymentWithAppointment & { id: string },
+  ) {
     const appt = payment.appointment;
     if (!appt?.email) return;
-    const balance = Math.max(0, payment.totalAmount - payment.amount);
     try {
-      await this.email.sendPaymentReceipt(
-        appt.email,
-        {
-          fullName: appt.fullName,
-          serviceName: appt.service?.name ?? "your service",
-          reference: payment.reference ?? "",
-          amountPaid: payment.amount,
-          totalAmount: payment.totalAmount,
-          type: payment.type as PaymentType,
-          balance,
-          date: appt.appointmentDate.toISOString().slice(0, 10),
-          time: appt.appointmentTime,
-        },
-        await this.currentStudioName(),
-      );
+      const balance = Math.max(0, payment.totalAmount - payment.amount);
+      const isPartial = payment.type === "PARTIAL";
+      const lines: MoneyLine[] = [
+        { label: "Total", value: ghs(payment.totalAmount) },
+        { label: isPartial ? "Deposit paid" : "Amount paid", value: ghs(payment.amount) },
+        ...(balance > 0 ? [{ label: "Balance due at studio", value: ghs(balance), muted: true }] : []),
+      ];
+      const brand = await this.brandForNotification(payment.studioId);
+      const { subject, html } = paymentSuccess(brand, {
+        customerFirstName: appt.fullName.split(" ")[0] || appt.fullName,
+        serviceName: appt.service?.name ?? "your service",
+        reference: payment.reference ?? payment.id,
+        isPartial,
+        lines,
+        ...(brand.kind === "studio" && brand.studio.bookingUrl ? { viewUrl: brand.studio.bookingUrl } : {}),
+      });
+      await this.notifications.send({
+        template: NotificationTemplate.PAYMENT_SUCCESS,
+        to: appt.email,
+        subject,
+        html,
+        studioId: payment.studioId,
+        entityType: "Payment",
+        entityId: payment.id,
+      });
     } catch (error) {
       console.error("Failed to send payment receipt email:", error);
+    }
+  }
+
+  private async sendPaymentFailedNotification(
+    payment: PaymentWithAppointment & { id: string },
+  ) {
+    const appt = payment.appointment;
+    if (!appt?.email) return;
+    try {
+      const brand = await this.brandForNotification(payment.studioId);
+      const { subject, html } = paymentFailed(brand, {
+        customerFirstName: appt.fullName.split(" ")[0] || appt.fullName,
+        serviceName: appt.service?.name ?? "your service",
+        amountAttempted: ghs(payment.amount),
+        reference: payment.reference ?? payment.id,
+        ...(brand.kind === "studio" && brand.studio.bookingUrl ? { retryUrl: brand.studio.bookingUrl } : {}),
+      });
+      await this.notifications.send({
+        template: NotificationTemplate.PAYMENT_FAILED,
+        to: appt.email,
+        subject,
+        html,
+        studioId: payment.studioId,
+        entityType: "Payment",
+        entityId: payment.id,
+      });
+    } catch (error) {
+      console.error("Failed to send payment-failed email:", error);
     }
   }
 
