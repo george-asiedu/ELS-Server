@@ -6,12 +6,14 @@ export interface ContactInfoInput {
   email?: string | null;
   instagram?: string | null;
   tiktok?: string | null;
+  facebook?: string | null;
   address?: string | null;
   showPhone?: boolean;
   showWhatsapp?: boolean;
   showEmail?: boolean;
   showInstagram?: boolean;
   showTiktok?: boolean;
+  showFacebook?: boolean;
   showAddress?: boolean;
 }
 
@@ -38,12 +40,14 @@ export class ContactService extends Connection {
         ...(data.email !== undefined ? { email: data.email } : {}),
         ...(data.instagram !== undefined ? { instagram: data.instagram } : {}),
         ...(data.tiktok !== undefined ? { tiktok: data.tiktok } : {}),
+        ...(data.facebook !== undefined ? { facebook: data.facebook } : {}),
         ...(data.address !== undefined ? { address: data.address } : {}),
         ...(data.showPhone !== undefined ? { showPhone: data.showPhone } : {}),
         ...(data.showWhatsapp !== undefined ? { showWhatsapp: data.showWhatsapp } : {}),
         ...(data.showEmail !== undefined ? { showEmail: data.showEmail } : {}),
         ...(data.showInstagram !== undefined ? { showInstagram: data.showInstagram } : {}),
         ...(data.showTiktok !== undefined ? { showTiktok: data.showTiktok } : {}),
+        ...(data.showFacebook !== undefined ? { showFacebook: data.showFacebook } : {}),
         ...(data.showAddress !== undefined ? { showAddress: data.showAddress } : {}),
       },
     });
