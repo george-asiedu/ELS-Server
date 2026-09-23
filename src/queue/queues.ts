@@ -15,9 +15,14 @@ export interface ReconcilePaymentsJobData {
   triggeredBy?: "cron" | "manual";
 }
 
+export interface BillingRemindersJobData {
+  triggeredBy?: "cron" | "manual";
+}
+
 const QUEUE_NAMES = {
   email: "email",
   reconcilePayments: "reconcile-payments",
+  billingReminders: "billing-reminders",
 } as const;
 
 // Queues are only constructed when Redis is configured. Callers must check
@@ -37,6 +42,18 @@ export const emailQueue = isQueueEnabled()
 
 export const reconcilePaymentsQueue = isQueueEnabled()
   ? new Queue<ReconcilePaymentsJobData>(QUEUE_NAMES.reconcilePayments, {
+      connection: getRedisConnection()!,
+      defaultJobOptions: {
+        attempts: 3,
+        backoff: { type: "exponential", delay: 60_000 },
+        removeOnComplete: { age: 60 * 60 * 24 * 3, count: 100 },
+        removeOnFail: { age: 60 * 60 * 24 * 14 },
+      },
+    })
+  : null;
+
+export const billingRemindersQueue = isQueueEnabled()
+  ? new Queue<BillingRemindersJobData>(QUEUE_NAMES.billingReminders, {
       connection: getRedisConnection()!,
       defaultJobOptions: {
         attempts: 3,
