@@ -138,7 +138,10 @@ export class AuthService extends UserRepository {
         await this.currentStudioName(),
       );
     } catch (error) {
-      // Roll back the token if the email couldn't be delivered.
+      // Roll back the token if the email couldn't even be queued/sent. Once a
+      // queue is configured (REDIS_URL), "sent" here just means "enqueued" —
+      // a delivery failure after retries happens later in the worker and can't
+      // roll this back; that's the normal tradeoff of background email.
       await this.setResetTokenForUser(user.id, "", new Date(0));
       throw new ApiError("Failed to send password reset email", 500);
     }
