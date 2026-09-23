@@ -4,6 +4,16 @@ import { HttpCode } from "../models/status_codes";
 import { getPasswordHash, loginToken } from "../utils/helper";
 import { forgetStudioSlug } from "../tenant/studioResolver";
 import { paystack } from "../payment/paystackClient";
+import { NotificationService } from "../notifications/notificationService";
+import { NotificationTemplate } from "../notifications/registry";
+import { studioAccountSuspended } from "../notifications/templates/studio";
+import { EmailBrand } from "../notifications/types";
+import { env } from "../config/env.config";
+
+const zuriBrand: EmailBrand = {
+  kind: "zuri",
+  zuri: { name: "Zuri Studios", websiteUrl: env.clientUrl, supportEmail: env.senderEmail },
+};
 
 // Slugs that can never belong to a studio: they collide with platform routes,
 // reserved subdomains, or the super-admin surface.
@@ -125,6 +135,8 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
  * studioId must be set explicitly on the documents we create.
  */
 export class PlatformService extends Connection {
+  private notifications = new NotificationService();
+
   // ---- Platform billing config (singleton) ------------------------------
 
   // Read the singleton config, creating it with defaults on first access.
@@ -522,6 +534,33 @@ export class PlatformService extends Connection {
     await this.studio.update({ where: { id }, data: { status } });
     // Bust the resolver cache so the new status takes effect immediately.
     forgetStudioSlug(studio.slug);
+
+    if (status === "SUSPENDED" && studio.status !== "SUSPENDED" && studio.ownerUserId) {
+      try {
+        const owner = await this.user.findUnique({
+          where: { id: studio.ownerUserId },
+          select: { email: true },
+        });
+        if (owner?.email) {
+          const { subject, html } = studioAccountSuspended(zuriBrand, {
+            studioName: studio.name,
+            supportEmail: env.senderEmail,
+          });
+          await this.notifications.send({
+            template: NotificationTemplate.STUDIO_ACCOUNT_SUSPENDED,
+            to: owner.email,
+            subject,
+            html,
+            studioId: studio.id,
+            entityType: "Studio",
+            entityId: `${studio.id}:${status}:${Date.now()}`,
+          });
+        }
+      } catch (error) {
+        console.error("Failed to send studio-suspended email:", error);
+      }
+    }
+
     return this.getStudio(id);
   }
 
