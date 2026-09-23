@@ -1,5 +1,6 @@
 import { createTenantClient, RawDb, TenantDb } from "../tenant/tenantClient";
 import { getTenantContext } from "../tenant/context";
+import { shortId, studioCode } from "../utils/shortId";
 import { env } from "../config/env.config";
 import { StudioBrandingInfo } from "../notifications/types";
 
@@ -74,6 +75,21 @@ export class Connection {
       select: { paystackSubaccountCode: true },
     });
     return studio?.paystackSubaccountCode ?? null;
+  }
+
+  // Paystack reference: `<PREFIX>-<STUDIO-SLUG>-<uuid>` so a reference in a
+  // log/error/dashboard immediately tells you which studio it belongs to.
+  protected async makeReference(prefix: string): Promise<string> {
+    const studioId = getTenantContext()?.studioId;
+    let slug = "ZURI";
+    if (studioId) {
+      const studio = await this.studio.findUnique({
+        where: { id: studioId },
+        select: { name: true, slug: true },
+      });
+      if (studio) slug = studioCode(studio.name, studio.slug);
+    }
+    return `${prefix}-${slug}-${shortId()}`;
   }
 
   // The current studio's display name, for customer-facing emails/receipts.

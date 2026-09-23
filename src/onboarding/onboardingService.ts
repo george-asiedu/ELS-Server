@@ -1,4 +1,4 @@
-import { randomUUID } from "crypto";
+import { shortId } from "../utils/shortId";
 import { Connection } from "../db/dbConnection";
 import { ApiError } from "../middleware/apiError";
 import { HttpCode } from "../models/status_codes";
@@ -150,7 +150,7 @@ export class OnboardingService extends Connection {
       );
     }
 
-    const reference = `${SIGNUP_PREFIX}${randomUUID()}`;
+    const reference = `${SIGNUP_PREFIX}${shortId()}`;
     const ownerPasswordHash = await getPasswordHash(ownerPassword);
     const ownerFullName = String(input.ownerFullName ?? "").trim();
 

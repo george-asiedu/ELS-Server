@@ -186,7 +186,7 @@ export class OrderService extends Connection {
       Math.round((subtotal - discountAmount + deliveryFee) * 100) / 100;
     if (total <= 0) throw new ApiError("Order total must be greater than 0", 400);
 
-    const reference = `ORD-${randomUUID()}`;
+    const reference = await this.makeReference("ORD");
     const orderNumber = await this.genOrderNumber();
 
     const order = await this.order.create({
@@ -385,7 +385,7 @@ export class OrderService extends Connection {
     if (!email) throw new ApiError("An email is required to check out", 400);
     const profile = await this.profile.findUnique({ where: { userId } });
 
-    const reference = `ORD-${randomUUID()}`;
+    const reference = await this.makeReference("ORD");
     const orderNumber = await this.genOrderNumber();
 
     // Service payment portion (booking revenue), sharing the reference.
@@ -582,7 +582,7 @@ export class OrderService extends Connection {
     const email = order.customerEmail ?? (await this.userEmail(userId));
     if (!email) throw new ApiError("An email is required to pay", 400);
 
-    const reference = `ORD-${randomUUID()}`;
+    const reference = await this.makeReference("ORD");
     const subaccount = await this.currentStudioSubaccount();
     const init = await paystack.initialize({
       email,
