@@ -3,9 +3,13 @@ import { Connection } from "../db/dbConnection";
 import { ApiError } from "../middleware/apiError";
 import { env } from "../config/env.config";
 import { paystack, PaystackVerifyData } from "../payment/paystackClient";
-import { EmailService } from "../email/emailService";
 import { AuditService } from "../audit/auditService";
 import { safeClientOrigin } from "../utils/helper";
+import { NotificationService } from "../notifications/notificationService";
+import { NotificationTemplate } from "../notifications/registry";
+import { orderConfirmed, orderPaymentFailed, orderFulfilled } from "../notifications/templates/shop";
+import { EmailBrand, MoneyLine } from "../notifications/types";
+import { ghs } from "../notifications/format";
 
 type FulfillmentType = "PICKUP" | "DELIVERY";
 
@@ -53,8 +57,18 @@ const effectivePrice = (p: { price: number; promoPrice: number | null }) =>
   p.promoPrice != null && p.promoPrice < p.price ? p.promoPrice : p.price;
 
 export class OrderService extends Connection {
-  private email = new EmailService();
+  private notifications = new NotificationService();
   private audit = new AuditService();
+
+  private async brandForNotification(studioIdOverride?: string | null): Promise<EmailBrand> {
+    const studio = await this.currentStudioBranding(studioIdOverride ?? undefined);
+    return studio
+      ? { kind: "studio", studio }
+      : {
+          kind: "zuri",
+          zuri: { name: "Zuri Studios", websiteUrl: "https://zuristudios.com", supportEmail: "hello@zuristudios.com" },
+        };
+  }
 
   private static readonly POINTS_PER_GHS = 10; // 10 pts = GHS 1
   private static readonly REFERRAL_ORDER_BONUS = 50;
@@ -522,6 +536,28 @@ export class OrderService extends Connection {
       });
     }
 
+    if (status === "FULFILLED" && order.customerEmail) {
+      try {
+        const brand = await this.brandForNotification(order.studioId);
+        const { subject, html } = orderFulfilled(brand, {
+          orderNumber: order.orderNumber,
+          fulfillment: order.fulfillment as "PICKUP" | "DELIVERY",
+          ...(brand.kind === "studio" && brand.studio.websiteUrl ? { viewUrl: brand.studio.websiteUrl } : {}),
+        });
+        await this.notifications.send({
+          template: NotificationTemplate.SHOP_ORDER_FULFILLED,
+          to: order.customerEmail,
+          subject,
+          html,
+          studioId: order.studioId,
+          entityType: "Order",
+          entityId: order.id,
+        });
+      } catch (error) {
+        console.error("Failed to send order-fulfilled email:", error);
+      }
+    }
+
     return { message: "Order status updated", data: order };
   }
 
@@ -618,6 +654,27 @@ export class OrderService extends Connection {
             customerEmail: order.customerEmail ?? null,
           },
         });
+        if (order.customerEmail) {
+          try {
+            const brand = await this.brandForNotification(order.studioId);
+            const { subject, html } = orderPaymentFailed(brand, {
+              orderNumber: order.orderNumber,
+              amountAttempted: ghs(order.total),
+              ...(brand.kind === "studio" && brand.studio.websiteUrl ? { retryUrl: brand.studio.websiteUrl } : {}),
+            });
+            await this.notifications.send({
+              template: NotificationTemplate.SHOP_ORDER_PAYMENT_FAILED,
+              to: order.customerEmail,
+              subject,
+              html,
+              studioId: order.studioId,
+              entityType: "Order",
+              entityId: order.id,
+            });
+          } catch (error) {
+            console.error("Failed to send order-payment-failed email:", error);
+          }
+        }
       }
       return order;
     }
@@ -706,23 +763,33 @@ export class OrderService extends Connection {
     // Receipt email (best-effort).
     if (paid.customerEmail) {
       try {
-        await this.email.sendOrderReceipt(
-          paid.customerEmail,
-          {
-            orderNumber: paid.orderNumber,
-            items: paid.items.map((i) => ({
-              name: i.name,
-              quantity: i.quantity,
-              unitPrice: i.unitPrice,
-            })),
-            subtotal: paid.subtotal,
-            deliveryFee: paid.deliveryFee,
-            total: paid.total,
-            fulfillment: paid.fulfillment,
-            reference: paid.reference ?? "",
-          },
-          await this.currentStudioName(),
-        );
+        const brand = await this.brandForNotification(paid.studioId);
+        const lines: MoneyLine[] = [
+          { label: "Subtotal", value: ghs(paid.subtotal) },
+          ...(paid.discountAmount > 0 ? [{ label: "Discount", value: `-${ghs(paid.discountAmount)}`, muted: true }] : []),
+          ...(paid.deliveryFee > 0 ? [{ label: "Delivery", value: ghs(paid.deliveryFee) }] : []),
+          { label: "Total", value: ghs(paid.total), emphasis: true },
+        ];
+        const { subject, html } = orderConfirmed(brand, {
+          orderNumber: paid.orderNumber,
+          items: paid.items.map((i) => ({
+            name: i.name,
+            quantity: i.quantity,
+            total: ghs(i.unitPrice * i.quantity),
+          })),
+          lines,
+          fulfillment: paid.fulfillment as "PICKUP" | "DELIVERY",
+          ...(brand.kind === "studio" && brand.studio.websiteUrl ? { viewUrl: brand.studio.websiteUrl } : {}),
+        });
+        await this.notifications.send({
+          template: NotificationTemplate.SHOP_ORDER_CONFIRMED,
+          to: paid.customerEmail,
+          subject,
+          html,
+          studioId: paid.studioId,
+          entityType: "Order",
+          entityId: paid.id,
+        });
       } catch (error) {
         console.error("Failed to send order receipt email:", error);
       }
