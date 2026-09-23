@@ -1,4 +1,5 @@
 import { env } from "../config/env.config";
+import { emailQueue } from "../queue/queues";
 
 interface SendArgs {
   to: string;
@@ -8,25 +9,50 @@ interface SendArgs {
   text?: string;
 }
 
+// The actual Plunk API call — used directly by callers with no queue configured,
+// and by the email worker when a queue IS configured. Exported so the worker
+// (a separate module, to keep BullMQ out of request-handling code paths) can
+// call the exact same send logic.
+export const sendEmailNow = async ({
+  to,
+  subject,
+  html,
+}: {
+  to: string;
+  subject: string;
+  html: string;
+}): Promise<void> => {
+  const res = await fetch(env.plunk.apiUrl, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${env.plunk.secretKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      to,
+      subject,
+      body: html,
+      from: env.senderEmail,
+    }),
+  });
+  if (!res.ok) {
+    const detail = await res.text().catch(() => "");
+    throw new Error(`Plunk email send failed (${res.status}): ${detail}`);
+  }
+};
+
 export class EmailService {
+  // Enqueues the email when a queue is configured (REDIS_URL set) — a worker
+  // sends it in the background with automatic retries, so a slow/flaky Plunk
+  // call never blocks the request that triggered it (booking, checkout,
+  // password reset, ...). Falls back to sending inline when there's no queue,
+  // so the app keeps working exactly as before without Redis provisioned.
   private async send({ to, subject, html }: SendArgs) {
-    const res = await fetch(env.plunk.apiUrl, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${env.plunk.secretKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        to,
-        subject,
-        body: html,
-        from: env.senderEmail,
-      }),
-    });
-    if (!res.ok) {
-      const detail = await res.text().catch(() => "");
-      throw new Error(`Plunk email send failed (${res.status}): ${detail}`);
+    if (emailQueue) {
+      await emailQueue.add("send", { to, subject, html });
+      return;
     }
+    await sendEmailNow({ to, subject, html });
   }
 
   public async sendPasswordReset(
