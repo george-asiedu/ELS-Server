@@ -10,6 +10,7 @@ import { env } from "./config/env.config";
 import { globalErrorHandler } from "./middleware/globalErrorHandler";
 import { resolveTenant } from "./middleware/tenant";
 import routes from "./routes/index";
+import { bootstrapQueues } from "./queue";
 
 const app = express();
 
@@ -108,4 +109,11 @@ if (!port)
 
 app.listen(port, () => {
   console.log(`Server is running on port ${port}`);
+});
+
+// Background job queues (email sending, payment reconciliation). Started
+// in-process alongside the API — fine at this scale; see queue/README.md for
+// how to split workers into a separate Render service later if load grows.
+bootstrapQueues().catch((error) => {
+  console.error("Failed to start queues:", error);
 });
