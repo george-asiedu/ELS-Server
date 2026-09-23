@@ -4,9 +4,16 @@ import { ApiError } from "../middleware/apiError";
 import { HttpCode } from "../models/status_codes";
 import { loginToken, verifyPassword, getPasswordHash } from "../utils/helper";
 import { env } from "../config/env.config";
-import { EmailService } from "../email/emailService";
+import { NotificationService } from "../notifications/notificationService";
+import { NotificationTemplate } from "../notifications/registry";
+import { passwordResetRequested } from "../notifications/templates/auth";
+import { EmailBrand } from "../notifications/types";
 
-const emailService = new EmailService();
+const notifications = new NotificationService();
+const zuriBrand: EmailBrand = {
+  kind: "zuri",
+  zuri: { name: "Zuri Studios", websiteUrl: env.clientUrl, supportEmail: env.senderEmail },
+};
 
 /**
  * Authentication for the platform super admin. Super admins have no studio
@@ -69,7 +76,18 @@ export class PlatformAuthService extends Connection {
 
     const resetUrl = `${env.clientUrl}/platform/reset-password/${resetToken}`;
     try {
-      await emailService.sendPasswordReset(user.email, resetUrl, "Zuri Studios");
+      const { subject, html } = passwordResetRequested(zuriBrand, {
+        resetUrl,
+        expiresInMinutes: 60,
+      });
+      await notifications.send({
+        template: NotificationTemplate.AUTH_PASSWORD_RESET_REQUESTED,
+        to: user.email,
+        subject,
+        html,
+        entityType: "User",
+        entityId: hashedToken,
+      });
     } catch {
       await this.user.update({
         where: { id: user.id },
