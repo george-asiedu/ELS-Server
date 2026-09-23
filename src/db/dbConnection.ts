@@ -1,6 +1,6 @@
 import { createTenantClient, RawDb, TenantDb } from "../tenant/tenantClient";
 import { getTenantContext } from "../tenant/context";
-import { shortId } from "../utils/shortId";
+import { shortId, studioCode } from "../utils/shortId";
 import { env } from "../config/env.config";
 import { StudioBrandingInfo } from "../notifications/types";
 
@@ -85,11 +85,9 @@ export class Connection {
     if (studioId) {
       const studio = await this.studio.findUnique({
         where: { id: studioId },
-        select: { slug: true },
+        select: { name: true, slug: true },
       });
-      // Short studio tag (first 5 alphanumerics) — enough to spot the studio.
-      const tag = studio?.slug.replace(/[^a-z0-9]/gi, "").slice(0, 5).toUpperCase();
-      if (tag) slug = tag;
+      if (studio) slug = studioCode(studio.name, studio.slug);
     }
     return `${prefix}-${slug}-${shortId()}`;
   }
