@@ -8,6 +8,8 @@ const router: Router = Router();
 
 // Public: super-admin sign-in.
 router.post("/auth/login", PlatformController.login);
+router.post("/auth/forgot-password", PlatformController.forgotPassword);
+router.post("/auth/reset-password", PlatformController.resetPassword);
 
 // Everything below requires a signed-in super admin.
 router.use(authenticate, requireSuperAdmin);
