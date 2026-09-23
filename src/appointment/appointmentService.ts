@@ -1,12 +1,29 @@
 import { Connection } from "../db/dbConnection";
+import { getTenantContext } from "../tenant/context";
 import { ApiError } from "../middleware/apiError";
 import { S3BucketService } from "../bucket/s3BucketService";
-import { EmailService } from "../email/emailService";
 import { UploadedFile } from "../models/user";
 import {
   AppointmentStatusInput,
   CreateAppointmentInput,
 } from "./appointmentModels";
+import { NotificationService } from "../notifications/notificationService";
+import { NotificationTemplate } from "../notifications/registry";
+import {
+  bookingRequestCustomer,
+  bookingRequestStudio,
+  bookingCompleted,
+  bookingCancelled,
+} from "../notifications/templates/booking";
+import { EmailBrand } from "../notifications/types";
+
+// A short, human-friendly reference derived from the real record id (not a
+// separately-tracked field) — e.g. "APT-4F9C2A1B".
+const shortRef = (prefix: string, id: string) =>
+  `${prefix}-${id.slice(-8).toUpperCase()}`;
+
+const formatDate = (d: Date) =>
+  d.toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "long", year: "numeric" });
 
 const serviceInclude = {
   service: {
@@ -33,7 +50,7 @@ const serviceInclude = {
 
 export class AppointmentService extends Connection {
   private s3 = new S3BucketService();
-  private email = new EmailService();
+  private notifications = new NotificationService();
 
   // Loyalty value for booking-time redemption. The discount cap ratio comes
   // from the studio's settings (loyaltyCapRatio()).
@@ -113,22 +130,63 @@ export class AppointmentService extends Connection {
       });
     }
 
-    // Automated confirmation email (best-effort — never block the booking).
-    if (appointment.email) {
-      try {
-        await this.email.sendAppointmentReceived(
-          appointment.email,
-          {
-            fullName: appointment.fullName,
-            serviceName: appointment.service?.name ?? "your service",
-            date: data.appointmentDate,
-            time: appointment.appointmentTime,
-          },
-          await this.currentStudioName(),
-        );
-      } catch (error) {
-        console.error("Failed to send appointment confirmation email:", error);
+    // Booking-request notifications (best-effort — never block the booking):
+    // the customer's confirmation, and a heads-up to the studio owner.
+    try {
+      const studio = await this.currentStudioBranding();
+      const brand: EmailBrand = studio
+        ? { kind: "studio", studio }
+        : { kind: "zuri", zuri: { name: "Zuri Studios", websiteUrl: "https://zuristudios.com", supportEmail: "hello@zuristudios.com" } };
+      const paymentRequired = (await this.paymentSettings.findFirst())?.enabled ?? false;
+      const core = {
+        serviceName: appointment.service?.name ?? "your service",
+        date: formatDate(appointment.appointmentDate),
+        time: appointment.appointmentTime,
+        duration: appointment.service?.duration ?? null,
+        studioName: studio?.name ?? "the studio",
+        bookingRef: shortRef("APT", appointment.id),
+      };
+
+      if (appointment.email) {
+        const { subject, html } = bookingRequestCustomer(brand, {
+          ...core,
+          customerFirstName: appointment.fullName.split(" ")[0] || appointment.fullName,
+          paymentRequired,
+          ...(studio?.bookingUrl ? { bookingUrl: studio.bookingUrl } : {}),
+        });
+        await this.notifications.send({
+          template: NotificationTemplate.BOOKING_REQUEST_CUSTOMER,
+          to: appointment.email,
+          subject,
+          html,
+          studioId: getTenantContext()?.studioId ?? null,
+          entityType: "Appointment",
+          entityId: appointment.id,
+        });
       }
+
+      const studioEmail = await this.currentStudioNotifyEmail();
+      if (studioEmail) {
+        const { subject, html } = bookingRequestStudio(brand, {
+          ...core,
+          customerName: appointment.fullName,
+          customerPhone: appointment.phone,
+          ...(appointment.email ? { customerEmail: appointment.email } : {}),
+          ...(appointment.notes ? { notes: appointment.notes } : {}),
+          ...(appointment.designImageUrl ? { designImageUrl: appointment.designImageUrl } : {}),
+        });
+        await this.notifications.send({
+          template: NotificationTemplate.BOOKING_REQUEST_STUDIO,
+          to: studioEmail,
+          subject,
+          html,
+          studioId: getTenantContext()?.studioId ?? null,
+          entityType: "Appointment",
+          entityId: appointment.id,
+        });
+      }
+    } catch (error) {
+      console.error("Failed to send booking-request notifications:", error);
     }
 
     return { message: "Appointment created successfully", data: appointment };
@@ -177,10 +235,11 @@ export class AppointmentService extends Connection {
 
     // Award loyalty points the first time an appointment is completed — on the
     // amount actually paid (after any loyalty discount), never the sticker price.
+    let pointsEarned = 0;
     if (status === "COMPLETED" && appointment.userId) {
       const netPaid =
         (appointment.totalPrice ?? 0) - (appointment.discountAmount ?? 0);
-      await this.awardLoyaltyForCompletion(
+      pointsEarned = await this.awardLoyaltyForCompletion(
         appointment.id,
         appointment.userId,
         netPaid,
@@ -220,6 +279,59 @@ export class AppointmentService extends Connection {
       appointment.pointsRefunded = true;
     }
 
+    // Status-change notifications (best-effort — never block the transition).
+    if ((status === "COMPLETED" || status === "CANCELLED") && appointment.email) {
+      try {
+        const studio = await this.currentStudioBranding();
+        const brand: EmailBrand = studio
+          ? { kind: "studio", studio }
+          : { kind: "zuri", zuri: { name: "Zuri Studios", websiteUrl: "https://zuristudios.com", supportEmail: "hello@zuristudios.com" } };
+        const core = {
+          serviceName: appointment.service?.name ?? "your service",
+          date: formatDate(appointment.appointmentDate),
+          time: appointment.appointmentTime,
+          duration: appointment.service?.duration ?? null,
+          studioName: studio?.name ?? "the studio",
+          bookingRef: shortRef("APT", appointment.id),
+        };
+        const customerFirstName = appointment.fullName.split(" ")[0] || appointment.fullName;
+
+        if (status === "COMPLETED") {
+          const { subject, html } = bookingCompleted(brand, {
+            ...core,
+            customerFirstName,
+            ...(pointsEarned > 0 ? { loyaltyPointsEarned: pointsEarned } : {}),
+          });
+          await this.notifications.send({
+            template: NotificationTemplate.BOOKING_COMPLETED,
+            to: appointment.email,
+            subject,
+            html,
+            studioId: getTenantContext()?.studioId ?? null,
+            entityType: "Appointment",
+            entityId: appointment.id,
+          });
+        } else {
+          const { subject, html } = bookingCancelled(brand, {
+            ...core,
+            customerFirstName,
+            ...(studio?.bookingUrl ? { bookingUrl: studio.bookingUrl } : {}),
+          });
+          await this.notifications.send({
+            template: NotificationTemplate.BOOKING_CANCELLED,
+            to: appointment.email,
+            subject,
+            html,
+            studioId: getTenantContext()?.studioId ?? null,
+            entityType: "Appointment",
+            entityId: appointment.id,
+          });
+        }
+      } catch (error) {
+        console.error("Failed to send booking status notification:", error);
+      }
+    }
+
     return { message: "Appointment status updated", data: appointment };
   }
 
@@ -232,15 +344,15 @@ export class AppointmentService extends Connection {
     userId: string,
     totalPrice: number,
     serviceName: string,
-  ) {
+  ): Promise<number> {
     // Guard against double-awarding if the status is set to COMPLETED again.
     const alreadyEarned = await this.loyaltyTransaction.findFirst({
       where: { appointmentId, type: "EARNED" },
     });
-    if (alreadyEarned) return;
+    if (alreadyEarned) return 0;
 
     const points = Math.floor(totalPrice / AppointmentService.GHS_PER_POINT);
-    if (points <= 0) return;
+    if (points <= 0) return 0;
 
     await this.loyaltyTransaction.create({
       data: {
@@ -262,6 +374,7 @@ export class AppointmentService extends Connection {
     });
 
     await this.awardReferralBonusIfEligible(userId);
+    return points;
   }
 
   // When a referred user completes their first appointment, reward the referrer.
