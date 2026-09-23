@@ -1,7 +1,8 @@
 import { isQueueEnabled, getRedisConnection } from "./connection";
-import { reconcilePaymentsQueue, QUEUE_NAMES } from "./queues";
+import { reconcilePaymentsQueue, billingRemindersQueue, QUEUE_NAMES } from "./queues";
 import { createEmailWorker } from "./workers/emailWorker";
 import { createReconcileWorker } from "./workers/reconcileWorker";
+import { createBillingReminderWorker } from "./workers/billingReminderWorker";
 
 // Call once at boot (see app.ts). No-ops entirely when REDIS_URL isn't set —
 // see queue/README.md for what that means for email sending and the
@@ -30,6 +31,7 @@ export const bootstrapQueues = async (): Promise<void> => {
 
   createEmailWorker();
   createReconcileWorker();
+  createBillingReminderWorker();
 
   // Repeatable job: sweep for stale pending payments/orders every 15 minutes.
   // upsertJobScheduler is idempotent — safe to call on every boot/deploy
@@ -40,7 +42,15 @@ export const bootstrapQueues = async (): Promise<void> => {
     { name: "sweep", data: { triggeredBy: "cron" } },
   );
 
+  // Repeatable job: check for studios whose subscription period is expiring
+  // soon or has lapsed, once a day.
+  await billingRemindersQueue!.upsertJobScheduler(
+    "billing-reminders-cron",
+    { pattern: "0 8 * * *" },
+    { name: "sweep", data: { triggeredBy: "cron" } },
+  );
+
   console.log(
-    `Queues online: "${QUEUE_NAMES.email}" (background email) and "${QUEUE_NAMES.reconcilePayments}" (every 15 min).`,
+    `Queues online: "${QUEUE_NAMES.email}" (background email), "${QUEUE_NAMES.reconcilePayments}" (every 15 min), and "${QUEUE_NAMES.billingReminders}" (daily).`,
   );
 };
