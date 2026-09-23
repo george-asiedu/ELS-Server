@@ -396,13 +396,13 @@ export class StudioService extends Connection {
       select: { plan: true, billingCadence: true, billingMode: true },
     });
     if (!studio) throw new ApiError("Studio not found", HttpCode.NOT_FOUND);
-    if (studio.billingMode === "REVENUE_SHARE") {
-      throw new ApiError(
-        "Your account bills per transaction; plan changes are handled by the Zuri team.",
-        HttpCode.BAD_REQUEST,
-      );
-    }
-    if (studio.plan === plan && studio.billingCadence === cadence) {
+    // A pay-as-you-earn studio may move to a recurring plan (this is the switch
+    // itself, so any plan/cadence is allowed). The reverse isn't offered.
+    if (
+      studio.billingMode !== "REVENUE_SHARE" &&
+      studio.plan === plan &&
+      studio.billingCadence === cadence
+    ) {
       throw new ApiError("You're already on this plan", HttpCode.BAD_REQUEST);
     }
     const email = await this.ownerEmail(id);
@@ -449,6 +449,24 @@ export class StudioService extends Connection {
     const studio = await this.studio.findUnique({ where: { id } });
     if (!studio) throw new ApiError("Studio not found", HttpCode.NOT_FOUND);
 
+    // Leaving pay-as-you-earn: stop taking a per-transaction cut, including on
+    // the Paystack subaccount, before the studio is switched over.
+    const fromRevenueShare = studio.billingMode === "REVENUE_SHARE";
+    if (fromRevenueShare && studio.paystackSubaccountCode) {
+      try {
+        await paystack.updateSubaccount(studio.paystackSubaccountCode, {
+          percentageCharge: 0,
+        });
+      } catch (error) {
+        throw new ApiError(
+          `Payment received, but we couldn't update your payout settings (${
+            error instanceof Error ? error.message : "Paystack error"
+          }). Please contact support — you have not been charged twice.`,
+          HttpCode.BAD_GATEWAY,
+        );
+      }
+    }
+
     // A plan change starts a fresh period from now.
     await this.studio.update({
       where: { id },
@@ -457,6 +475,9 @@ export class StudioService extends Connection {
         billingCadence: targetCadence,
         subscriptionStatus: "active",
         currentPeriodEnd: extendPeriod(null, targetCadence),
+        ...(fromRevenueShare
+          ? { billingMode: "SUBSCRIPTION" as const, platformFeePercent: 0 }
+          : {}),
       },
     });
     const flags = planFlags(plan as Plan);
