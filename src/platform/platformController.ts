@@ -37,6 +37,36 @@ export class PlatformController {
     }
   };
 
+  public static forgotPassword = async (
+    req: Request,
+    res: Response,
+    next: NextFunction,
+  ) => {
+    try {
+      const email = String(req.body?.email ?? "").trim();
+      if (!email) throw new ApiError("Email is required", HttpCode.BAD_REQUEST);
+      const result = await platformAuthService.forgotPassword(email);
+      return res.status(200).json(result);
+    } catch (error) {
+      return next(error);
+    }
+  };
+
+  public static resetPassword = async (
+    req: Request,
+    res: Response,
+    next: NextFunction,
+  ) => {
+    try {
+      const token = String(req.body?.token ?? "");
+      const password = String(req.body?.password ?? "");
+      const result = await platformAuthService.resetPassword(token, password);
+      return res.status(200).json(result);
+    } catch (error) {
+      return next(error);
+    }
+  };
+
   public static me = (req: Request, res: Response) => {
     return res.status(200).json({
       id: req.user.id,
