@@ -1,5 +1,4 @@
 import crypto from "crypto";
-import { randomUUID } from "crypto";
 import { Connection } from "../db/dbConnection";
 import { ApiError } from "../middleware/apiError";
 import { env } from "../config/env.config";
@@ -100,7 +99,7 @@ export class PaymentService extends Connection {
     const email = appointment.email || (await this.userEmail(userId));
     if (!email) throw new ApiError("An email is required to pay", 400);
 
-    const reference = `ELS-${randomUUID()}`;
+    const reference = await this.makeReference("APT");
 
     // One payment per appointment — reuse the row and refresh the reference so a
     // previously abandoned attempt gets a clean Paystack transaction.
