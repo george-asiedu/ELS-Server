@@ -1,6 +1,6 @@
 import { createTenantClient, RawDb, TenantDb } from "../tenant/tenantClient";
 import { getTenantContext } from "../tenant/context";
-import { randomUUID } from "crypto";
+import { shortId } from "../utils/shortId";
 import { env } from "../config/env.config";
 import { StudioBrandingInfo } from "../notifications/types";
 
@@ -81,15 +81,17 @@ export class Connection {
   // log/error/dashboard immediately tells you which studio it belongs to.
   protected async makeReference(prefix: string): Promise<string> {
     const studioId = getTenantContext()?.studioId;
-    let slug = "PLATFORM";
+    let slug = "ZURI";
     if (studioId) {
       const studio = await this.studio.findUnique({
         where: { id: studioId },
         select: { slug: true },
       });
-      if (studio?.slug) slug = studio.slug.toUpperCase();
+      // Short studio tag (first 5 alphanumerics) — enough to spot the studio.
+      const tag = studio?.slug.replace(/[^a-z0-9]/gi, "").slice(0, 5).toUpperCase();
+      if (tag) slug = tag;
     }
-    return `${prefix}-${slug}-${randomUUID()}`;
+    return `${prefix}-${slug}-${shortId()}`;
   }
 
   // The current studio's display name, for customer-facing emails/receipts.
