@@ -33,6 +33,8 @@ export const env = {
   port: Number(process.env.PORT),
   databaseUrl: process.env.DATABASE_URL as string,
   nodeEnv: process.env.NODE_ENV as string,
+  // Defaults to trusting no proxy headers; configure to match the real proxy chain.
+  trustProxyHops: Math.max(0, Math.floor(Number(process.env.TRUST_PROXY_HOPS) || 0)),
   JWT_SECRET: process.env.JWT_SECRET as string,
   JWT_EXPIRATION: process.env.JWT_EXPIRATION as string,
   JWT_REFRESH_EXPIRES: process.env.JWT_REFRESH_EXPIRES as string,
