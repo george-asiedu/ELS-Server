@@ -1,30 +1,21 @@
 import { Profile } from "../models/user";
 import { UserRepository } from "../auth/userRepository";
-import { S3BucketService } from "../bucket/s3BucketService";
 import { ApiError } from "../middleware/apiError";
-import { UploadedFile } from "../models/user";
 import { verifyPassword } from "../utils/helper";
 import { forgetLoginDevices, revokeLoginSessions } from "../auth/sessionService";
 
 export class ProfileService extends UserRepository {
-  constructor(private s3: S3BucketService) {
-    super();
-  } 
+  constructor() { super(); }
   
   public async createOrUpdateProfile(
     data: Profile, 
-    userId: string, 
-    image?: UploadedFile
+    userId: string,
   ) {
     if(!userId) {
       throw new ApiError("User ID is required", 400);
     }
     
     try {
-      if(image) {
-        data.avatar = await this.s3.uploadFile(image, { maxDim: 512, quality: 85 });
-      }
-
       // Keep the account (login) email in sync with the profile email.
       if (data.email) {
         const existing = await this.getByEmail(data.email);
