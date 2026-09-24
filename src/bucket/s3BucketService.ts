@@ -39,16 +39,15 @@ export class S3BucketService {
     const processed = await processImage(file, opts);
 
     const bucketName = env.aws.s3BucketName;
-    const fileExtension = path.extname(processed.originalname);
+    const fileExtension = path.extname(processed.originalname).toLowerCase();
     if (!fileExtension) {
       throw new ApiError('File must have an extension', 400);
     }
 
-    const cleanFileName = processed.originalname.replace(/\s+/g, '-');
     // Group uploads per studio so each tenant's media is separable in S3.
     const studioId = getTenantContext()?.studioId;
     const prefix = studioId ? `studios/${studioId}` : 'platform';
-    const key = `${prefix}/${uuidv4()}-${cleanFileName}`;
+    const key = `${prefix}/${uuidv4()}${fileExtension}`;
 
     const params = {
       Bucket: bucketName,
