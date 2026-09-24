@@ -3,6 +3,7 @@ import { getTenantContext } from "../tenant/context";
 import { shortId, studioCode } from "../utils/shortId";
 import { env } from "../config/env.config";
 import { StudioBrandingInfo } from "../notifications/types";
+import { S3BucketService } from "../bucket/s3BucketService";
 
 /**
  * Base class every service extends. It exposes the Prisma model delegates as
@@ -137,7 +138,7 @@ export class Connection {
     return {
       name: studio.name,
       slug: studio.slug,
-      logoUrl: branding?.logoUrl ?? null,
+      logoUrl: new S3BucketService().deliveryUrl(branding?.logoUrl ?? null) ?? null,
       primaryColor: branding?.primaryColor ?? null,
       websiteUrl,
       bookingUrl: `${websiteUrl}/book`,
