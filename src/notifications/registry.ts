@@ -6,8 +6,7 @@
 //
 // Deliberately NOT implemented (see notifications/README.md for why each one
 // doesn't apply to this app's actual architecture today):
-//   AUTH_VERIFY_EMAIL, AUTH_LOGIN_ALERT   — no email-verification or
-//     login/device-audit flow exists to source real data from.
+//   AUTH_VERIFY_EMAIL                     — no email-verification flow exists.
 //   BOOKING_RESCHEDULED                   — no reschedule flow exists.
 //   BOOKING_REMINDER_24H / _1H            — needs a new scheduled sweep over
 //     upcoming appointments; a real follow-up, not implemented yet.
@@ -21,6 +20,7 @@
 export const NotificationTemplate = {
   AUTH_PASSWORD_RESET_REQUESTED: "AUTH_PASSWORD_RESET_REQUESTED",
   AUTH_PASSWORD_CHANGED: "AUTH_PASSWORD_CHANGED",
+  AUTH_LOGIN_ALERT: "AUTH_LOGIN_ALERT",
   CUSTOMER_WELCOME: "CUSTOMER_WELCOME",
 
   STUDIO_CREATED: "STUDIO_CREATED",
