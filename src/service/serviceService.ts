@@ -2,7 +2,6 @@ import { Connection } from "../db/dbConnection";
 import { ApiError } from "../middleware/apiError";
 import { CreateServiceInput, UpdateServiceInput } from "./serviceModels";
 import { S3BucketService } from "../bucket/s3BucketService";
-import { UploadedFile } from "../models/user";
 import { CursorPage, cursorPageArgs, cursorPageResult } from "../utils/cursorPagination";
 
 export class ServiceService extends Connection {
@@ -19,6 +18,7 @@ export class ServiceService extends Connection {
       orderBy: [{ category: "asc" }, { name: "asc" }, { id: "asc" }],
       ...cursorPageArgs(page),
     });
+    services.forEach((item) => { item.imageUrl = this.s3.deliveryUrl(item.imageUrl); });
     return { message: "Services retrieved successfully", ...cursorPageResult(services, page) };
   }
 
@@ -34,6 +34,7 @@ export class ServiceService extends Connection {
       orderBy: [{ category: "asc" }, { name: "asc" }, { id: "asc" }],
       ...cursorPageArgs(page),
     });
+    services.forEach((item) => { item.imageUrl = this.s3.deliveryUrl(item.imageUrl); });
     return { message: "Services retrieved successfully", ...cursorPageResult(services, page) };
   }
 
@@ -42,12 +43,13 @@ export class ServiceService extends Connection {
     if (!service) {
       throw new ApiError("Service not found", 404);
     }
+    service.imageUrl = this.s3.deliveryUrl(service.imageUrl);
     return { message: "Service retrieved successfully", data: service };
   }
 
-  public async create(data: CreateServiceInput, image?: UploadedFile) {
+  public async create(data: CreateServiceInput) {
     await this.assertCategoryExists(data.category);
-    const imageUrl = image ? await this.s3.uploadFile(image) : data.imageUrl;
+    const imageUrl = data.imageUrl ? this.s3.assertOwnedMediaUrl(data.imageUrl, "services") : undefined;
     const service = await this.service.create({
       data: {
         name: data.name,
@@ -64,7 +66,7 @@ export class ServiceService extends Connection {
     return { message: "Service created successfully", data: service };
   }
 
-  public async update(id: string, data: UpdateServiceInput, image?: UploadedFile) {
+  public async update(id: string, data: UpdateServiceInput) {
     const existing = await this.service.findUnique({ where: { id } });
     if (!existing) {
       throw new ApiError("Service not found", 404);
@@ -72,7 +74,7 @@ export class ServiceService extends Connection {
     if (data.category !== undefined) {
       await this.assertCategoryExists(data.category);
     }
-    const imageUrl = image ? await this.s3.uploadFile(image) : data.imageUrl;
+    const imageUrl = data.imageUrl ? this.s3.assertOwnedMediaUrl(data.imageUrl, "services") : data.imageUrl;
 
     const service = await this.service.update({
       where: { id },
