@@ -1,8 +1,11 @@
 import { Connection } from "../db/dbConnection";
 import { ApiError } from "../middleware/apiError";
 import { CreateServiceInput, UpdateServiceInput } from "./serviceModels";
+import { S3BucketService } from "../bucket/s3BucketService";
+import { UploadedFile } from "../models/user";
 
 export class ServiceService extends Connection {
+  private s3 = new S3BucketService();
   // Public list: active services whose category is also visible (active).
   public async listActive() {
     const visible = await this.category.findMany({
@@ -39,8 +42,9 @@ export class ServiceService extends Connection {
     return { message: "Service retrieved successfully", data: service };
   }
 
-  public async create(data: CreateServiceInput) {
+  public async create(data: CreateServiceInput, image?: UploadedFile) {
     await this.assertCategoryExists(data.category);
+    const imageUrl = image ? await this.s3.uploadFile(image) : data.imageUrl;
     const service = await this.service.create({
       data: {
         name: data.name,
@@ -51,13 +55,13 @@ export class ServiceService extends Connection {
         duration: data.duration,
         popular: data.popular ?? false,
         active: data.active ?? true,
-        imageUrl: data.imageUrl ?? null,
+        imageUrl: imageUrl ?? null,
       },
     });
     return { message: "Service created successfully", data: service };
   }
 
-  public async update(id: string, data: UpdateServiceInput) {
+  public async update(id: string, data: UpdateServiceInput, image?: UploadedFile) {
     const existing = await this.service.findUnique({ where: { id } });
     if (!existing) {
       throw new ApiError("Service not found", 404);
@@ -65,6 +69,7 @@ export class ServiceService extends Connection {
     if (data.category !== undefined) {
       await this.assertCategoryExists(data.category);
     }
+    const imageUrl = image ? await this.s3.uploadFile(image) : data.imageUrl;
 
     const service = await this.service.update({
       where: { id },
@@ -79,7 +84,7 @@ export class ServiceService extends Connection {
         ...(data.duration !== undefined ? { duration: data.duration } : {}),
         ...(data.popular !== undefined ? { popular: data.popular } : {}),
         ...(data.active !== undefined ? { active: data.active } : {}),
-        ...(data.imageUrl !== undefined ? { imageUrl: data.imageUrl } : {}),
+        ...(imageUrl !== undefined ? { imageUrl } : {}),
       },
     });
     return { message: "Service updated successfully", data: service };
