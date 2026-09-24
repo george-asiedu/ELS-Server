@@ -11,14 +11,15 @@ import { randomBytes, createHash } from "crypto";
 import { getTenantContext } from "../tenant/context";
 import { NotificationService } from "../notifications/notificationService";
 import { NotificationTemplate } from "../notifications/registry";
-import { passwordResetRequested, passwordChanged, customerWelcome } from "../notifications/templates/auth";
+import { passwordResetRequested, passwordChanged, customerWelcome, loginAlert } from "../notifications/templates/auth";
 import { EmailBrand } from "../notifications/types";
 import { createLoginSession, revokeLoginSessions } from "./sessionService";
+import { LoginDeviceMetadata } from "./loginDevice";
 
 const notifications = new NotificationService();
 
 export class AuthService extends UserRepository {
-  public async signup(data: Signup) {
+  public async signup(data: Signup, device?: LoginDeviceMetadata) {
     const existingUser = await this.checkExistingUser(data.email);
     if (existingUser) {
       throw new ApiError("User with this email already exists", 409);
@@ -57,7 +58,7 @@ export class AuthService extends UserRepository {
       role: newUser.role,
       studioId: newUser.studioId,
     };
-    const token = await createLoginSession(payload);
+    const { token } = await createLoginSession(payload, device);
 
     // Best-effort welcome email — never blocks account creation if it fails.
     try {
@@ -107,7 +108,7 @@ export class AuthService extends UserRepository {
     return generateReferralCode(8);
   }
 
-  public async login(data: Login) {
+  public async login(data: Login, device?: LoginDeviceMetadata) {
     const user = await this.getByEmail(data.email);
     if (!user) {
       throw new ApiError("Invalid email or password", 400);
@@ -124,7 +125,33 @@ export class AuthService extends UserRepository {
       role: user.role,
       studioId: user.studioId,
     };
-    const token = await createLoginSession(payload);
+    const { token, isNewDevice, deviceKey } = await createLoginSession(payload, device);
+
+    if (isNewDevice) {
+      try {
+        const studio = await this.currentStudioBranding();
+        const brand: EmailBrand = studio
+          ? { kind: "studio", studio }
+          : { kind: "zuri", zuri: { name: "Zuri Studios", websiteUrl: env.clientUrl, supportEmail: env.senderEmail } };
+        const { subject, html } = loginAlert(brand, {
+          device: device?.userAgent || "Unknown browser or device",
+          ipAddress: device?.ipAddress || "Unavailable",
+          signedInAt: new Date().toISOString(),
+          recoveryUrl: `${env.clientUrl.replace(/\/$/, "")}/forgot-password`,
+        });
+        await notifications.send({
+          template: NotificationTemplate.AUTH_LOGIN_ALERT,
+          to: user.email,
+          subject,
+          html,
+          studioId: user.studioId ?? null,
+          entityType: "AuthDevice",
+          entityId: deviceKey,
+        });
+      } catch (error) {
+        console.error("Failed to send new-device login alert:", error);
+      }
+    }
 
     return {
       message: "Login successful",
