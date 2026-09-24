@@ -19,6 +19,9 @@ export class ProfileController {
       if (!userId) {
         throw new ApiError('User ID is required', 400);
       }
+      if (req.user?.role !== "ADMIN" && req.user?.id !== userId) {
+        throw new ApiError("You can only update your own profile", 403);
+      }
       
       const isValid = validateProfile(req.body);
       if (!isValid) {
@@ -107,6 +110,9 @@ export class ProfileController {
       const userId = req.params.userId
       if (!userId) {
         throw new ApiError('User ID is required', 400);
+      }
+      if (req.user?.role !== "ADMIN" && req.user?.id !== userId) {
+        throw new ApiError("You can only view your own profile", 403);
       }
 
       const result = await profileService.getUserProfile(userId);
