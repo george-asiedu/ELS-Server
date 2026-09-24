@@ -26,7 +26,6 @@ export class AppointmentController {
       const result = await appointmentService.create(
         req.body,
         userId,
-        req.file,
       );
       return res.status(201).json(result);
     } catch (error) {
