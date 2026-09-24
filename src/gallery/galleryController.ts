@@ -42,14 +42,16 @@ export class GalleryController {
     next: NextFunction,
   ) => {
     try {
-      const { title, category } = req.body as {
+      const { title, category, imageUrl, externalUrl } = req.body as {
         title?: string;
         category?: string;
+        imageUrl?: string;
+        externalUrl?: string;
       };
       if (!category) {
         throw new ApiError("A category is required", 400);
       }
-      const result = await galleryService.create(title, category, req.file);
+      const result = await galleryService.create(title, category, imageUrl, externalUrl);
       return res.status(201).json(result);
     } catch (error) {
       return next(error);
