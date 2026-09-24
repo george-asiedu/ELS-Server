@@ -1,7 +1,8 @@
 import { Connection } from "../db/dbConnection";
 import { ApiError } from "../middleware/apiError";
 import { HttpCode } from "../models/status_codes";
-import { getPasswordHash, loginToken } from "../utils/helper";
+import { getPasswordHash } from "../utils/helper";
+import { createLoginSession, revokeStudioLoginSessions } from "../auth/sessionService";
 import { forgetStudioSlug } from "../tenant/studioResolver";
 import { paystack } from "../payment/paystackClient";
 import { NotificationService } from "../notifications/notificationService";
@@ -608,6 +609,7 @@ export class PlatformService extends Connection {
       this.raw.studioSignup.deleteMany({ where }),
     ]);
     // Users last (owner + any staff/customers of this studio).
+    await revokeStudioLoginSessions(id);
     await this.raw.user.deleteMany({ where });
     await this.raw.studio.delete({ where: { id } });
 
@@ -665,7 +667,7 @@ export class PlatformService extends Connection {
       throw new ApiError("Studio owner not found", HttpCode.NOT_FOUND);
     }
 
-    const token = loginToken({
+    const token = await createLoginSession({
       id: owner.id,
       email: owner.email,
       role: owner.role,
