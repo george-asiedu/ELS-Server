@@ -4,10 +4,11 @@ import { ApiError } from "../middleware/apiError";
 import { HttpCode } from "../models/status_codes";
 import { verifyPassword, getPasswordHash } from "../utils/helper";
 import { createLoginSession, revokeLoginSessions } from "../auth/sessionService";
+import { LoginDeviceMetadata } from "../auth/loginDevice";
 import { env } from "../config/env.config";
 import { NotificationService } from "../notifications/notificationService";
 import { NotificationTemplate } from "../notifications/registry";
-import { passwordResetRequested } from "../notifications/templates/auth";
+import { loginAlert, passwordResetRequested } from "../notifications/templates/auth";
 import { EmailBrand } from "../notifications/types";
 
 const notifications = new NotificationService();
@@ -22,7 +23,7 @@ const zuriBrand: EmailBrand = {
  * the tenant extension is bypassed and the user lookup spans all studios.
  */
 export class PlatformAuthService extends Connection {
-  public async login(email: string, password: string) {
+  public async login(email: string, password: string, device?: LoginDeviceMetadata) {
     const normalized = String(email ?? "").trim().toLowerCase();
     // Scope strictly to super admins so a studio user with the same email can
     // never authenticate against the platform surface.
@@ -38,12 +39,33 @@ export class PlatformAuthService extends Connection {
       throw new ApiError("Invalid email or password", HttpCode.BAD_REQUEST);
     }
 
-    const token = await createLoginSession({
+    const { token, isNewDevice, deviceKey } = await createLoginSession({
       id: user.id,
       email: user.email,
       role: user.role,
       studioId: null,
-    });
+    }, device);
+
+    if (isNewDevice) {
+      try {
+        const { subject, html } = loginAlert(zuriBrand, {
+          device: device?.userAgent || "Unknown browser or device",
+          ipAddress: device?.ipAddress || "Unavailable",
+          signedInAt: new Date().toISOString(),
+          recoveryUrl: `${env.clientUrl.replace(/\/$/, "")}/platform/forgot-password`,
+        });
+        await notifications.send({
+          template: NotificationTemplate.AUTH_LOGIN_ALERT,
+          to: user.email,
+          subject,
+          html,
+          entityType: "AuthDevice",
+          entityId: deviceKey,
+        });
+      } catch (error) {
+        console.error("Failed to send platform new-device login alert:", error);
+      }
+    }
 
     return {
       message: "Login successful",
