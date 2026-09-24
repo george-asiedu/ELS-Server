@@ -1,7 +1,6 @@
 import { Login, Signup } from "../models/user";
 import { UserRepository } from "./userRepository";
 import {
-  loginToken,
   verifyPassword,
   getPasswordHash,
   generateReferralCode
@@ -14,6 +13,7 @@ import { NotificationService } from "../notifications/notificationService";
 import { NotificationTemplate } from "../notifications/registry";
 import { passwordResetRequested, passwordChanged, customerWelcome } from "../notifications/templates/auth";
 import { EmailBrand } from "../notifications/types";
+import { createLoginSession, revokeLoginSessions } from "./sessionService";
 
 const notifications = new NotificationService();
 
@@ -57,7 +57,7 @@ export class AuthService extends UserRepository {
       role: newUser.role,
       studioId: newUser.studioId,
     };
-    const token = loginToken(payload);
+    const token = await createLoginSession(payload);
 
     // Best-effort welcome email — never blocks account creation if it fails.
     try {
@@ -124,7 +124,7 @@ export class AuthService extends UserRepository {
       role: user.role,
       studioId: user.studioId,
     };
-    const token = loginToken(payload);
+    const token = await createLoginSession(payload);
 
     return {
       message: "Login successful",
@@ -213,6 +213,7 @@ export class AuthService extends UserRepository {
       // hash new password and update user; clear reset token fields
       const newHashedPassword = await getPasswordHash(newPassword);
       await this.resetPasswordByUserId(user.id, newHashedPassword);
+      await revokeLoginSessions(user.id);
 
       // Best-effort security notification — never blocks the (already
       // successful) password reset if it fails.
