@@ -14,6 +14,7 @@ router.post("/auth/reset-password", PlatformController.resetPassword);
 
 // Everything below requires a signed-in super admin.
 router.use(authenticate, requireSuperAdmin);
+router.post("/auth/logout", PlatformController.logout);
 
 router.get("/me", PlatformController.me);
 router.get("/analytics", PlatformController.analytics);
