@@ -85,7 +85,7 @@ export class ServiceController {
           errors: validateCreateService.errors,
         });
       }
-      const result = await serviceService.create(parsed as CreateServiceInput, req.file);
+      const result = await serviceService.create(parsed as CreateServiceInput);
       return res.status(201).json(result);
     } catch (error) {
       return next(error);
@@ -108,7 +108,7 @@ export class ServiceController {
           errors: validateUpdateService.errors,
         });
       }
-      const result = await serviceService.update(id, parsed, req.file);
+      const result = await serviceService.update(id, parsed);
       return res.status(200).json(result);
     } catch (error) {
       return next(error);
