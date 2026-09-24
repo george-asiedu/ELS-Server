@@ -6,27 +6,35 @@ Signing in on a fourth device evicts the oldest session. Logout revokes the
 current session, and password resets/changes revoke every session for the user.
 Revocation takes effect on the next authenticated API request.
 
+The Vercel client sends a persistent random browser ID during signup/sign-in.
+The first recognized device is silent; a new browser ID triggers one
+`AUTH_LOGIN_ALERT` email per device. Clearing browser storage creates a new ID
+and may trigger an alert. API clients without this header use a user-agent/IP
+fingerprint.
+
 ## Before deploying
 
-1. Apply the `AuthSession` schema addition to PostgreSQL using the project's
+1. Apply the `AuthSession` and `AuthDevice` schema additions to PostgreSQL using the project's
    schema deployment process (`npx prisma db push` is the existing development
    workflow). Deploy the schema before the new application code.
 2. Set a high-entropy `JWT_SECRET` and keep payment, database, email, and AWS
    credentials in the deployment secret manager. Never expose server secrets
    as `VITE_*` variables.
-3. Set `REDIS_URL` for shared rate-limit counters across multiple API instances.
-   Without it, express-rate-limit uses its in-memory store, so counters are
-   local to each process. The Redis store shares the existing Redis service.
+3. The Render API reads `REDIS_URL` for shared rate-limit counters. Since your
+   Redis URL is already configured, this uses the existing Redis service across
+   API instances. Without it, express-rate-limit falls back to process-local
+   counters.
 4. Set `ROOT_DOMAIN` and `ALLOWED_ORIGINS` to the HTTPS storefront origins that
    should call the API. Localhost and HTTP origins are permitted only outside
    production. Do not add broad or unverified wildcard origins.
-5. Terminate TLS at a trusted load balancer/reverse proxy. Set
-   `TRUST_PROXY_HOPS` to the exact number of trusted proxy hops before relying
-   on client IP based limits; the default is zero, and arbitrary forwarded
-   headers are not trusted.
-6. Configure the frontend hosting/CDN to send a restrictive Content-Security-
-   Policy and other security headers. The Express API headers do not configure
-   the separately hosted React application.
+5. On Render, set `TRUST_PROXY_HOPS=1` for the public web service behind
+   Render's TLS-terminating load balancer. Keep it aligned with the actual
+   network path; the code defaults to zero and does not trust arbitrary
+   forwarded headers.
+6. Set Vercel's `VITE_API_URL` to the Render API URL. The Vercel project now
+   sends a CSP and standard browser security headers via `vercel.json`. If the
+   API uses a custom backend domain, add that exact HTTPS origin to CSP
+   `connect-src` and the API's `ALLOWED_ORIGINS`.
 
 The API applies general, sign-in, signup, password-recovery, payment, order,
 onboarding, and billing rate limits; bounds JSON and URL-encoded request sizes;

@@ -17,7 +17,8 @@ a server-side session record, so logout or a device cap could not revoke them.
 **Remediation:** Login and signup now persist session IDs, access tokens carry
 that ID as `jti`, and authenticated requests check the active session. The
 fourth concurrent login removes the oldest session. Logout and password changes
-revoke sessions. The database schema now includes `AuthSession`.
+revoke sessions. `AuthDevice` remembers browser IDs and triggers one alert for
+each new device after the first known device. The schema includes both tables.
 
 **Deployment:** Apply the schema before deploying. Existing JWTs lack `jti` and
 will be rejected after release, so users need to sign in again.
@@ -91,22 +92,41 @@ those tokens.
 
 **Status:** Not migrated in this change. The API continues to use explicit
 Authorization bearer headers, so cookie-based CSRF controls are not applicable.
-The API CSP does not protect the separately hosted SPA; configure a restrictive
-CSP at the frontend host and consider moving to HttpOnly-cookie sessions with
-an explicit CSRF/origin design as a separately coordinated auth migration.
+Vercel now sends a restrictive CSP in `vercel.json`, which narrows script
+execution, but a same-origin script injection could still read localStorage.
+Consider HttpOnly-cookie sessions with an explicit CSRF/origin design as a
+separately coordinated auth migration.
 
 ### SEC-07 — Medium — Proxy and deployment controls are not represented here
 
-**Evidence:** No trusted proxy topology, frontend hosting headers, WAF, TLS
-termination, or production Redis configuration is defined in these app repos.
+**Location:** `src/config/env.config.ts`, `src/app.ts`, Vercel `vercel.json`.
 
-**Remediation:** Added `TRUST_PROXY_HOPS` (default 0) so production can trust
-only the configured proxy chain. Enforce HTTPS and frontend CSP at the edge,
-and set `REDIS_URL` for multi-instance rate-limit enforcement. See `SECURITY.md`.
+**Evidence:** Render's proxy chain, deployment environment values, WAF and
+service controls are configured outside the code repositories.
+
+**Remediation:** Added `TRUST_PROXY_HOPS` (default 0); deployment notes now
+specify the Render setting. The Vercel CSP is in `vercel.json`; the existing
+`REDIS_URL` enables shared limits. See `SECURITY.md`.
+
+### SEC-08 — Medium — New-device sign-ins had no user email alert
+
+**Location:** `src/auth/sessionService.ts`, `src/auth/loginDevice.ts`,
+`src/notifications/registry.ts`, `src/notifications/templates/auth.ts`.
+
+**Evidence:** `notifications/README.md` listed `AUTH_LOGIN_ALERT` as deferred
+because no device-audit flow existed.
+
+**Remediation:** The frontend sends a persistent random browser ID. The first
+recognized device is registered silently; each later browser receives one
+escaped, idempotent alert with reported browser, IP, and UTC timestamp. The same
+browser does not receive repeat alerts. API clients fall back to a UA/IP
+fingerprint, which may treat a network change as a new device.
 
 ## Verification
 
-Attempted `npm run build`; Node could not start under the workspace filesystem
-permissions (`EPERM` while resolving `C:\Users\gasie`). Prisma schema/client
-generation and TypeScript compilation therefore could not be completed here.
-No live database migration or payment integration was run.
+- Prisma Client generation completed and server TypeScript check passed.
+- Frontend TypeScript build check passed; `vercel.json` parsed successfully.
+- Vite production bundling could not read the workspace's parent directory
+  (`Access is denied` from esbuild). The server package build script invokes
+  Yarn, which is not installed in this environment.
+- No live database migration or payment integration was run.
