@@ -15,6 +15,7 @@ import { createHash } from "crypto";
 import { rateLimitStore } from "./middleware/rateLimitStore";
 import { ApiError } from "./middleware/apiError";
 import { HttpCode } from "./models/status_codes";
+import { recordPlatformActivity } from "./platform/platformActivityLog";
 
 const app = express();
 if (env.trustProxyHops > 0) app.set("trust proxy", env.trustProxyHops);
@@ -97,6 +98,9 @@ app.use(
   }),
 );
 app.use(hpp());
+// Attach logging before rate limits and body parsing so rejected or malformed
+// API requests are still recorded without inspecting their payloads.
+app.use("/api", recordPlatformActivity);
 
 const limiter = rateLimit({
   ...withRateLimitStore("api"),
