@@ -23,6 +23,11 @@ const requiredVars = [
 ];
 const missing = requiredVars.filter((v) => !process.env[v]);
 
+const configuredTrustProxyHops = Number(process.env.TRUST_PROXY_HOPS ?? 0);
+const trustProxyHops = Number.isSafeInteger(configuredTrustProxyHops) && configuredTrustProxyHops >= 0
+  ? configuredTrustProxyHops
+  : 0;
+
 if (missing.length > 0) {
   throw new Error(
     `Missing required environment variables in ${envFilePath}: ${missing.join(", ")}`,
@@ -32,9 +37,9 @@ if (missing.length > 0) {
 export const env = {
   port: Number(process.env.PORT),
   databaseUrl: process.env.DATABASE_URL as string,
-  nodeEnv: process.env.NODE_ENV as string,
+  nodeEnv: (process.env.NODE_ENV as string).trim().toLowerCase(),
   // Defaults to trusting no proxy headers; configure to match the real proxy chain.
-  trustProxyHops: Math.max(0, Math.floor(Number(process.env.TRUST_PROXY_HOPS) || 0)),
+  trustProxyHops,
   JWT_SECRET: process.env.JWT_SECRET as string,
   JWT_EXPIRATION: process.env.JWT_EXPIRATION as string,
   JWT_REFRESH_EXPIRES: process.env.JWT_REFRESH_EXPIRES as string,
