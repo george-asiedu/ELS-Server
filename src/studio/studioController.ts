@@ -46,7 +46,6 @@ export class StudioController {
       const result = await studioService.updateBranding(
         req.studioId,
         req.body ?? {},
-        req.file,
       );
       return res.status(200).json(result);
     } catch (error) {
