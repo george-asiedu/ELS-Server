@@ -412,11 +412,28 @@ model AuthSession {
   id        String   @id
   userId    String
   studioId  String?
+  deviceKey String?
   expiresAt DateTime
   createdAt DateTime @default(now())
 
   @@index([userId, expiresAt])
+  @@index([userId, deviceKey])
   @@map("auth_sessions")
+}
+
+// A browser-generated random identifier, hashed by the API. This remembers
+// known browsers after their active sessions expire so alerts are one-time per
+// newly seen device rather than on every login.
+model AuthDevice {
+  id          String   @id @default(cuid())
+  userId      String
+  deviceKey   String
+  firstSeenAt DateTime @default(now())
+  lastSeenAt  DateTime @updatedAt
+
+  @@unique([userId, deviceKey])
+  @@index([userId, lastSeenAt])
+  @@map("auth_devices")
 }
 
 model Profile {
