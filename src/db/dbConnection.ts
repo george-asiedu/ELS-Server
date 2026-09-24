@@ -191,6 +191,7 @@ export class Connection {
   get studioSettings() { return this.db.studioSettings; }
   get featureRequest() { return this.db.featureRequest; }
   get auditLog() { return this.db.auditLog; }
+  get platformActivityLog() { return this.db.platformActivityLog; }
   get notificationLog() { return this.db.notificationLog; }
   get studioSignup() { return this.db.studioSignup; }
   get platformReview() { return this.db.platformReview; }
