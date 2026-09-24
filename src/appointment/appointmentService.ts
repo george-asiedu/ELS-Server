@@ -3,7 +3,6 @@ import { CursorPage, cursorPageArgs, cursorPageResult } from "../utils/cursorPag
 import { getTenantContext } from "../tenant/context";
 import { ApiError } from "../middleware/apiError";
 import { S3BucketService } from "../bucket/s3BucketService";
-import { UploadedFile } from "../models/user";
 import {
   AppointmentStatusInput,
   CreateAppointmentInput,
@@ -60,7 +59,6 @@ export class AppointmentService extends Connection {
   public async create(
     data: CreateAppointmentInput,
     userId?: string,
-    designImage?: UploadedFile,
   ) {
     const service = await this.service.findUnique({
       where: { id: data.serviceId },
@@ -70,9 +68,7 @@ export class AppointmentService extends Connection {
     }
 
     let designImageUrl: string | undefined;
-    if (designImage) {
-      designImageUrl = await this.s3.uploadFile(designImage);
-    }
+    if (data.designImageUrl) designImageUrl = this.s3.assertOwnedMediaUrl(data.designImageUrl, "appointments");
 
     // A service on promo bills at its promo price.
     const onPromo =
@@ -213,6 +209,7 @@ export class AppointmentService extends Connection {
       include: serviceInclude,
       ...cursorPageArgs(page),
     });
+    appointments.forEach((item) => { item.designImageUrl = this.s3.deliveryUrl(item.designImageUrl); });
     return { message: "Appointments retrieved successfully", ...cursorPageResult(appointments, page) };
   }
 
@@ -222,6 +219,7 @@ export class AppointmentService extends Connection {
       include: serviceInclude,
       ...cursorPageArgs(page),
     });
+    appointments.forEach((item) => { item.designImageUrl = this.s3.deliveryUrl(item.designImageUrl); });
     return { message: "Appointments retrieved successfully", ...cursorPageResult(appointments, page) };
   }
 
