@@ -85,7 +85,7 @@ const withRateLimitStore = (namespace: string) => {
 app.use(
   cors({
     methods: ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allowedHeaders: ["Authorization", "Content-Type", "X-Studio-Slug", "Idempotency-Key"],
+    allowedHeaders: ["Authorization", "Content-Type", "X-Studio-Slug", "X-Device-Id", "Idempotency-Key"],
     maxAge: 600,
     origin: (origin, cb) => {
       // No Origin header = same-origin, curl, or server-to-server (e.g. the
@@ -206,7 +206,7 @@ const port = env.port;
 if (!port)
   throw new Error("Port number is not defined in environment variables");
 
-app.listen(port, () => {
+app.listen(port, "0.0.0.0", () => {
   console.log(`Server is running on port ${port}`);
 });
 
