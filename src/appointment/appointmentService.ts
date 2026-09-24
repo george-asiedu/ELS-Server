@@ -1,4 +1,5 @@
 import { Connection } from "../db/dbConnection";
+import { CursorPage, cursorPageArgs, cursorPageResult } from "../utils/cursorPagination";
 import { getTenantContext } from "../tenant/context";
 import { ApiError } from "../middleware/apiError";
 import { S3BucketService } from "../bucket/s3BucketService";
@@ -205,21 +206,23 @@ export class AppointmentService extends Connection {
     return { message: "Availability retrieved successfully", data: taken };
   }
 
-  public async listForUser(userId: string) {
+  public async listForUser(userId: string, page: CursorPage) {
     const appointments = await this.appointment.findMany({
       where: { userId },
-      orderBy: { appointmentDate: "desc" },
+      orderBy: [{ appointmentDate: "desc" }, { id: "desc" }],
       include: serviceInclude,
+      ...cursorPageArgs(page),
     });
-    return { message: "Appointments retrieved successfully", data: appointments };
+    return { message: "Appointments retrieved successfully", ...cursorPageResult(appointments, page) };
   }
 
-  public async listAll() {
+  public async listAll(page: CursorPage) {
     const appointments = await this.appointment.findMany({
-      orderBy: { appointmentDate: "desc" },
+      orderBy: [{ appointmentDate: "desc" }, { id: "desc" }],
       include: serviceInclude,
+      ...cursorPageArgs(page),
     });
-    return { message: "Appointments retrieved successfully", data: appointments };
+    return { message: "Appointments retrieved successfully", ...cursorPageResult(appointments, page) };
   }
 
   public async updateStatus(id: string, status: AppointmentStatusInput) {

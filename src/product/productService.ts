@@ -2,6 +2,7 @@ import { Connection } from "../db/dbConnection";
 import { ApiError } from "../middleware/apiError";
 import { S3BucketService } from "../bucket/s3BucketService";
 import { UploadedFile } from "../models/user";
+import { CursorPage, cursorPageArgs, cursorPageResult } from "../utils/cursorPagination";
 
 export interface CreateProductInput {
   name: string;
@@ -29,7 +30,7 @@ export class ProductService extends Connection {
   }
 
   // Public list: active products whose category is also visible (active).
-  public async listActive() {
+  public async listActive(page: CursorPage) {
     const visible = await this.productCategory.findMany({
       where: { active: true },
       select: { slug: true },
@@ -37,16 +38,18 @@ export class ProductService extends Connection {
     const slugs = visible.map((c) => c.slug);
     const products = await this.product.findMany({
       where: { active: true, category: { in: slugs } },
-      orderBy: [{ category: "asc" }, { name: "asc" }],
+      orderBy: [{ category: "asc" }, { name: "asc" }, { id: "asc" }],
+      ...cursorPageArgs(page),
     });
-    return { message: "Products retrieved successfully", data: products };
+    return { message: "Products retrieved successfully", ...cursorPageResult(products, page) };
   }
 
-  public async listAll() {
+  public async listAll(page: CursorPage) {
     const products = await this.product.findMany({
-      orderBy: [{ category: "asc" }, { name: "asc" }],
+      orderBy: [{ category: "asc" }, { name: "asc" }, { id: "asc" }],
+      ...cursorPageArgs(page),
     });
-    return { message: "Products retrieved successfully", data: products };
+    return { message: "Products retrieved successfully", ...cursorPageResult(products, page) };
   }
 
   public async getById(id: string) {

@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from "express";
 import { OrderService } from "./orderService";
+import { parseCursorPage } from "../utils/cursorPagination";
 import { ApiError } from "../middleware/apiError";
 
 const orderService = new OrderService();
@@ -108,7 +109,8 @@ export class OrderController {
     next: NextFunction,
   ) => {
     try {
-      return res.status(200).json(await orderService.listMine(req.user.id));
+      const page = parseCursorPage(req.query.cursor, req.query.limit);
+      return res.status(200).json(await orderService.listMine(req.user.id, page));
     } catch (error) {
       return next(error);
     }
@@ -147,12 +149,13 @@ export class OrderController {
   };
 
   public static listAll = async (
-    _req: Request,
+    req: Request,
     res: Response,
     next: NextFunction,
   ) => {
     try {
-      return res.status(200).json(await orderService.listAll());
+      const page = parseCursorPage(req.query.cursor, req.query.limit);
+      return res.status(200).json(await orderService.listAll(page));
     } catch (error) {
       return next(error);
     }

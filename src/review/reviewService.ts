@@ -1,6 +1,7 @@
 import { Connection } from "../db/dbConnection";
 import { ApiError } from "../middleware/apiError";
 import { CreateReviewInput } from "./reviewModels";
+import { CursorPage, cursorPageArgs, cursorPageResult } from "../utils/cursorPagination";
 
 const reviewInclude = {
   user: {
@@ -57,12 +58,13 @@ export class ReviewService extends Connection {
     return { message: "Reviews retrieved successfully", data: reviews };
   }
 
-  public async listAll() {
+  public async listAll(page: CursorPage) {
     const reviews = await this.review.findMany({
-      orderBy: { createdAt: "desc" },
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
       include: reviewInclude,
+      ...cursorPageArgs(page),
     });
-    return { message: "Reviews retrieved successfully", data: reviews };
+    return { message: "Reviews retrieved successfully", ...cursorPageResult(reviews, page) };
   }
 
   public async setApproved(id: string, approved: boolean) {

@@ -2,6 +2,7 @@ import { Connection } from "../db/dbConnection";
 import { S3BucketService } from "../bucket/s3BucketService";
 import { ApiError } from "../middleware/apiError";
 import { UploadedFile } from "../models/user";
+import { CursorPage, cursorPageArgs, cursorPageResult } from "../utils/cursorPagination";
 
 export class GalleryService extends Connection {
   constructor(private s3: S3BucketService) {
@@ -9,7 +10,7 @@ export class GalleryService extends Connection {
   }
 
   // Public: active items whose category is also visible (active).
-  public async listActive() {
+  public async listActive(page: CursorPage) {
     const visible = await this.category.findMany({
       where: { active: true },
       select: { slug: true },
@@ -17,16 +18,18 @@ export class GalleryService extends Connection {
     const slugs = visible.map((c) => c.slug);
     const images = await this.gallery.findMany({
       where: { active: true, category: { in: slugs } },
-      orderBy: { createdAt: "desc" },
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      ...cursorPageArgs(page),
     });
-    return { message: "Gallery retrieved successfully", data: images };
+    return { message: "Gallery retrieved successfully", ...cursorPageResult(images, page) };
   }
 
-  public async listAll() {
+  public async listAll(page: CursorPage) {
     const images = await this.gallery.findMany({
-      orderBy: { createdAt: "desc" },
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      ...cursorPageArgs(page),
     });
-    return { message: "Gallery retrieved successfully", data: images };
+    return { message: "Gallery retrieved successfully", ...cursorPageResult(images, page) };
   }
 
   public async create(

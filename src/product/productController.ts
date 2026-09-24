@@ -2,6 +2,7 @@ import { Request, Response, NextFunction } from "express";
 import { ProductService } from "./productService";
 import { ApiError } from "../middleware/apiError";
 import { CreateProductInput, UpdateProductInput } from "./productService";
+import { parseCursorPage } from "../utils/cursorPagination";
 
 const productService = new ProductService();
 
@@ -38,24 +39,26 @@ const parseBody = (body: Record<string, unknown>): UpdateProductInput => {
 
 export class ProductController {
   public static list = async (
-    _req: Request,
+    req: Request,
     res: Response,
     next: NextFunction,
   ) => {
     try {
-      return res.status(200).json(await productService.listActive());
+      const page = parseCursorPage(req.query.cursor, req.query.limit);
+      return res.status(200).json(await productService.listActive(page));
     } catch (error) {
       return next(error);
     }
   };
 
   public static listAll = async (
-    _req: Request,
+    req: Request,
     res: Response,
     next: NextFunction,
   ) => {
     try {
-      return res.status(200).json(await productService.listAll());
+      const page = parseCursorPage(req.query.cursor, req.query.limit);
+      return res.status(200).json(await productService.listAll(page));
     } catch (error) {
       return next(error);
     }

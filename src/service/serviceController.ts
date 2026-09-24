@@ -4,6 +4,7 @@ import { ApiError } from "../middleware/apiError";
 import { errorMessage } from "../utils/helper";
 import { CreateServiceInput, UpdateServiceInput } from "./serviceModels";
 import { validateCreateService, validateUpdateService } from "./validator";
+import { parseCursorPage } from "../utils/cursorPagination";
 
 const serviceService = new ServiceService();
 
@@ -28,12 +29,13 @@ const parseBody = (body: Record<string, unknown>): UpdateServiceInput => {
 
 export class ServiceController {
   public static list = async (
-    _req: Request,
+    req: Request,
     res: Response,
     next: NextFunction,
   ) => {
     try {
-      const result = await serviceService.listActive();
+      const page = parseCursorPage(req.query.cursor, req.query.limit);
+      const result = await serviceService.listActive(page);
       return res.status(200).json(result);
     } catch (error) {
       return next(error);
@@ -41,12 +43,13 @@ export class ServiceController {
   };
 
   public static listAll = async (
-    _req: Request,
+    req: Request,
     res: Response,
     next: NextFunction,
   ) => {
     try {
-      const result = await serviceService.listAll();
+      const page = parseCursorPage(req.query.cursor, req.query.limit);
+      const result = await serviceService.listAll(page);
       return res.status(200).json(result);
     } catch (error) {
       return next(error);

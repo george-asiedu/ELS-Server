@@ -3,11 +3,12 @@ import { ApiError } from "../middleware/apiError";
 import { CreateServiceInput, UpdateServiceInput } from "./serviceModels";
 import { S3BucketService } from "../bucket/s3BucketService";
 import { UploadedFile } from "../models/user";
+import { CursorPage, cursorPageArgs, cursorPageResult } from "../utils/cursorPagination";
 
 export class ServiceService extends Connection {
   private s3 = new S3BucketService();
   // Public list: active services whose category is also visible (active).
-  public async listActive() {
+  public async listActive(page: CursorPage) {
     const visible = await this.category.findMany({
       where: { active: true },
       select: { slug: true },
@@ -15,9 +16,10 @@ export class ServiceService extends Connection {
     const slugs = visible.map((c) => c.slug);
     const services = await this.service.findMany({
       where: { active: true, category: { in: slugs } },
-      orderBy: [{ category: "asc" }, { name: "asc" }],
+      orderBy: [{ category: "asc" }, { name: "asc" }, { id: "asc" }],
+      ...cursorPageArgs(page),
     });
-    return { message: "Services retrieved successfully", data: services };
+    return { message: "Services retrieved successfully", ...cursorPageResult(services, page) };
   }
 
   private async assertCategoryExists(slug: string) {
@@ -27,11 +29,12 @@ export class ServiceService extends Connection {
     }
   }
 
-  public async listAll() {
+  public async listAll(page: CursorPage) {
     const services = await this.service.findMany({
-      orderBy: [{ category: "asc" }, { name: "asc" }],
+      orderBy: [{ category: "asc" }, { name: "asc" }, { id: "asc" }],
+      ...cursorPageArgs(page),
     });
-    return { message: "Services retrieved successfully", data: services };
+    return { message: "Services retrieved successfully", ...cursorPageResult(services, page) };
   }
 
   public async getById(id: string) {
