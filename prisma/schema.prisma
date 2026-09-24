@@ -260,6 +260,28 @@ model AuditLog {
   @@map("audit_logs")
 }
 
+// Operational request telemetry, separate from the business/admin AuditLog.
+// Contains request metadata only; never persist request bodies, query strings,
+// credentials, or user email addresses here.
+model PlatformActivityLog {
+  id         String   @id @default(cuid())
+  requestId  String
+  studioId   String?
+  actorId    String?
+  actorRole  String?
+  method     String
+  route      String
+  statusCode Int
+  durationMs Int
+  userAgent  String?
+  createdAt  DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([studioId, createdAt])
+  @@index([statusCode, createdAt])
+  @@map("platform_activity_logs")
+}
+
 // Delivery record for every notification email the platform sends. Not
 // tenant-scoped (mirrors AuditLog) — background jobs (cron, webhooks) send
 // across studios with no request-scoped tenant context.
