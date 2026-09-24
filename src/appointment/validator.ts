@@ -23,6 +23,7 @@ const createAppointmentSchema: JSONSchemaType<CreateAppointmentInput> = {
     appointmentTime: { type: "string", minLength: 1, maxLength: 20 },
     notes: { type: "string", nullable: true, maxLength: 1000 },
     applyPoints: { type: "string", nullable: true, enum: ["true", "false"] },
+    designImageUrl: { type: "string", nullable: true, maxLength: 2048 },
   },
   required: ["fullName", "phone", "serviceId", "appointmentDate", "appointmentTime"],
   additionalProperties: false,
