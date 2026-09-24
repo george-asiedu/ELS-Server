@@ -12,8 +12,8 @@ const parseBody = (body: Record<string, unknown>): UpdateServiceInput => {
   const out: UpdateServiceInput = {};
   if (body.name !== undefined) out.name = String(body.name);
   if (body.category !== undefined) out.category = String(body.category);
-  if (body.description !== undefined)
-    out.description = body.description === "" || body.description === null ? undefined : String(body.description);
+  if (body.description !== undefined && body.description !== "" && body.description !== null)
+    out.description = String(body.description);
   if (body.duration !== undefined) out.duration = String(body.duration);
   if (body.price !== undefined && body.price !== "") out.price = Number(body.price);
   if (body.promoPrice !== undefined) {
@@ -23,7 +23,7 @@ const parseBody = (body: Record<string, unknown>): UpdateServiceInput => {
   }
   if (body.popular !== undefined) out.popular = body.popular === true || body.popular === "true";
   if (body.active !== undefined) out.active = body.active === true || body.active === "true";
-  if (body.imageUrl !== undefined) out.imageUrl = body.imageUrl === null ? undefined : String(body.imageUrl);
+  if (body.imageUrl !== undefined && body.imageUrl !== null) out.imageUrl = String(body.imageUrl);
   return out;
 };
 
