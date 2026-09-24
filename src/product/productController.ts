@@ -34,6 +34,7 @@ const parseBody = (body: Record<string, unknown>): UpdateProductInput => {
   if (active !== undefined) out.active = active;
   const popular = toBool(body.popular);
   if (popular !== undefined) out.popular = popular;
+  if (body.imageUrl !== undefined) out.imageUrl = body.imageUrl === null || body.imageUrl === "" ? null : String(body.imageUrl);
   return out;
 };
 
@@ -90,10 +91,7 @@ export class ProductController {
         throw new ApiError("A valid price is required", 400);
       if (!parsed.category)
         throw new ApiError("A product category is required", 400);
-      const result = await productService.create(
-        parsed as CreateProductInput,
-        req.file,
-      );
+      const result = await productService.create(parsed as CreateProductInput);
       return res.status(201).json(result);
     } catch (error) {
       return next(error);
@@ -109,7 +107,7 @@ export class ProductController {
       const { id } = req.params;
       if (!id) throw new ApiError("Product ID is required", 400);
       const parsed = parseBody(req.body ?? {});
-      const result = await productService.update(id, parsed, req.file);
+      const result = await productService.update(id, parsed);
       return res.status(200).json(result);
     } catch (error) {
       return next(error);
