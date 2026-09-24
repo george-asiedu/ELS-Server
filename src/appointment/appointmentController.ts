@@ -3,6 +3,7 @@ import { AppointmentService } from "./appointmentService";
 import { ApiError } from "../middleware/apiError";
 import { errorMessage } from "../utils/helper";
 import { validateCreateAppointment, validateUpdateStatus } from "./validator";
+import { parseCursorPage } from "../utils/cursorPagination";
 
 const appointmentService = new AppointmentService();
 
@@ -25,7 +26,6 @@ export class AppointmentController {
       const result = await appointmentService.create(
         req.body,
         userId,
-        req.file,
       );
       return res.status(201).json(result);
     } catch (error) {
@@ -57,7 +57,8 @@ export class AppointmentController {
   ) => {
     try {
       if (!req.user) throw new ApiError("Authentication required", 401);
-      const result = await appointmentService.listForUser(req.user.id);
+      const page = parseCursorPage(req.query.cursor, req.query.limit);
+      const result = await appointmentService.listForUser(req.user.id, page);
       return res.status(200).json(result);
     } catch (error) {
       return next(error);
@@ -65,12 +66,13 @@ export class AppointmentController {
   };
 
   public static listAll = async (
-    _req: Request,
+    req: Request,
     res: Response,
     next: NextFunction,
   ) => {
     try {
-      const result = await appointmentService.listAll();
+      const page = parseCursorPage(req.query.cursor, req.query.limit);
+      const result = await appointmentService.listAll(page);
       return res.status(200).json(result);
     } catch (error) {
       return next(error);

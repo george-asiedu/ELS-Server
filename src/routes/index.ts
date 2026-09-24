@@ -21,12 +21,14 @@ import featureRequestRoutes from "../featureRequest/routes";
 import promoRoutes from "../promo/routes";
 import onboardingRoutes from "../onboarding/routes";
 import platformReviewRoutes from "../platformReview/routes";
+import uploadRoutes from "../bucket/uploadRoutes";
 
 const router: Router = Router();
 
 // Super-admin surface. resolveTenant runs these in the platform (superAdmin)
 // context — no studio scoping — and the routes guard themselves.
 router.use("/platform", platformRoutes);
+router.use("/uploads", uploadRoutes);
 
 // Public per-studio storefront config (branding/content/feature flags).
 router.use("/studio", studioRoutes);

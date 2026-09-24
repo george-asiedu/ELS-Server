@@ -1,5 +1,6 @@
 import { Connection } from "../db/dbConnection";
 import { ApiError } from "../middleware/apiError";
+import { S3BucketService } from "../bucket/s3BucketService";
 
 const itemsInclude = {
   items: {
@@ -23,6 +24,7 @@ const itemsInclude = {
 } as const;
 
 export class CartService extends Connection {
+  private s3 = new S3BucketService();
   private async getOrCreate(userId: string) {
     const existing = await this.cart.findUnique({ where: { userId } });
     if (existing) return existing;
@@ -35,6 +37,7 @@ export class CartService extends Connection {
       where: { userId },
       include: itemsInclude,
     });
+    cart?.items.forEach((item) => { item.product.imageUrl = this.s3.deliveryUrl(item.product.imageUrl); });
     return { message: "Cart retrieved successfully", data: cart };
   }
 

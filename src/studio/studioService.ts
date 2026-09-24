@@ -2,7 +2,6 @@ import { Connection } from "../db/dbConnection";
 import { S3BucketService } from "../bucket/s3BucketService";
 import { ApiError } from "../middleware/apiError";
 import { HttpCode } from "../models/status_codes";
-import { UploadedFile } from "../models/user";
 import { paystack } from "../payment/paystackClient";
 import { env } from "../config/env.config";
 import { randomUUID } from "crypto";
@@ -125,7 +124,7 @@ export class StudioService extends Connection {
       name: studio.name,
       slug: studio.slug,
       branding: {
-        logoUrl: studio.branding?.logoUrl ?? null,
+        logoUrl: this.s3.deliveryUrl(studio.branding?.logoUrl ?? null) ?? null,
         primaryColor: studio.branding?.primaryColor ?? null,
         accentColor: studio.branding?.accentColor ?? null,
         fontFamily: studio.branding?.fontFamily ?? null,
@@ -159,6 +158,7 @@ export class StudioService extends Connection {
       update: {},
       create: { studioId: id },
     });
+    branding.logoUrl = this.s3.deliveryUrl(branding.logoUrl);
     return { message: "Branding retrieved", data: branding };
   }
 
@@ -169,8 +169,8 @@ export class StudioService extends Connection {
       accentColor?: unknown;
       fontFamily?: unknown;
       removeLogo?: unknown;
+      logoUrl?: unknown;
     },
-    logoFile?: UploadedFile,
   ) {
     const id = this.requireStudioId(studioId);
 
@@ -191,8 +191,8 @@ export class StudioService extends Connection {
       data.fontFamily = font || null;
     }
 
-    if (logoFile) {
-      data.logoUrl = await this.s3.uploadFile(logoFile, { maxDim: 512, quality: 90 });
+    if (input.logoUrl) {
+      data.logoUrl = this.s3.assertOwnedMediaUrl(String(input.logoUrl), "studio");
     } else if (
       input.removeLogo === true ||
       input.removeLogo === "true"
@@ -205,6 +205,7 @@ export class StudioService extends Connection {
       update: data,
       create: { studioId: id, ...data },
     });
+    branding.logoUrl = this.s3.deliveryUrl(branding.logoUrl);
     return { message: "Branding updated", data: branding };
   }
 

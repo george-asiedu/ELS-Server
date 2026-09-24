@@ -1,8 +1,8 @@
 import { Connection } from "../db/dbConnection";
+import { CursorPage, cursorPageArgs, cursorPageResult } from "../utils/cursorPagination";
 import { getTenantContext } from "../tenant/context";
 import { ApiError } from "../middleware/apiError";
 import { S3BucketService } from "../bucket/s3BucketService";
-import { UploadedFile } from "../models/user";
 import {
   AppointmentStatusInput,
   CreateAppointmentInput,
@@ -59,7 +59,6 @@ export class AppointmentService extends Connection {
   public async create(
     data: CreateAppointmentInput,
     userId?: string,
-    designImage?: UploadedFile,
   ) {
     const service = await this.service.findUnique({
       where: { id: data.serviceId },
@@ -69,9 +68,7 @@ export class AppointmentService extends Connection {
     }
 
     let designImageUrl: string | undefined;
-    if (designImage) {
-      designImageUrl = await this.s3.uploadFile(designImage);
-    }
+    if (data.designImageUrl) designImageUrl = this.s3.assertOwnedMediaUrl(data.designImageUrl, "appointments");
 
     // A service on promo bills at its promo price.
     const onPromo =
@@ -205,21 +202,25 @@ export class AppointmentService extends Connection {
     return { message: "Availability retrieved successfully", data: taken };
   }
 
-  public async listForUser(userId: string) {
+  public async listForUser(userId: string, page: CursorPage) {
     const appointments = await this.appointment.findMany({
       where: { userId },
-      orderBy: { appointmentDate: "desc" },
+      orderBy: [{ appointmentDate: "desc" }, { id: "desc" }],
       include: serviceInclude,
+      ...cursorPageArgs(page),
     });
-    return { message: "Appointments retrieved successfully", data: appointments };
+    appointments.forEach((item) => { item.designImageUrl = this.s3.deliveryUrl(item.designImageUrl); });
+    return { message: "Appointments retrieved successfully", ...cursorPageResult(appointments, page) };
   }
 
-  public async listAll() {
+  public async listAll(page: CursorPage) {
     const appointments = await this.appointment.findMany({
-      orderBy: { appointmentDate: "desc" },
+      orderBy: [{ appointmentDate: "desc" }, { id: "desc" }],
       include: serviceInclude,
+      ...cursorPageArgs(page),
     });
-    return { message: "Appointments retrieved successfully", data: appointments };
+    appointments.forEach((item) => { item.designImageUrl = this.s3.deliveryUrl(item.designImageUrl); });
+    return { message: "Appointments retrieved successfully", ...cursorPageResult(appointments, page) };
   }
 
   public async updateStatus(id: string, status: AppointmentStatusInput) {

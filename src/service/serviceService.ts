@@ -1,10 +1,13 @@
 import { Connection } from "../db/dbConnection";
 import { ApiError } from "../middleware/apiError";
 import { CreateServiceInput, UpdateServiceInput } from "./serviceModels";
+import { S3BucketService } from "../bucket/s3BucketService";
+import { CursorPage, cursorPageArgs, cursorPageResult } from "../utils/cursorPagination";
 
 export class ServiceService extends Connection {
+  private s3 = new S3BucketService();
   // Public list: active services whose category is also visible (active).
-  public async listActive() {
+  public async listActive(page: CursorPage) {
     const visible = await this.category.findMany({
       where: { active: true },
       select: { slug: true },
@@ -12,9 +15,11 @@ export class ServiceService extends Connection {
     const slugs = visible.map((c) => c.slug);
     const services = await this.service.findMany({
       where: { active: true, category: { in: slugs } },
-      orderBy: [{ category: "asc" }, { name: "asc" }],
+      orderBy: [{ category: "asc" }, { name: "asc" }, { id: "asc" }],
+      ...cursorPageArgs(page),
     });
-    return { message: "Services retrieved successfully", data: services };
+    services.forEach((item) => { item.imageUrl = this.s3.deliveryUrl(item.imageUrl); });
+    return { message: "Services retrieved successfully", ...cursorPageResult(services, page) };
   }
 
   private async assertCategoryExists(slug: string) {
@@ -24,11 +29,13 @@ export class ServiceService extends Connection {
     }
   }
 
-  public async listAll() {
+  public async listAll(page: CursorPage) {
     const services = await this.service.findMany({
-      orderBy: [{ category: "asc" }, { name: "asc" }],
+      orderBy: [{ category: "asc" }, { name: "asc" }, { id: "asc" }],
+      ...cursorPageArgs(page),
     });
-    return { message: "Services retrieved successfully", data: services };
+    services.forEach((item) => { item.imageUrl = this.s3.deliveryUrl(item.imageUrl); });
+    return { message: "Services retrieved successfully", ...cursorPageResult(services, page) };
   }
 
   public async getById(id: string) {
@@ -36,11 +43,13 @@ export class ServiceService extends Connection {
     if (!service) {
       throw new ApiError("Service not found", 404);
     }
+    service.imageUrl = this.s3.deliveryUrl(service.imageUrl);
     return { message: "Service retrieved successfully", data: service };
   }
 
   public async create(data: CreateServiceInput) {
     await this.assertCategoryExists(data.category);
+    const imageUrl = data.imageUrl ? this.s3.assertOwnedMediaUrl(data.imageUrl, "services") : undefined;
     const service = await this.service.create({
       data: {
         name: data.name,
@@ -51,7 +60,7 @@ export class ServiceService extends Connection {
         duration: data.duration,
         popular: data.popular ?? false,
         active: data.active ?? true,
-        imageUrl: data.imageUrl ?? null,
+        imageUrl: imageUrl ?? null,
       },
     });
     return { message: "Service created successfully", data: service };
@@ -65,6 +74,7 @@ export class ServiceService extends Connection {
     if (data.category !== undefined) {
       await this.assertCategoryExists(data.category);
     }
+    const imageUrl = data.imageUrl ? this.s3.assertOwnedMediaUrl(data.imageUrl, "services") : data.imageUrl;
 
     const service = await this.service.update({
       where: { id },
@@ -79,7 +89,7 @@ export class ServiceService extends Connection {
         ...(data.duration !== undefined ? { duration: data.duration } : {}),
         ...(data.popular !== undefined ? { popular: data.popular } : {}),
         ...(data.active !== undefined ? { active: data.active } : {}),
-        ...(data.imageUrl !== undefined ? { imageUrl: data.imageUrl } : {}),
+        ...(imageUrl !== undefined ? { imageUrl } : {}),
       },
     });
     return { message: "Service updated successfully", data: service };

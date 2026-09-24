@@ -2,18 +2,40 @@ import { Request, Response, NextFunction } from "express";
 import { ServiceService } from "./serviceService";
 import { ApiError } from "../middleware/apiError";
 import { errorMessage } from "../utils/helper";
+import { CreateServiceInput, UpdateServiceInput } from "./serviceModels";
 import { validateCreateService, validateUpdateService } from "./validator";
+import { parseCursorPage } from "../utils/cursorPagination";
 
 const serviceService = new ServiceService();
 
+const parseBody = (body: Record<string, unknown>): UpdateServiceInput => {
+  const out: UpdateServiceInput = {};
+  if (body.name !== undefined) out.name = String(body.name);
+  if (body.category !== undefined) out.category = String(body.category);
+  if (body.description !== undefined && body.description !== "" && body.description !== null)
+    out.description = String(body.description);
+  if (body.duration !== undefined) out.duration = String(body.duration);
+  if (body.price !== undefined && body.price !== "") out.price = Number(body.price);
+  if (body.promoPrice !== undefined) {
+    out.promoPrice = body.promoPrice === "" || body.promoPrice === null
+      ? null
+      : Number(body.promoPrice);
+  }
+  if (body.popular !== undefined) out.popular = body.popular === true || body.popular === "true";
+  if (body.active !== undefined) out.active = body.active === true || body.active === "true";
+  if (body.imageUrl !== undefined && body.imageUrl !== null) out.imageUrl = String(body.imageUrl);
+  return out;
+};
+
 export class ServiceController {
   public static list = async (
-    _req: Request,
+    req: Request,
     res: Response,
     next: NextFunction,
   ) => {
     try {
-      const result = await serviceService.listActive();
+      const page = parseCursorPage(req.query.cursor, req.query.limit);
+      const result = await serviceService.listActive(page);
       return res.status(200).json(result);
     } catch (error) {
       return next(error);
@@ -21,12 +43,13 @@ export class ServiceController {
   };
 
   public static listAll = async (
-    _req: Request,
+    req: Request,
     res: Response,
     next: NextFunction,
   ) => {
     try {
-      const result = await serviceService.listAll();
+      const page = parseCursorPage(req.query.cursor, req.query.limit);
+      const result = await serviceService.listAll(page);
       return res.status(200).json(result);
     } catch (error) {
       return next(error);
@@ -54,14 +77,15 @@ export class ServiceController {
     next: NextFunction,
   ) => {
     try {
-      const isValid = validateCreateService(req.body);
+      const parsed = parseBody(req.body ?? {});
+      const isValid = validateCreateService(parsed as CreateServiceInput);
       if (!isValid) {
         return res.status(400).json({
           message: errorMessage(validateCreateService.errors),
           errors: validateCreateService.errors,
         });
       }
-      const result = await serviceService.create(req.body);
+      const result = await serviceService.create(parsed as CreateServiceInput);
       return res.status(201).json(result);
     } catch (error) {
       return next(error);
@@ -76,14 +100,15 @@ export class ServiceController {
     try {
       const { id } = req.params;
       if (!id) throw new ApiError("Service ID is required", 400);
-      const isValid = validateUpdateService(req.body);
+      const parsed = parseBody(req.body ?? {});
+      const isValid = validateUpdateService(parsed);
       if (!isValid) {
         return res.status(400).json({
           message: errorMessage(validateUpdateService.errors),
           errors: validateUpdateService.errors,
         });
       }
-      const result = await serviceService.update(id, req.body);
+      const result = await serviceService.update(id, parsed);
       return res.status(200).json(result);
     } catch (error) {
       return next(error);

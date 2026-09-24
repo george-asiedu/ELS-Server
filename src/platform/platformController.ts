@@ -4,6 +4,8 @@ import { PlatformAuthService } from "./platformAuthService";
 import { AuditService } from "../audit/auditService";
 import { ApiError } from "../middleware/apiError";
 import { HttpCode } from "../models/status_codes";
+import { revokeLoginSession } from "../auth/sessionService";
+import { getLoginDeviceMetadata } from "../auth/loginDevice";
 
 const platformService = new PlatformService();
 const platformAuthService = new PlatformAuthService();
@@ -19,6 +21,17 @@ const actor = (req: Request) => ({
 export class PlatformController {
   // ---- Auth -------------------------------------------------------------
 
+  public static logout = async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      if (req.user && req.authSessionId) {
+        await revokeLoginSession(req.authSessionId, req.user.id);
+      }
+      return res.status(200).json({ message: "Logged out successfully" });
+    } catch (error) {
+      return next(error);
+    }
+  };
+
   public static login = async (
     req: Request,
     res: Response,
@@ -30,7 +43,7 @@ export class PlatformController {
       if (!email || !password) {
         throw new ApiError("Email and password are required", HttpCode.BAD_REQUEST);
       }
-      const result = await platformAuthService.login(email, password);
+      const result = await platformAuthService.login(email, password, getLoginDeviceMetadata(req));
       return res.status(200).json(result);
     } catch (error) {
       return next(error);

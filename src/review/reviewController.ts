@@ -3,6 +3,7 @@ import { ReviewService } from "./reviewService";
 import { ApiError } from "../middleware/apiError";
 import { errorMessage } from "../utils/helper";
 import { validateApproveReview, validateCreateReview } from "./validator";
+import { parseCursorPage } from "../utils/cursorPagination";
 
 const reviewService = new ReviewService();
 
@@ -42,12 +43,13 @@ export class ReviewController {
   };
 
   public static listAll = async (
-    _req: Request,
+    req: Request,
     res: Response,
     next: NextFunction,
   ) => {
     try {
-      const result = await reviewService.listAll();
+      const page = parseCursorPage(req.query.cursor, req.query.limit);
+      const result = await reviewService.listAll(page);
       return res.status(200).json(result);
     } catch (error) {
       return next(error);

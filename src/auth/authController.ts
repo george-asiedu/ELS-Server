@@ -5,10 +5,23 @@ import { errorMessage } from "../utils/helper";
 import { validateLogin } from "./validators/login";
 import { ApiError } from "../middleware/apiError";
 import { validateEmail, validatePassword } from "../profile/validator/profile";
+import { revokeLoginSession } from "./sessionService";
+import { getLoginDeviceMetadata } from "./loginDevice";
 
 const authService = new AuthService();
 
 export class AuthController {
+  public static logout = async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      if (req.user && req.authSessionId) {
+        await revokeLoginSession(req.authSessionId, req.user.id);
+      }
+      return res.status(200).json({ message: "Logged out successfully" });
+    } catch (error) {
+      return next(error);
+    }
+  };
+
   public static signup = async (
     req: Request,
     res: Response,
@@ -22,7 +35,7 @@ export class AuthController {
           errors: validateSignup.errors,
         });
       }
-      const result = await authService.signup(req.body);
+      const result = await authService.signup(req.body, getLoginDeviceMetadata(req));
       return res.status(201).json(result);
     } catch (error) {
       return next(error);
@@ -42,7 +55,7 @@ export class AuthController {
           errors: validateLogin.errors,
         });
       }
-      const result = await authService.login(req.body);
+      const result = await authService.login(req.body, getLoginDeviceMetadata(req));
       return res.status(200).json(result);
     } catch (error) {
       return next(error);

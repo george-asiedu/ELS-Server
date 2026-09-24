@@ -6,7 +6,7 @@ import { ProfileService } from "./profileService";
 import { validateEmail, validatePassword, validateProfile } from "./validator/profile";
 
 const s3 = new S3BucketService();
-const profileService = new ProfileService(s3)
+const profileService = new ProfileService()
 
 export class ProfileController {
   public static create = async (
@@ -19,6 +19,9 @@ export class ProfileController {
       if (!userId) {
         throw new ApiError('User ID is required', 400);
       }
+      if (req.user?.role !== "ADMIN" && req.user?.id !== userId) {
+        throw new ApiError("You can only update your own profile", 403);
+      }
       
       const isValid = validateProfile(req.body);
       if (!isValid) {
@@ -27,8 +30,8 @@ export class ProfileController {
           errors: validateProfile.errors,
         });
       }
-      const image = req.file;
-      const result = await profileService.createOrUpdateProfile(req.body, userId, image);
+      if (req.body.avatar) req.body.avatar = s3.assertOwnedMediaUrl(String(req.body.avatar), "profiles");
+      const result = await profileService.createOrUpdateProfile(req.body, userId);
       return res.status(200).json(result);
     } catch (error) {
       return next(error);
@@ -52,11 +55,10 @@ export class ProfileController {
           errors: validateProfile.errors,
         });
       }
-      const image = req.file;
+      if (req.body.avatar) req.body.avatar = s3.assertOwnedMediaUrl(String(req.body.avatar), "profiles");
       const result = await profileService.createOrUpdateProfile(
         req.body,
         req.user.id,
-        image,
       );
       return res.status(200).json(result);
     } catch (error) {
@@ -108,8 +110,12 @@ export class ProfileController {
       if (!userId) {
         throw new ApiError('User ID is required', 400);
       }
+      if (req.user?.role !== "ADMIN" && req.user?.id !== userId) {
+        throw new ApiError("You can only view your own profile", 403);
+      }
 
       const result = await profileService.getUserProfile(userId);
+      if (result.data.avatar) result.data.avatar = s3.deliveryUrl(result.data.avatar);
       return res.status(200).json(result);
     } catch (error) {
       return next(error);
@@ -127,6 +133,7 @@ export class ProfileController {
       }
 
       const result = await profileService.getUserProfile(req.user.id);
+      if (result.data.avatar) result.data.avatar = s3.deliveryUrl(result.data.avatar);
       return res.status(200).json(result);
     } catch (error) {
       return next(error);

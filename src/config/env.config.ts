@@ -15,6 +15,7 @@ const requiredVars = [
   "AWS_ACCESS_KEY_ID",
   "AWS_SECRET_ACCESS_KEY",
   "AWS_REGION",
+  "AWS_CLOUDFRONT_URL",
   "PLUNK_SECRET_KEY",
   "SENDER_EMAIL",
   "CLIENT_URL",
@@ -22,6 +23,11 @@ const requiredVars = [
   "PAYSTACK_PUBLIC_KEY"
 ];
 const missing = requiredVars.filter((v) => !process.env[v]);
+
+const configuredTrustProxyHops = Number(process.env.TRUST_PROXY_HOPS ?? 0);
+const trustProxyHops = Number.isSafeInteger(configuredTrustProxyHops) && configuredTrustProxyHops >= 0
+  ? configuredTrustProxyHops
+  : 0;
 
 if (missing.length > 0) {
   throw new Error(
@@ -32,7 +38,9 @@ if (missing.length > 0) {
 export const env = {
   port: Number(process.env.PORT),
   databaseUrl: process.env.DATABASE_URL as string,
-  nodeEnv: process.env.NODE_ENV as string,
+  nodeEnv: (process.env.NODE_ENV as string).trim().toLowerCase(),
+  // Defaults to trusting no proxy headers; configure to match the real proxy chain.
+  trustProxyHops,
   JWT_SECRET: process.env.JWT_SECRET as string,
   JWT_EXPIRATION: process.env.JWT_EXPIRATION as string,
   JWT_REFRESH_EXPIRES: process.env.JWT_REFRESH_EXPIRES as string,
@@ -41,6 +49,7 @@ export const env = {
     accessKeyId: process.env.AWS_ACCESS_KEY_ID as string,
     secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY as string,
     region: process.env.AWS_REGION as string,
+    cloudFrontUrl: (process.env.AWS_CLOUDFRONT_URL as string || "").replace(/\/$/, ""),
   },
   senderEmail: process.env.SENDER_EMAIL as string,
   // Plunk transactional email (replaces SendGrid). apiUrl is overridable in case

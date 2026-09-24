@@ -1,7 +1,7 @@
 import { ErrorObject } from "ajv";
 import * as bcrypt from "bcrypt";
 import jwt, { SignOptions } from "jsonwebtoken";
-import { randomBytes } from "crypto";
+import { randomBytes, randomUUID } from "crypto";
 import { Payload, AuthToken } from "../models/user";
 import { env } from "../config/env.config";
 
@@ -87,6 +87,7 @@ declare global {
         role: string;
         studioId?: string | null;
       };
+      authSessionId?: string;
       // The studio this request resolved to (null for platform/super-admin).
       studioId?: string | null;
       // The full tenant context resolved for this request. Stashed so it can be
@@ -98,7 +99,7 @@ declare global {
   }
 }
 
-export const loginToken = (user: Payload) => {
+export const loginToken = (user: Payload, sessionId = randomUUID()) => {
   const secret = env.JWT_SECRET;
   const accessDuration = env.JWT_EXPIRATION;
   const refreshDuration = env.JWT_REFRESH_EXPIRES;
@@ -110,6 +111,7 @@ export const loginToken = (user: Payload) => {
       role: user.role,
       studioId: user.studioId ?? null,
       token: AuthToken.ACCESS_TOKEN,
+      jti: sessionId,
     },
     secret,
     { expiresIn: accessDuration } as SignOptions,
@@ -119,12 +121,13 @@ export const loginToken = (user: Payload) => {
     {
       sub: user.id,
       token: AuthToken.REFRESH_TOKEN,
+      jti: sessionId,
     },
     secret,
     { expiresIn: refreshDuration } as SignOptions,
   );
 
-  return { accessToken, refreshToken };
+  return { accessToken, refreshToken, sessionId };
 };
 
 export const generateToken = (user: Payload) => {

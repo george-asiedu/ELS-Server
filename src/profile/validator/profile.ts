@@ -42,7 +42,7 @@ const profileSchema: JSONSchemaType<Profile> = {
     avatar: {
       type: "string",
       nullable: true,
-      pattern: "^(https?://)?(www\\.)?[a-zA-Z0-9\\-]+(\\.[a-zA-Z]{2,})+(/[a-zA-Z0-9\\-_]+)*$",
+      pattern: "^https://[^\\s]+$",
       errorMessage: {
         type: "Avatar URL must be a string",
         pattern: "Avatar URL must be a valid URL"

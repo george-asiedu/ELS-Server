@@ -1,5 +1,6 @@
 import { randomUUID } from "crypto";
 import { Connection } from "../db/dbConnection";
+import { CursorPage, cursorPageArgs, cursorPageResult } from "../utils/cursorPagination";
 import { ApiError } from "../middleware/apiError";
 import { env } from "../config/env.config";
 import { paystack, PaystackVerifyData } from "../payment/paystackClient";
@@ -470,18 +471,20 @@ export class OrderService extends Connection {
     };
   }
 
-  public async listMine(userId: string) {
+  public async listMine(userId: string, page: CursorPage) {
     const orders = await this.order.findMany({
       where: { userId },
-      orderBy: { createdAt: "desc" },
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
       include: orderInclude,
+      ...cursorPageArgs(page),
     });
-    return { message: "Orders retrieved successfully", data: orders };
+    return { message: "Orders retrieved successfully", ...cursorPageResult(orders, page) };
   }
 
-  public async listAll() {
+  public async listAll(page: CursorPage) {
     const orders = await this.order.findMany({
-      orderBy: { createdAt: "desc" },
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      ...cursorPageArgs(page),
       include: {
         items: true,
         user: {
@@ -489,7 +492,7 @@ export class OrderService extends Connection {
         },
       },
     });
-    return { message: "Orders retrieved successfully", data: orders };
+    return { message: "Orders retrieved successfully", ...cursorPageResult(orders, page) };
   }
 
   public async updateStatus(id: string, status: string) {

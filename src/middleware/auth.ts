@@ -4,6 +4,7 @@ import { env } from "../config/env.config";
 import { ApiError } from "./apiError";
 import { HttpCode } from "../models/status_codes";
 import { AuthToken } from "../models/user";
+import { isActiveLoginSession } from "../auth/sessionService";
 
 interface AccessTokenPayload {
   sub: string;
@@ -11,6 +12,7 @@ interface AccessTokenPayload {
   role: string;
   studioId?: string | null;
   token: string;
+  jti?: string;
 }
 
 const extractToken = (req: Request): string | null => {
@@ -21,7 +23,7 @@ const extractToken = (req: Request): string | null => {
   return null;
 };
 
-export const authenticate = (
+export const authenticate = async (
   req: Request,
   _res: Response,
   next: NextFunction,
@@ -36,6 +38,9 @@ export const authenticate = (
 
     if (decoded.token !== AuthToken.ACCESS_TOKEN) {
       throw new ApiError("Invalid token type", HttpCode.UNAUTHORIZED_ACCESS);
+    }
+    if (!decoded.jti || !(await isActiveLoginSession(decoded.jti, decoded.sub))) {
+      throw new ApiError("Session expired or revoked. Please sign in again.", HttpCode.UNAUTHORIZED_ACCESS);
     }
 
     // Reject a token minted for one studio being used against another.
@@ -54,6 +59,7 @@ export const authenticate = (
       role: decoded.role,
       studioId: decoded.studioId ?? null,
     };
+    req.authSessionId = decoded.jti;
 
     return next();
   } catch (error) {
@@ -117,7 +123,7 @@ export const requireCustomer = (
 
 // Attaches req.user when a valid token is present, but does not require it.
 // Used for endpoints that behave differently for guests vs logged-in users.
-export const optionalAuth = (
+export const optionalAuth = async (
   req: Request,
   _res: Response,
   next: NextFunction,
@@ -129,12 +135,14 @@ export const optionalAuth = (
     }
     const decoded = jwt.verify(token, env.JWT_SECRET) as AccessTokenPayload;
     if (decoded.token === AuthToken.ACCESS_TOKEN) {
+      if (!decoded.jti || !(await isActiveLoginSession(decoded.jti, decoded.sub))) return next();
       req.user = {
         id: decoded.sub,
         email: decoded.email,
         role: decoded.role,
         studioId: decoded.studioId ?? null,
       };
+      req.authSessionId = decoded.jti;
     }
     return next();
   } catch {

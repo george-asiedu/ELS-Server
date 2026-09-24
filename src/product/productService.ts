@@ -1,7 +1,7 @@
 import { Connection } from "../db/dbConnection";
 import { ApiError } from "../middleware/apiError";
 import { S3BucketService } from "../bucket/s3BucketService";
-import { UploadedFile } from "../models/user";
+import { CursorPage, cursorPageArgs, cursorPageResult } from "../utils/cursorPagination";
 
 export interface CreateProductInput {
   name: string;
@@ -14,6 +14,7 @@ export interface CreateProductInput {
   trackStock?: boolean;
   active?: boolean;
   popular?: boolean;
+  imageUrl?: string | null;
 }
 
 export type UpdateProductInput = Partial<CreateProductInput>;
@@ -29,7 +30,7 @@ export class ProductService extends Connection {
   }
 
   // Public list: active products whose category is also visible (active).
-  public async listActive() {
+  public async listActive(page: CursorPage) {
     const visible = await this.productCategory.findMany({
       where: { active: true },
       select: { slug: true },
@@ -37,31 +38,35 @@ export class ProductService extends Connection {
     const slugs = visible.map((c) => c.slug);
     const products = await this.product.findMany({
       where: { active: true, category: { in: slugs } },
-      orderBy: [{ category: "asc" }, { name: "asc" }],
+      orderBy: [{ category: "asc" }, { name: "asc" }, { id: "asc" }],
+      ...cursorPageArgs(page),
     });
-    return { message: "Products retrieved successfully", data: products };
+    products.forEach((item) => { item.imageUrl = this.s3.deliveryUrl(item.imageUrl); });
+    return { message: "Products retrieved successfully", ...cursorPageResult(products, page) };
   }
 
-  public async listAll() {
+  public async listAll(page: CursorPage) {
     const products = await this.product.findMany({
-      orderBy: [{ category: "asc" }, { name: "asc" }],
+      orderBy: [{ category: "asc" }, { name: "asc" }, { id: "asc" }],
+      ...cursorPageArgs(page),
     });
-    return { message: "Products retrieved successfully", data: products };
+    products.forEach((item) => { item.imageUrl = this.s3.deliveryUrl(item.imageUrl); });
+    return { message: "Products retrieved successfully", ...cursorPageResult(products, page) };
   }
 
   public async getById(id: string) {
     const product = await this.product.findUnique({ where: { id } });
     if (!product) throw new ApiError("Product not found", 404);
+    product.imageUrl = this.s3.deliveryUrl(product.imageUrl);
     return { message: "Product retrieved successfully", data: product };
   }
 
-  public async create(data: CreateProductInput, image?: UploadedFile) {
+  public async create(data: CreateProductInput) {
     await this.assertCategoryExists(data.category);
     if (!data.name?.trim()) throw new ApiError("Product name is required", 400);
     if (!(data.price >= 0)) throw new ApiError("A valid price is required", 400);
 
-    let imageUrl: string | undefined;
-    if (image) imageUrl = await this.s3.uploadFile(image);
+    const imageUrl = data.imageUrl ? this.s3.assertOwnedMediaUrl(data.imageUrl, "products") : undefined;
 
     const product = await this.product.create({
       data: {
@@ -84,7 +89,6 @@ export class ProductService extends Connection {
   public async update(
     id: string,
     data: UpdateProductInput,
-    image?: UploadedFile,
   ) {
     const existing = await this.product.findUnique({ where: { id } });
     if (!existing) throw new ApiError("Product not found", 404);
@@ -92,8 +96,7 @@ export class ProductService extends Connection {
       await this.assertCategoryExists(data.category);
     }
 
-    let imageUrl: string | undefined;
-    if (image) imageUrl = await this.s3.uploadFile(image);
+    const imageUrl = data.imageUrl ? this.s3.assertOwnedMediaUrl(data.imageUrl, "products") : undefined;
 
     const product = await this.product.update({
       where: { id },
