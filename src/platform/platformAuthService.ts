@@ -2,7 +2,8 @@ import { randomBytes, createHash } from "crypto";
 import { Connection } from "../db/dbConnection";
 import { ApiError } from "../middleware/apiError";
 import { HttpCode } from "../models/status_codes";
-import { loginToken, verifyPassword, getPasswordHash } from "../utils/helper";
+import { verifyPassword, getPasswordHash } from "../utils/helper";
+import { createLoginSession, revokeLoginSessions } from "../auth/sessionService";
 import { env } from "../config/env.config";
 import { NotificationService } from "../notifications/notificationService";
 import { NotificationTemplate } from "../notifications/registry";
@@ -37,7 +38,7 @@ export class PlatformAuthService extends Connection {
       throw new ApiError("Invalid email or password", HttpCode.BAD_REQUEST);
     }
 
-    const token = loginToken({
+    const token = await createLoginSession({
       id: user.id,
       email: user.email,
       role: user.role,
@@ -73,6 +74,7 @@ export class PlatformAuthService extends Connection {
       where: { id: user.id },
       data: { resetToken: hashedToken, resetTokenExpiry: expiry },
     });
+    await revokeLoginSessions(user.id);
 
     const resetUrl = `${env.clientUrl}/platform/reset-password/${resetToken}`;
     try {
