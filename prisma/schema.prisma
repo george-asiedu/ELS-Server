@@ -406,6 +406,19 @@ model User {
   @@map("users")
 }
 
+// Server-side bearer-token sessions allow immediate revocation and enforce a
+// maximum number of active devices per account.
+model AuthSession {
+  id        String   @id
+  userId    String
+  studioId  String?
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([userId, expiresAt])
+  @@map("auth_sessions")
+}
+
 model Profile {
   id       String  @id @default(cuid())
   studioId String? 
