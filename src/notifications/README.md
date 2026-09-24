@@ -54,6 +54,13 @@ break the caller's booking/payment/order transaction. It logs to
 `NotificationLog` and never re-sends the same (template, entityId, recipient)
 triple twice (see Idempotency below).
 
+Authentication records a random browser/device ID. The first recognized
+device is registered silently; each later device gets one `AUTH_LOGIN_ALERT`
+email. Repeat logins from the same browser do not resend the alert. The email
+includes the reported browser, IP address, and UTC sign-in time. API clients
+without the device header use a user-agent/IP fingerprint and may alert again
+if their IP changes.
+
 ## Studio branding, and the super-admin context gotcha
 
 `currentStudioBranding()` / `currentStudioNotifyEmail()`
@@ -94,8 +101,7 @@ supports. Per its own repeated instruction — never invent data the app
 doesn't have — the following were scoped out (see the comment block at the
 top of `registry.ts` for the live list, which is the source of truth):
 
-- **AUTH_VERIFY_EMAIL / AUTH_LOGIN_ALERT** — no email-verification or
-  login/device-audit flow exists.
+- **AUTH_VERIFY_EMAIL** — no email-verification flow exists.
 - **BOOKING_RESCHEDULED** — no reschedule flow exists.
 - **BOOKING_REMINDER_24H / _1H** — would need a new scheduled sweep over
   upcoming appointments. Real, plausible follow-up work; not built yet.
