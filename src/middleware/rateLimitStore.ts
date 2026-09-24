@@ -18,7 +18,7 @@ export const rateLimitStore = (namespace: string) => {
   `;
   return {
     localKeys: false,
-    init: (options: Parameters<typeof rateLimit>[0]) => { windowMs = options.windowMs; },
+    init: (options: NonNullable<Parameters<typeof rateLimit>[0]>) => { windowMs = options.windowMs ?? 60_000; },
     async get(key: string) {
       const results = await redis!.multi().get(`${prefix}${key}`).pttl(`${prefix}${key}`).exec();
       const count = Number(results?.[0]?.[1]);
