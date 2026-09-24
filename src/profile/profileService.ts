@@ -4,6 +4,7 @@ import { S3BucketService } from "../bucket/s3BucketService";
 import { ApiError } from "../middleware/apiError";
 import { UploadedFile } from "../models/user";
 import { verifyPassword } from "../utils/helper";
+import { revokeLoginSessions } from "../auth/sessionService";
 
 export class ProfileService extends UserRepository {
   constructor(private s3: S3BucketService) {
@@ -84,7 +85,8 @@ export class ProfileService extends UserRepository {
     if (!user) {
       throw new ApiError("User not found", 404);
     }
-  
+
+    await revokeLoginSessions(user.id);
     await this.deleteUser(user.id);
   
     return {
@@ -109,6 +111,7 @@ export class ProfileService extends UserRepository {
     }
 
     await this.updatePassword(id, password);
+    await revokeLoginSessions(id);
 
     return { message: "Password updated successfully" };
   }
@@ -133,6 +136,7 @@ export class ProfileService extends UserRepository {
     }
 
     await this.updatePassword(userId, newPassword);
+    await revokeLoginSessions(userId);
     return { message: "Password updated successfully" };
   }
 }
