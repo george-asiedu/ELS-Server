@@ -6,6 +6,7 @@ import { validateLogin } from "./validators/login";
 import { ApiError } from "../middleware/apiError";
 import { validateEmail, validatePassword } from "../profile/validator/profile";
 import { revokeLoginSession } from "./sessionService";
+import { getLoginDeviceMetadata } from "./loginDevice";
 
 const authService = new AuthService();
 
@@ -34,7 +35,7 @@ export class AuthController {
           errors: validateSignup.errors,
         });
       }
-      const result = await authService.signup(req.body);
+      const result = await authService.signup(req.body, getLoginDeviceMetadata(req));
       return res.status(201).json(result);
     } catch (error) {
       return next(error);
@@ -54,7 +55,7 @@ export class AuthController {
           errors: validateLogin.errors,
         });
       }
-      const result = await authService.login(req.body);
+      const result = await authService.login(req.body, getLoginDeviceMetadata(req));
       return res.status(200).json(result);
     } catch (error) {
       return next(error);
