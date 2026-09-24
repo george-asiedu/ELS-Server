@@ -667,7 +667,7 @@ export class PlatformService extends Connection {
       throw new ApiError("Studio owner not found", HttpCode.NOT_FOUND);
     }
 
-    const token = await createLoginSession({
+    const { token } = await createLoginSession({
       id: owner.id,
       email: owner.email,
       role: owner.role,
