@@ -16,6 +16,10 @@ export const globalErrorHandler = (
       error = new ApiError("Token is invalid", HttpCode.UNAUTHORIZED_ACCESS);
     } else if (name === "TokenExpiredError") {
       error = new ApiError("Token expired", HttpCode.UNAUTHORIZED_ACCESS);
+    } else if (name === "SyntaxError" && "status" in err && (err as { status?: number }).status === 400) {
+      error = new ApiError("Invalid JSON request body", HttpCode.BAD_REQUEST);
+    } else if ("status" in err && (err as { status?: number }).status === 413) {
+      error = new ApiError("Request body is too large", HttpCode.PAYLOAD_TOO_LARGE);
     }
   }
 
@@ -36,6 +40,10 @@ export const globalErrorHandler = (
   const nodeEnv = process.env.NODE_ENV || "development";
   const appError = error as ApiError;
 
+  if (appError.statusCode >= 500) {
+    console.error("API error", appError);
+  }
+
   if (nodeEnv === "development") {
     res.status(appError.statusCode).json({
       status: appError.status,
@@ -43,7 +51,7 @@ export const globalErrorHandler = (
       stack: appError.stack,
     });
   } else {
-    if (appError.isOperational) {
+    if (appError.isOperational && appError.statusCode < 500) {
       res.status(appError.statusCode).json({
         status: appError.status,
         message: appError.message,
