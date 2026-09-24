@@ -15,6 +15,7 @@ const requiredVars = [
   "AWS_ACCESS_KEY_ID",
   "AWS_SECRET_ACCESS_KEY",
   "AWS_REGION",
+  "AWS_CLOUDFRONT_URL",
   "PLUNK_SECRET_KEY",
   "SENDER_EMAIL",
   "CLIENT_URL",
@@ -48,6 +49,7 @@ export const env = {
     accessKeyId: process.env.AWS_ACCESS_KEY_ID as string,
     secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY as string,
     region: process.env.AWS_REGION as string,
+    cloudFrontUrl: (process.env.AWS_CLOUDFRONT_URL as string || "").replace(/\/$/, ""),
   },
   senderEmail: process.env.SENDER_EMAIL as string,
   // Plunk transactional email (replaces SendGrid). apiUrl is overridable in case
