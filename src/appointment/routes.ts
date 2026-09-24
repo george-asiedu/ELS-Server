@@ -3,9 +3,16 @@ import multer from "multer";
 import { AppointmentController } from "./appointmentController";
 import { authenticate, requireAdmin, requireCustomer } from "../middleware/auth";
 import { reenterTenant } from "../middleware/tenant";
+import { ApiError } from "../middleware/apiError";
 
 const router: Router = Router();
-const upload = multer({ storage: multer.memoryStorage() });
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024, files: 1, fields: 30 },
+  fileFilter: (_req, file, cb) => file.mimetype.startsWith("image/")
+    ? cb(null, true)
+    : cb(new ApiError("Only image files are allowed", 400)),
+});
 
 // Public availability — which time slots are already taken for a date.
 router.get("/availability", AppointmentController.availability);
