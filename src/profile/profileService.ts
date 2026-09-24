@@ -4,7 +4,7 @@ import { S3BucketService } from "../bucket/s3BucketService";
 import { ApiError } from "../middleware/apiError";
 import { UploadedFile } from "../models/user";
 import { verifyPassword } from "../utils/helper";
-import { revokeLoginSessions } from "../auth/sessionService";
+import { forgetLoginDevices, revokeLoginSessions } from "../auth/sessionService";
 
 export class ProfileService extends UserRepository {
   constructor(private s3: S3BucketService) {
@@ -87,6 +87,7 @@ export class ProfileService extends UserRepository {
     }
 
     await revokeLoginSessions(user.id);
+    await forgetLoginDevices(user.id);
     await this.deleteUser(user.id);
   
     return {
