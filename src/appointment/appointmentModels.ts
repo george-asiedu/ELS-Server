@@ -14,6 +14,7 @@ export interface CreateAppointmentInput {
   notes?: string;
   // Multipart field — "true" to apply the customer's loyalty points as a discount.
   applyPoints?: string;
+  designImageUrl?: string;
 }
 
 export interface UpdateAppointmentStatusInput {
