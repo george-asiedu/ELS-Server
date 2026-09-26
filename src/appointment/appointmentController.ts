@@ -110,6 +110,29 @@ export class AppointmentController {
     }
   };
 
+  // Admin-only: changing the service moves money, so it is not something a
+  // customer can do to their own booking yet (see changeService's doc comment).
+  public static changeService = async (
+    req: Request,
+    res: Response,
+    next: NextFunction,
+  ) => {
+    try {
+      const { id } = req.params;
+      if (!id) throw new ApiError("Appointment ID is required", 400);
+      const serviceId =
+        typeof req.body?.serviceId === "string" ? req.body.serviceId.trim() : "";
+      if (!serviceId) throw new ApiError("A service id is required", 400);
+      const result = await appointmentService.changeService(id, serviceId, {
+        ...(req.user?.email ? { email: req.user.email } : {}),
+        ...(req.user?.role ? { role: req.user.role } : {}),
+      });
+      return res.status(200).json(result);
+    } catch (error) {
+      return next(error);
+    }
+  };
+
   public static updateStatus = async (
     req: Request,
     res: Response,

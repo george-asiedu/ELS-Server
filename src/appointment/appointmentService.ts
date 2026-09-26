@@ -3,6 +3,9 @@ import { CursorPage, cursorPageArgs, cursorPageResult } from "../utils/cursorPag
 import { getTenantContext, runAsSuperAdmin } from "../tenant/context";
 import { ApiError } from "../middleware/apiError";
 import { parseDurationMinutes } from "./duration";
+import { AuditService } from "../audit/auditService";
+import { LedgerService } from "../ledger/ledgerService";
+import { RefundService } from "../refund/refundService";
 import { S3BucketService } from "../bucket/s3BucketService";
 import {
   AppointmentStatusInput,
@@ -19,6 +22,7 @@ import {
   bookingRescheduled,
   bookingReminder,
   bookingRescheduleRequested,
+  bookingServiceChanged,
 } from "../notifications/templates/booking";
 import { EmailBrand, MoneyLine } from "../notifications/types";
 import { ghs } from "../notifications/format";
@@ -150,6 +154,9 @@ const serviceInclude = {
 export class AppointmentService extends Connection {
   private s3 = new S3BucketService();
   private notifications = new NotificationService();
+  private audit = new AuditService();
+  private ledger = new LedgerService();
+  private refunds = new RefundService();
 
   // Loyalty value for booking-time redemption. The discount cap ratio comes
   // from the studio's settings (loyaltyCapRatio()).
@@ -774,6 +781,220 @@ export class AppointmentService extends Connection {
         ? "Reschedule requested — the studio will confirm your new time."
         : "Appointment rescheduled",
       data: appointment,
+    };
+  }
+
+  /**
+   * Change the service on an existing booking.
+   *
+   * Modelled as cancel-and-rebook under one booking reference rather than an
+   * in-place edit: the booking keeps its id and history, and the money moves as
+   * its own explicit event — a refund when the new service costs less than has
+   * been paid, or a larger balance due when it costs more. Nothing is silently
+   * re-priced, and the ledger carries an ADJUSTMENT row either way.
+   *
+   * Admin-only for now. A customer-initiated version needs somewhere to park a
+   * REQUESTED service while the studio decides, because the money must not move
+   * before approval — see the note in the README.
+   */
+  public async changeService(
+    id: string,
+    newServiceId: string,
+    actor: { email?: string; role?: string } = {},
+  ) {
+    const existing = await this.appointment.findUnique({
+      where: { id },
+      include: serviceInclude,
+    });
+    if (!existing) throw new ApiError("Appointment not found", 404);
+    if (existing.status === "CANCELLED" || existing.status === "COMPLETED") {
+      throw new ApiError(
+        `A ${existing.status.toLowerCase()} appointment can't be changed`,
+        400,
+      );
+    }
+    if (existing.serviceId === newServiceId) {
+      throw new ApiError("That's already the booked service", 400);
+    }
+
+    const next = await this.service.findUnique({ where: { id: newServiceId } });
+    if (!next) throw new ApiError("Selected service not found", 404);
+    if (!next.active) {
+      throw new ApiError("That service isn't currently offered", 400);
+    }
+
+    // The new service may run longer, so the slot has to be re-checked against
+    // its duration — this is the case that made duration-awareness a
+    // prerequisite rather than a nicety.
+    await this.assertSlotBookable({
+      date: existing.appointmentDate,
+      time: existing.appointmentTime,
+      ignoreAppointmentId: id,
+      enforceOpeningHours: true,
+      minNoticeHours: 0,
+      durationMinutes: parseDurationMinutes(next.duration),
+    });
+
+    const round = (n: number) => Math.round(n * 100) / 100;
+    // Promo price wins when it undercuts the list price, same as booking.
+    const newPrice =
+      next.promoPrice !== null && next.promoPrice < next.price
+        ? next.promoPrice
+        : next.price;
+
+    // A loyalty discount was sized against the old price; it must not exceed
+    // the new one, or a cheaper service could end up owing the customer money
+    // it never collected.
+    const discount = Math.min(existing.discountAmount ?? 0, newPrice);
+    const newDue = round(newPrice - discount);
+
+    const payment = await this.payment.findUnique({
+      where: { appointmentId: id },
+    });
+    const settled =
+      payment &&
+      ["PAID", "PARTIALLY_REFUNDED"].includes(payment.status) &&
+      payment.amount > 0;
+    const netPaid = settled
+      ? round(payment.amount - (payment.refundedAmount ?? 0))
+      : 0;
+
+    const appointment = await this.appointment.update({
+      where: { id },
+      data: {
+        serviceId: newServiceId,
+        totalPrice: newPrice,
+        discountAmount: discount,
+      },
+      include: serviceInclude,
+    });
+
+    // Keep the payment's "full amount due" in step, so the balance a customer
+    // still owes is computed from the new price everywhere it is shown.
+    if (payment) {
+      await this.payment.update({
+        where: { id: payment.id },
+        data: { totalAmount: newDue },
+      });
+    }
+
+    let refunded = 0;
+    let balanceDue = round(Math.max(0, newDue - netPaid));
+
+    // Overpaid because the new service is cheaper — give the difference back
+    // through the ordinary refund path so it is recorded and receipted like
+    // any other refund.
+    if (settled && netPaid > newDue) {
+      const over = round(netPaid - newDue);
+      try {
+        await this.refunds.refundPayment(payment!.id, actor, {
+          amount: over,
+          reason: `Service changed from ${existing.service?.name ?? "previous service"} to ${next.name}`,
+        });
+        refunded = over;
+        balanceDue = 0;
+      } catch (error) {
+        // A provider failure must not undo the service change the studio just
+        // made — the change stands and the refund is surfaced to be retried.
+        console.error("Service-change refund failed:", error);
+        throw new ApiError(
+          `The service was changed, but the ${ghs(over)} refund could not be started: ${
+            error instanceof Error ? error.message : "provider error"
+          }. Please issue it from Transactions.`,
+          502,
+        );
+      }
+    }
+
+    await this.audit.record({
+      actor,
+      action: "appointment.service_changed",
+      targetType: "Appointment",
+      targetId: id,
+      studioId: existing.studioId ?? undefined,
+      metadata: {
+        from: { id: existing.serviceId, name: existing.service?.name ?? null, price: existing.totalPrice },
+        to: { id: next.id, name: next.name, price: newPrice },
+        netPaid,
+        newDue,
+        refunded,
+        balanceDue,
+      },
+    });
+
+    // A price move with no cash movement still belongs on the ledger — it
+    // changes what the studio is owed.
+    if (round(newPrice) !== round(existing.totalPrice ?? 0)) {
+      const delta = round(newPrice - (existing.totalPrice ?? 0));
+      await this.ledger.post({
+        studioId: existing.studioId,
+        type: "ADJUSTMENT",
+        direction: delta >= 0 ? "CREDIT" : "DEBIT",
+        status: "SUCCESS",
+        amount: Math.abs(delta),
+        dedupeKey: `appointment:service-change:${id}:${Date.now()}`,
+        description: `Service changed: ${existing.service?.name ?? "previous"} → ${next.name}`,
+        customerName: existing.fullName,
+        customerEmail: existing.email,
+        appointmentId: id,
+        paymentId: payment?.id ?? null,
+        actorEmail: actor.email ?? null,
+        actorRole: actor.role ?? "studio",
+      });
+    }
+
+    if (appointment.email) {
+      try {
+        const studio = await this.currentStudioBranding();
+        const brand: EmailBrand = studio
+          ? { kind: "studio", studio }
+          : { kind: "zuri", zuri: { name: "Zuri Studios", websiteUrl: "https://zuristudios.com", supportEmail: "hello@zuristudios.com" } };
+        const { subject, html } = bookingServiceChanged(brand, {
+          serviceName: next.name,
+          date: formatDate(appointment.appointmentDate),
+          time: appointment.appointmentTime,
+          duration: next.duration,
+          studioName: studio?.name ?? "the studio",
+          bookingRef: shortRef("APT", appointment.id),
+          customerFirstName:
+            appointment.fullName.split(" ")[0] || appointment.fullName,
+          previousServiceName: existing.service?.name ?? "your previous service",
+          lines: [
+            { label: "New total", value: ghs(newDue) },
+            ...(netPaid > 0 ? [{ label: "Already paid", value: ghs(netPaid) }] : []),
+            ...(refunded > 0
+              ? [{ label: "Refunded to you", value: ghs(refunded), emphasis: true }]
+              : []),
+            ...(balanceDue > 0
+              ? [{ label: "Balance due", value: ghs(balanceDue), emphasis: true }]
+              : []),
+          ],
+          refunded: refunded > 0 ? ghs(refunded) : null,
+          balanceDue: balanceDue > 0 ? ghs(balanceDue) : null,
+          ...(studio?.bookingUrl ? { bookingUrl: studio.bookingUrl } : {}),
+        });
+        await this.notifications.send({
+          template: NotificationTemplate.BOOKING_SERVICE_CHANGED,
+          to: appointment.email,
+          subject,
+          html,
+          studioId: getTenantContext()?.studioId ?? null,
+          entityType: "Appointment",
+          entityId: `${id}:service:${newServiceId}`,
+        });
+      } catch (error) {
+        console.error("Failed to send service-change notification:", error);
+      }
+    }
+
+    return {
+      message:
+        refunded > 0
+          ? `Service changed. ${ghs(refunded)} is being refunded.`
+          : balanceDue > 0
+            ? `Service changed. ${ghs(balanceDue)} is now due.`
+            : "Service changed.",
+      data: { appointment, newDue, netPaid, refunded, balanceDue },
     };
   }
 

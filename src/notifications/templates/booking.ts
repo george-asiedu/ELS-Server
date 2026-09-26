@@ -292,3 +292,52 @@ export const bookingRescheduleRequested = (
     }),
   };
 };
+
+/**
+ * The booked service itself changed. Leads with the money, because that is the
+ * part a customer needs to act on — a refund coming back, or a balance that
+ * just grew.
+ */
+export const bookingServiceChanged = (
+  brand: EmailBrand,
+  data: BookingCore & {
+    customerFirstName: string;
+    previousServiceName: string;
+    lines: MoneyLine[];
+    refunded?: string | null;
+    balanceDue?: string | null;
+    bookingUrl?: string;
+  },
+) => {
+  const color = brandColor(brand);
+  return {
+    subject: `Your booking has been updated to ${data.serviceName}`,
+    html: renderShell({
+      brand,
+      previewText: `${data.previousServiceName} → ${data.serviceName}.`,
+      documentType: "Booking updated",
+      bodyHtml: `
+        ${statusBadge("info", "SERVICE CHANGED")}
+        <h1 style="margin: 0 0 12px; font-family: Georgia, serif; font-size: 22px; color: #2A1B1F; text-align: center;">Your booking has changed</h1>
+        <p style="margin: 0; font-family: Arial, sans-serif; font-size: 15px; color: #2A1B1F; line-height: 1.6; text-align: center;">
+          ${esc(data.customerFirstName)}, ${esc(data.studioName)} has updated your booking from
+          <strong>${esc(data.previousServiceName)}</strong> to <strong>${esc(data.serviceName)}</strong>.
+          Your appointment time is unchanged.
+        </p>
+        ${appointmentCard({ serviceName: data.serviceName, date: data.date, time: data.time, duration: data.duration ?? null, studioName: data.studioName, color })}
+        ${moneyTable(data.lines)}
+        ${
+          data.refunded
+            ? `<p style="margin: 0; font-family: Arial, sans-serif; font-size: 14px; color: #2A1B1F; text-align: center;">We're refunding <strong>${esc(data.refunded)}</strong> to the way you paid. It usually lands within 5–10 business days.</p>`
+            : ""
+        }
+        ${
+          data.balanceDue
+            ? `<p style="margin: 0; font-family: Arial, sans-serif; font-size: 14px; color: #2A1B1F; text-align: center;">There's now <strong>${esc(data.balanceDue)}</strong> left to pay — you can settle it at the studio.</p>`
+            : ""
+        }
+        <p class="muted" style="margin: 14px 0 0; font-family: Arial, sans-serif; font-size: 12px; color: #7A6A6E; text-align: center;">Booking ${esc(data.bookingRef)}</p>
+        ${data.bookingUrl ? button("View Appointment", data.bookingUrl, color) : ""}`,
+    }),
+  };
+};

@@ -39,6 +39,15 @@ router.patch(
   reenterTenant,
   AppointmentController.reschedule,
 );
+// Swap the booked service. Admin-only: it re-prices the booking and can
+// trigger a refund or leave a balance due.
+router.patch(
+  "/:id/service",
+  authenticate,
+  requireAdmin,
+  reenterTenant,
+  AppointmentController.changeService,
+);
 router.delete("/:id", authenticate, requireAdmin, AppointmentController.remove);
 
 export default router;
