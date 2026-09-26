@@ -71,13 +71,15 @@ export const resolveTenant = async (
 };
 
 /**
- * Re-establish the tenant ALS context after a body parser that breaks async
- * context propagation. multer (multipart/form-data) parses the request stream —
- * whose underlying socket predates resolveTenant's `runWithTenant` — so its
- * completion callback, and the controller it invokes, run OUTSIDE the tenant
- * store and the scoping extension would fail closed. `req.tenantContext` is a
- * plain property that survives, so we re-enter the store here. Mount this
- * immediately AFTER the multer middleware on every multipart route.
+ * Re-establish the tenant ALS context for handlers that would otherwise run
+ * outside it. Middleware that awaits on I/O predating resolveTenant's
+ * `runWithTenant` — reading the request stream, or an async auth lookup — can
+ * resume on a callback whose async context is not the tenant store, so the
+ * controller it invokes runs OUTSIDE that store and the scoping extension
+ * fails closed. `req.tenantContext` is a plain property that survives any such
+ * hop, so we re-enter the store from it here. Mount this AFTER `authenticate`
+ * (and after any body parser that consumes the stream) on every route that
+ * reads or writes tenant-scoped data.
  */
 export const reenterTenant = (
   req: Request,
