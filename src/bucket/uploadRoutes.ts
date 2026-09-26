@@ -4,7 +4,7 @@ import { authenticate } from "../middleware/auth";
 import { ApiError } from "../middleware/apiError";
 import { reenterTenant } from "../middleware/tenant";
 
-const router = Router();
+const router: Router = Router();
 const storage = new S3BucketService();
 const scopes = new Set(["gallery", "services", "products", "appointments", "studio", "profiles", "reviews", "misc"]);
 
