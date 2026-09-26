@@ -1,5 +1,5 @@
 import { renderShell, button, esc, statusBadge, moneyTable, itemsTable, brandColor,
-  receiptBlock,
+  receiptAttachedNotice,
   ReceiptDetails,
 } from "../design/shell";
 import { EmailBrand, MoneyLine } from "../types";
@@ -30,7 +30,7 @@ export const orderConfirmed = (
         </p>
         ${itemsTable(data.items)}
         ${moneyTable(data.lines)}
-        ${receiptBlock(data.receipt, color)}
+        ${receiptAttachedNotice(data.receipt, color)}
         ${data.viewUrl ? button("View Order", data.viewUrl, color) : ""}`,
     }),
   };

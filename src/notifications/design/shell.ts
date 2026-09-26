@@ -140,6 +140,32 @@ const receiptRow = (label: string, value: string): string => `
       <td align="right" style="padding: 5px 0; font-family: Arial, Helvetica, sans-serif; font-size: 12px; color: ${INK}; font-weight: 500;">${esc(value)}</td>
     </tr>`;
 
+// The receipt itself now travels as a PDF attachment, so the body carries only a
+// short pointer to it plus the details a customer needs to quote without opening
+// anything. Keeping the reference visible matters: some mail clients hide
+// attachments behind an extra tap, and support questions start with a reference.
+export const receiptAttachedNotice = (
+  r: ReceiptDetails,
+  color: string,
+): string => `
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin: 24px 0; border: 1px solid ${BORDER}; border-radius: 12px; border-left: 4px solid ${color};">
+    <tr>
+      <td style="padding: 16px 20px;">
+        <p style="margin: 0 0 4px; font-family: Arial, Helvetica, sans-serif; font-size: 14px; font-weight: 700; color: ${INK};">
+          📎 Your receipt is attached
+        </p>
+        <p style="margin: 0; font-family: Arial, Helvetica, sans-serif; font-size: 12px; color: ${MUTED}; line-height: 1.6;">
+          Receipt no. <strong style="color: ${INK};">${esc(r.receiptNumber)}</strong> &middot; ${esc(r.amountPaid)} paid to ${esc(r.paidTo)} on ${esc(r.paidOn)}.<br />
+          Reference: <span style="color: ${INK};">${esc(r.reference)}</span> &middot; paid by ${esc(receiptMethodLabel(r.method))}${
+            r.balanceDue
+              ? `<br /><span style="color: ${EMPHASIS};">Balance due at studio: ${esc(r.balanceDue)}</span>`
+              : ""
+          }
+        </p>
+      </td>
+    </tr>
+  </table>`;
+
 export const receiptBlock = (r: ReceiptDetails, color: string): string => `
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin: 24px 0; border: 1px solid ${BORDER}; border-radius: 12px; border-top: 3px solid ${color};">
     <tr>

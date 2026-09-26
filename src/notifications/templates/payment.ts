@@ -5,7 +5,7 @@ import {
   statusBadge,
   moneyTable,
   brandColor,
-  receiptBlock,
+  receiptAttachedNotice,
   ReceiptDetails,
 } from "../design/shell";
 import { EmailBrand, MoneyLine } from "../types";
@@ -36,7 +36,7 @@ export const paymentSuccess = (
           Your payment for <strong>${esc(data.serviceName)}</strong> was successful.
         </p>
         ${moneyTable(data.lines)}
-        ${receiptBlock(data.receipt, color)}
+        ${receiptAttachedNotice(data.receipt, color)}
         ${data.viewUrl ? button("View Booking", data.viewUrl, color) : ""}`,
     }),
   };

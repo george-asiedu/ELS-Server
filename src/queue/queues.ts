@@ -1,5 +1,6 @@
 import { Queue } from "bullmq";
 import { getRedisConnection, isQueueEnabled } from "./connection";
+import type { EmailAttachment } from "../email/emailService";
 
 // Job payload for a single transactional email. Kept as plain serialisable
 // data (no class instances) since BullMQ persists it as JSON in Redis.
@@ -7,6 +8,10 @@ export interface EmailJobData {
   to: string;
   subject: string;
   html: string;
+  // Base64 attachments (receipt PDFs). Receipts are only a few KB, so carrying
+  // them in the job payload is fine; anything large should be uploaded to S3
+  // and linked instead of persisted into Redis.
+  attachments?: EmailAttachment[];
 }
 
 export interface ReconcilePaymentsJobData {

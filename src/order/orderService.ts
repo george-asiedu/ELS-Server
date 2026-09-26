@@ -12,6 +12,8 @@ import { NotificationTemplate } from "../notifications/registry";
 import { orderConfirmed, orderPaymentFailed, orderFulfilled } from "../notifications/templates/shop";
 import { EmailBrand, MoneyLine } from "../notifications/types";
 import { ghs, receiptDate, receiptNumber } from "../notifications/format";
+import { buildReceiptPdf } from "../notifications/receiptPdf";
+import { receiptMethodLabel } from "../notifications/design/shell";
 
 type FulfillmentType = "PICKUP" | "DELIVERY";
 
@@ -972,6 +974,45 @@ export class OrderService extends Connection {
           fulfillment: paid.fulfillment as "PICKUP" | "DELIVERY",
           ...(brand.kind === "studio" && brand.studio.websiteUrl ? { viewUrl: brand.studio.websiteUrl } : {}),
         });
+        // PDF receipt, itemised, attached to the confirmation.
+        const pdf = buildReceiptPdf({
+          studioName: paidTo,
+          primaryColor:
+            brand.kind === "studio" ? brand.studio.primaryColor : null,
+          title: "Order receipt",
+          receiptNumber: receiptNumber("RCP", paid.id),
+          issuedAt: paid.paidAt ?? new Date(),
+          heading: `Order ${paid.orderNumber}`,
+          lines: [
+            ...(paid.customerName
+              ? [{ label: "Customer", value: paid.customerName }]
+              : []),
+            ...paid.items.map((i) => ({
+              label: `${i.name} × ${i.quantity}`,
+              value: ghs(i.unitPrice * i.quantity),
+            })),
+            { label: "Subtotal", value: ghs(paid.subtotal) },
+            ...(paid.discountAmount > 0
+              ? [{ label: "Discount", value: `-${ghs(paid.discountAmount)}` }]
+              : []),
+            ...(paid.deliveryFee > 0
+              ? [{ label: "Delivery", value: ghs(paid.deliveryFee) }]
+              : []),
+            { label: "Total", value: ghs(paid.total), strong: true },
+            {
+              label: "Fulfilment",
+              value: paid.fulfillment === "DELIVERY" ? "Delivery" : "Pickup at studio",
+            },
+          ],
+          amountPaid: ghs(paid.total),
+          balanceDue: null,
+          reference: paid.reference ?? paid.orderNumber,
+          transactionId: paid.transactionId ?? null,
+          paymentMethod: receiptMethodLabel(paid.channel ?? null),
+          paidToEmail: paidToEmail ?? null,
+          status: "PAID",
+        });
+
         await this.notifications.send({
           template: NotificationTemplate.SHOP_ORDER_CONFIRMED,
           to: paid.customerEmail,
@@ -980,6 +1021,13 @@ export class OrderService extends Connection {
           studioId: paid.studioId,
           entityType: "Order",
           entityId: paid.id,
+          attachments: [
+            {
+              filename: pdf.filename,
+              content: pdf.base64,
+              contentType: "application/pdf",
+            },
+          ],
         });
       } catch (error) {
         console.error("Failed to send order receipt email:", error);

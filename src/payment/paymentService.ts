@@ -14,7 +14,14 @@ import { NotificationService } from "../notifications/notificationService";
 import { NotificationTemplate } from "../notifications/registry";
 import { paymentSuccess, paymentFailed } from "../notifications/templates/payment";
 import { EmailBrand, MoneyLine } from "../notifications/types";
-import { ghs, receiptDate, receiptNumber } from "../notifications/format";
+import {
+  ghs,
+  receiptDate,
+  receiptDayOnly,
+  receiptNumber,
+} from "../notifications/format";
+import { buildReceiptPdf } from "../notifications/receiptPdf";
+import { receiptMethodLabel } from "../notifications/design/shell";
 
 type PaymentType = "FULL" | "PARTIAL";
 
@@ -704,6 +711,39 @@ export class PaymentService extends Connection {
         },
         ...(brand.kind === "studio" && brand.studio.bookingUrl ? { viewUrl: brand.studio.bookingUrl } : {}),
       });
+      // The receipt travels as a PDF attachment; the email body only points at
+      // it. Generated per-send rather than stored, so it always reflects the
+      // payment as it stands.
+      const pdf = buildReceiptPdf({
+        studioName: paidTo,
+        primaryColor:
+          brand.kind === "studio" ? brand.studio.primaryColor : null,
+        title: isPartial ? "Deposit receipt" : "Payment receipt",
+        receiptNumber: receiptNumber("RCP", payment.id),
+        issuedAt: payment.paidAt ?? new Date(),
+        heading: appt.service?.name ?? "Your service",
+        lines: [
+          { label: "Customer", value: appt.fullName },
+          {
+            label: "Appointment",
+            value: `${receiptDayOnly(appt.appointmentDate)} · ${appt.appointmentTime}`,
+          },
+          { label: "Total", value: ghs(payment.totalAmount) },
+          {
+            label: isPartial ? "Deposit paid" : "Amount paid",
+            value: ghs(payment.amount),
+            strong: true,
+          },
+        ],
+        amountPaid: ghs(payment.amount),
+        balanceDue: balance > 0 ? ghs(balance) : null,
+        reference: payment.reference ?? payment.id,
+        transactionId: payment.transactionId ?? null,
+        paymentMethod: receiptMethodLabel(payment.channel ?? null),
+        paidToEmail: paidToEmail ?? null,
+        status: balance > 0 ? "PARTIALLY_PAID" : "PAID",
+      });
+
       await this.notifications.send({
         template: NotificationTemplate.PAYMENT_SUCCESS,
         to: appt.email,
@@ -712,6 +752,13 @@ export class PaymentService extends Connection {
         studioId: payment.studioId,
         entityType: "Payment",
         entityId: payment.id,
+        attachments: [
+          {
+            filename: pdf.filename,
+            content: pdf.base64,
+            contentType: "application/pdf",
+          },
+        ],
       });
     } catch (error) {
       console.error("Failed to send payment receipt email:", error);

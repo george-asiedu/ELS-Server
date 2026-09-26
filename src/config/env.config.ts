@@ -54,6 +54,13 @@ export const env = {
   senderEmail: process.env.SENDER_EMAIL as string,
   // Plunk transactional email (replaces SendGrid). apiUrl is overridable in case
   // the account is on a different Plunk host.
+  //
+  // NOTE ON ATTACHMENTS: receipts are sent as PDF attachments (see
+  // notifications/receiptPdf.ts). Plunk documents `attachments` on its
+  // /v1/email/send endpoint, while the default below is the older /v1/send.
+  // If receipts arrive with the body but no PDF, the endpoint is silently
+  // ignoring the field — set PLUNK_API_URL to
+  // https://api.useplunk.com/v1/email/send and re-test.
   plunk: {
     secretKey: process.env.PLUNK_SECRET_KEY as string,
     apiUrl:

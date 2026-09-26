@@ -20,6 +20,8 @@ import {
   addPeriod,
 } from "../billing/billingPlans";
 import { NotificationService } from "../notifications/notificationService";
+import { buildReceiptPdf } from "../notifications/receiptPdf";
+import { ghs, receiptNumber } from "../notifications/format";
 import { NotificationTemplate } from "../notifications/registry";
 import { studioCreated } from "../notifications/templates/studio";
 import { EmailBrand } from "../notifications/types";
@@ -306,6 +308,40 @@ export class OnboardingService extends Connection {
         dashboardUrl: `${env.clientUrl}/admin/login`,
         storefrontUrl: websiteUrl,
       });
+      // The signup charge is a real payment, so it gets a receipt like any
+      // other. Revenue-share studios with no setup fee pay nothing here, and
+      // a zero-amount receipt would only confuse — so it's attached only when
+      // money actually changed hands.
+      const signupReceipt =
+        amount > 0
+          ? buildReceiptPdf({
+              studioName: "Zuri Studios",
+              title: revenueShare ? "Setup fee receipt" : "Subscription receipt",
+              receiptNumber: receiptNumber("RCP", studio.id),
+              issuedAt: new Date(),
+              heading: `${plan === "PREMIUM" ? "Premium" : "Standard"} plan — ${studio.name}`,
+              lines: [
+                { label: "Studio", value: studio.name },
+                { label: "Account", value: signup.ownerEmail },
+                {
+                  label: revenueShare ? "Billing" : "Plan period",
+                  value: revenueShare
+                    ? "Revenue share"
+                    : cadence === "YEARLY"
+                      ? "Yearly"
+                      : "Monthly",
+                },
+                { label: "Amount", value: ghs(amount), strong: true },
+              ],
+              amountPaid: ghs(amount),
+              balanceDue: null,
+              reference,
+              paymentMethod: "Online payment",
+              paidToEmail: env.senderEmail,
+              status: "PAID",
+            })
+          : null;
+
       await this.notifications.send({
         template: NotificationTemplate.STUDIO_CREATED,
         to: signup.ownerEmail,
@@ -314,6 +350,17 @@ export class OnboardingService extends Connection {
         studioId: studio.id,
         entityType: "Studio",
         entityId: studio.id,
+        ...(signupReceipt
+          ? {
+              attachments: [
+                {
+                  filename: signupReceipt.filename,
+                  content: signupReceipt.base64,
+                  contentType: "application/pdf",
+                },
+              ],
+            }
+          : {}),
       });
     } catch (error) {
       console.error("Failed to send studio-created email:", error);

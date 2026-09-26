@@ -21,3 +21,13 @@ export const receiptDate = (d: Date | null | undefined): string =>
 // can't be confused when a customer reads them out.
 export const receiptNumber = (prefix: string, id: string): string =>
   `${prefix}-${id.slice(-8).toUpperCase()}`;
+
+// Date without a time — for an appointment line that already carries its own
+// slot time ("04 Oct 2026 · 09:00"), where receiptDate would repeat it.
+export const receiptDayOnly = (d: Date | null | undefined): string =>
+  (d ?? new Date()).toLocaleDateString("en-GB", {
+    timeZone: "UTC",
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  });
