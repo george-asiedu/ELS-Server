@@ -22,10 +22,11 @@ export const orderConfirmed = (
     html: renderShell({
       brand,
       previewText: `Order ${data.orderNumber} is confirmed.`,
+      documentType: "Order receipt",
       bodyHtml: `
         ${statusBadge("success", "ORDER CONFIRMED")}
         <h1 style="margin: 0 0 4px; font-family: Georgia, serif; font-size: 22px; color: #2A1B1F; text-align: center;">Thank you for your order!</h1>
-        <p style="margin: 0 0 16px; font-family: Arial, sans-serif; font-size: 13px; color: #7A6A6E; text-align: center;">
+        <p class="muted" style="margin: 0 0 16px; font-family: Arial, sans-serif; font-size: 13px; color: #7A6A6E; text-align: center;">
           Order ${esc(data.orderNumber)} &middot; ${data.fulfillment === "DELIVERY" ? "Delivery" : "Pickup at studio"}
         </p>
         ${itemsTable(data.items)}
@@ -46,6 +47,7 @@ export const orderPaymentFailed = (
     html: renderShell({
       brand,
       previewText: "Your order payment didn't go through.",
+      documentType: "Payment failed",
       bodyHtml: `
         ${statusBadge("error", "PAYMENT FAILED")}
         <h1 style="margin: 0 0 12px; font-family: Georgia, serif; font-size: 22px; color: #2A1B1F; text-align: center;">Payment not completed</h1>
@@ -69,6 +71,7 @@ export const orderFulfilled = (
     html: renderShell({
       brand,
       previewText: isPickup ? "Ready for pickup." : "On its way to you.",
+      documentType: "Order update",
       bodyHtml: `
         ${statusBadge("info", isPickup ? "READY FOR PICKUP" : "OUT FOR DELIVERY")}
         <h1 style="margin: 0 0 12px; font-family: Georgia, serif; font-size: 22px; color: #2A1B1F; text-align: center;">

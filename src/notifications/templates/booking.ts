@@ -27,6 +27,7 @@ export const bookingRequestCustomer = (
     html: renderShell({
       brand,
       previewText: `Your ${data.serviceName} request is pending confirmation.`,
+      documentType: "Booking request",
       bodyHtml: `
         ${statusBadge("pending", "PENDING CONFIRMATION")}
         <h1 style="margin: 0 0 12px; font-family: Georgia, serif; font-size: 22px; color: #2A1B1F; text-align: center;">Thanks, ${esc(data.customerFirstName)}!</h1>
@@ -34,7 +35,7 @@ export const bookingRequestCustomer = (
           We've received your appointment request and will confirm it shortly.
         </p>
         ${appointmentCard({ ...data, color })}
-        <p style="margin: 0; font-family: Arial, sans-serif; font-size: 13px; color: #7A6A6E; text-align: center;">
+        <p class="muted" style="margin: 0; font-family: Arial, sans-serif; font-size: 13px; color: #7A6A6E; text-align: center;">
           Reference: ${esc(data.bookingRef)}${data.paymentRequired ? " · Payment pending" : ""}
         </p>
         ${data.bookingUrl ? button("View Booking", data.bookingUrl, color) : ""}`,
@@ -59,14 +60,15 @@ export const bookingRequestStudio = (
     html: renderShell({
       brand,
       previewText: `${data.customerName} requested ${data.serviceName}.`,
+      documentType: "Booking request",
       bodyHtml: `
         <h1 style="margin: 0 0 16px; font-family: Georgia, serif; font-size: 22px; color: #2A1B1F;">New booking request</h1>
         ${appointmentCard({ ...data, color })}
         <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin: 4px 0 0; font-family: Arial, sans-serif; font-size: 14px; color: #2A1B1F;">
-          <tr><td style="padding: 4px 0; color: #7A6A6E; width: 90px;">Customer</td><td style="padding: 4px 0;">${esc(data.customerName)}</td></tr>
-          <tr><td style="padding: 4px 0; color: #7A6A6E;">Phone</td><td style="padding: 4px 0;">${esc(data.customerPhone)}</td></tr>
-          ${data.customerEmail ? `<tr><td style="padding: 4px 0; color: #7A6A6E;">Email</td><td style="padding: 4px 0;">${esc(data.customerEmail)}</td></tr>` : ""}
-          ${data.notes ? `<tr><td style="padding: 4px 0; color: #7A6A6E; vertical-align: top;">Notes</td><td style="padding: 4px 0;">${esc(data.notes)}</td></tr>` : ""}
+          <tr><td class="muted" style="padding: 4px 0; color: #7A6A6E; width: 90px;">Customer</td><td style="padding: 4px 0;">${esc(data.customerName)}</td></tr>
+          <tr><td class="muted" style="padding: 4px 0; color: #7A6A6E;">Phone</td><td style="padding: 4px 0;">${esc(data.customerPhone)}</td></tr>
+          ${data.customerEmail ? `<tr><td class="muted" style="padding: 4px 0; color: #7A6A6E;">Email</td><td style="padding: 4px 0;">${esc(data.customerEmail)}</td></tr>` : ""}
+          ${data.notes ? `<tr><td class="muted" style="padding: 4px 0; color: #7A6A6E; vertical-align: top;">Notes</td><td style="padding: 4px 0;">${esc(data.notes)}</td></tr>` : ""}
         </table>
         ${data.designImageUrl ? `<p style="margin: 16px 0 0;"><img src="${esc(data.designImageUrl)}" alt="Design reference from ${esc(data.customerName)}" style="max-width: 100%; border-radius: 10px; border: 1px solid #EDE3E5;" /></p>` : ""}
         ${data.dashboardUrl ? button("Review Booking", data.dashboardUrl, color) : ""}`,
@@ -84,6 +86,7 @@ export const bookingCompleted = (
     html: renderShell({
       brand,
       previewText: "We hope you love your new look.",
+      documentType: "Appointment completed",
       bodyHtml: `
         <h1 style="margin: 0 0 12px; font-family: Georgia, serif; font-size: 22px; color: #2A1B1F; text-align: center;">Thanks for visiting, ${esc(data.customerFirstName)}!</h1>
         <p style="margin: 0 0 4px; font-family: Arial, sans-serif; font-size: 15px; color: #2A1B1F; line-height: 1.6; text-align: center;">
@@ -108,6 +111,7 @@ export const bookingCancelled = (
   html: renderShell({
     brand,
     previewText: `Your ${data.serviceName} appointment was cancelled.`,
+      documentType: "Appointment cancelled",
     bodyHtml: `
       ${statusBadge("error", "CANCELLED")}
       <h1 style="margin: 0 0 12px; font-family: Georgia, serif; font-size: 22px; color: #2A1B1F; text-align: center;">Appointment cancelled</h1>
@@ -115,7 +119,7 @@ export const bookingCancelled = (
         Hi ${esc(data.customerFirstName)}, your appointment has been cancelled.
       </p>
       ${appointmentCard({ ...data, color: "#B23B3B" })}
-      ${data.reason ? `<p style="margin: 0; font-family: Arial, sans-serif; font-size: 13px; color: #7A6A6E; text-align: center;">Reason: ${esc(data.reason)}</p>` : ""}
+      ${data.reason ? `<p class="muted" style="margin: 0; font-family: Arial, sans-serif; font-size: 13px; color: #7A6A6E; text-align: center;">Reason: ${esc(data.reason)}</p>` : ""}
       ${data.bookingUrl ? button("Book Again", data.bookingUrl, brandColor(brand)) : ""}`,
   }),
 });

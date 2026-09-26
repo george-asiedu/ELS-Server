@@ -71,10 +71,11 @@ export const featureRequestSubmitted = (
     html: renderShell({
       brand,
       previewText: `${data.studioName} requested: ${data.title}`,
+      documentType: "Feature request",
       bodyHtml: `
         ${statusBadge("info", "NEW FEATURE REQUEST")}
         <h1 style="margin: 0 0 4px; font-family: Georgia, serif; font-size: 22px; color: #2A1B1F; text-align: center;">${esc(data.title)}</h1>
-        <p style="margin: 0 0 20px; font-family: Arial, sans-serif; font-size: 13px; color: #7A6A6E; text-align: center;">
+        <p class="muted" style="margin: 0 0 20px; font-family: Arial, sans-serif; font-size: 13px; color: #7A6A6E; text-align: center;">
           from <strong>${esc(data.studioName)}</strong> (${esc(data.studioSlug)})${
             data.requestedByEmail ? ` &middot; ${esc(data.requestedByEmail)}` : ""
           }
@@ -108,6 +109,7 @@ export const featureRequestStatusChanged = (
     html: renderShell({
       brand,
       previewText: `${data.title} — ${copy.label}`,
+      documentType: "Feature request",
       bodyHtml: `
         ${statusBadge(copy.badge, copy.label)}
         <h1 style="margin: 0 0 12px; font-family: Georgia, serif; font-size: 22px; color: #2A1B1F; text-align: center;">${esc(copy.heading)}</h1>
@@ -117,7 +119,7 @@ export const featureRequestStatusChanged = (
         <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin: 0 0 8px; border: 1px solid #EADFE1; border-radius: 12px; border-left: 4px solid ${color};">
           <tr>
             <td style="padding: 16px 20px;">
-              <p style="margin: 0 0 2px; font-family: Arial, sans-serif; font-size: 11px; color: #7A6A6E; letter-spacing: 0.04em;">YOUR REQUEST</p>
+              <p class="muted" style="margin: 0 0 2px; font-family: Arial, sans-serif; font-size: 11px; color: #7A6A6E; letter-spacing: 0.04em;">YOUR REQUEST</p>
               <p style="margin: 0; font-family: Georgia, serif; font-size: 17px; font-weight: 700; color: #2A1B1F;">${esc(data.title)}</p>
             </td>
           </tr>

@@ -20,7 +20,7 @@ export const passwordResetRequested = (
           Click below to choose a new one — this link is valid for ${data.expiresInMinutes} minutes.
         </p>
         ${button("Reset Password", data.resetUrl, ROSE)}
-        <p style="margin: 24px 0 0; font-family: Arial, sans-serif; font-size: 13px; color: #7A6A6E; line-height: 1.6;">
+        <p class="muted" style="margin: 24px 0 0; font-family: Arial, sans-serif; font-size: 13px; color: #7A6A6E; line-height: 1.6;">
           If you didn't request this, you can safely ignore this email — your password won't change.
         </p>`,
     }),
@@ -42,7 +42,7 @@ export const passwordChanged = (
         <p style="margin: 0 0 8px; font-family: Arial, sans-serif; font-size: 15px; color: #2A1B1F; line-height: 1.6;">
           The password for <strong>${esc(data.email)}</strong> was changed on ${esc(data.changedAt)}.
         </p>
-        <p style="margin: 16px 0 0; font-family: Arial, sans-serif; font-size: 13px; color: #7A6A6E; line-height: 1.6;">
+        <p class="muted" style="margin: 16px 0 0; font-family: Arial, sans-serif; font-size: 13px; color: #7A6A6E; line-height: 1.6;">
           If this wasn't you, please reset your password immediately and contact support.
         </p>`,
     }),
@@ -66,12 +66,12 @@ export const loginAlert = (
           A new device signed in to your ${esc(brandName)} account. We send this alert once for each new browser or device.
         </p>
         <table role="presentation" style="width: 100%; border-collapse: collapse; font-family: Arial, sans-serif; font-size: 13px; color: #2A1B1F;">
-          <tr><td style="padding: 8px 0; color: #7A6A6E;">Device / browser</td><td style="padding: 8px 0;">${esc(data.device)}</td></tr>
-          <tr><td style="padding: 8px 0; color: #7A6A6E;">IP address</td><td style="padding: 8px 0;">${esc(data.ipAddress)}</td></tr>
-          <tr><td style="padding: 8px 0; color: #7A6A6E;">Time (UTC)</td><td style="padding: 8px 0;">${esc(data.signedInAt)}</td></tr>
+          <tr><td class="muted" style="padding: 8px 0; color: #7A6A6E;">Device / browser</td><td style="padding: 8px 0;">${esc(data.device)}</td></tr>
+          <tr><td class="muted" style="padding: 8px 0; color: #7A6A6E;">IP address</td><td style="padding: 8px 0;">${esc(data.ipAddress)}</td></tr>
+          <tr><td class="muted" style="padding: 8px 0; color: #7A6A6E;">Time (UTC)</td><td style="padding: 8px 0;">${esc(data.signedInAt)}</td></tr>
         </table>
         ${button("Reset your password", data.recoveryUrl, ROSE)}
-        <p style="margin: 20px 0 0; font-family: Arial, sans-serif; font-size: 13px; color: #7A6A6E; line-height: 1.6;">
+        <p class="muted" style="margin: 20px 0 0; font-family: Arial, sans-serif; font-size: 13px; color: #7A6A6E; line-height: 1.6;">
           If this wasn't you, reset your password immediately. Signing out of other devices will also revoke their sessions.
         </p>`,
     }),

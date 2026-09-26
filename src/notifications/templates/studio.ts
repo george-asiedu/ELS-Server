@@ -13,14 +13,15 @@ export const studioCreated = (
   html: renderShell({
     brand,
     previewText: `${data.studioName} is live.`,
+      documentType: "Studio activated",
     bodyHtml: `
       ${statusBadge("success", "STUDIO LIVE")}
       <h1 style="margin: 0 0 12px; font-family: Georgia, serif; font-size: 22px; color: #2A1B1F; text-align: center;">Welcome, ${esc(data.ownerFirstName)}!</h1>
       <p style="margin: 0 0 4px; font-family: Arial, sans-serif; font-size: 15px; color: #2A1B1F; line-height: 1.6; text-align: center;">
         <strong>${esc(data.studioName)}</strong> is live on Zuri Studios, on the ${esc(data.planName)} plan.
       </p>
-      <p style="margin: 0; font-family: Arial, sans-serif; font-size: 13px; color: #7A6A6E; text-align: center;">
-        Your storefront: <a href="${esc(data.storefrontUrl)}" style="color: #BE185D;">${esc(data.storefrontUrl.replace(/^https?:\/\//, ""))}</a>
+      <p class="muted" style="margin: 0; font-family: Arial, sans-serif; font-size: 13px; color: #7A6A6E; text-align: center;">
+        Your storefront: <a class="accent" href="${esc(data.storefrontUrl)}" style="color: #BE185D;">${esc(data.storefrontUrl.replace(/^https?:\/\//, ""))}</a>
       </p>
       ${button("Open Studio Dashboard", data.dashboardUrl, "#BE185D")}`,
   }),
@@ -40,7 +41,7 @@ export const studioAccountSuspended = (
       <p style="margin: 0; font-family: Arial, sans-serif; font-size: 15px; color: #2A1B1F; line-height: 1.6; text-align: center;">
         <strong>${esc(data.studioName)}</strong> has been suspended and its storefront is currently unavailable to
         customers. If you believe this is a mistake, or would like to resolve it, please contact us at
-        <a href="mailto:${esc(data.supportEmail)}" style="color: #BE185D;">${esc(data.supportEmail)}</a>.
+        <a class="accent" href="mailto:${esc(data.supportEmail)}" style="color: #BE185D;">${esc(data.supportEmail)}</a>.
       </p>`,
   }),
 });

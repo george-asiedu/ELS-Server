@@ -73,8 +73,8 @@ export const statusBadge = (kind: StatusKind, label: string): string => {
   return `
   <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin: 0 auto 20px;">
     <tr>
-      <td style="background-color: ${s.bg}; color: ${s.fg}; border-radius: 999px; padding: 6px 16px; font-family: Arial, Helvetica, sans-serif; font-size: 13px; font-weight: 700; letter-spacing: 0.02em;">
-        <span style="margin-right: 6px;">${s.glyph}</span>${esc(label)}
+      <td class="badge badge-${kind}" style="background-color: ${s.bg}; color: ${s.fg}; border-radius: 999px; padding: 6px 16px; font-family: Arial, Helvetica, sans-serif; font-size: 13px; font-weight: 700; letter-spacing: 0.02em;">
+        <span class="badge-text" style="margin-right: 6px;">${s.glyph}</span>${esc(label)}
       </td>
     </tr>
   </table>`;
@@ -136,7 +136,7 @@ export const receiptMethodLabel = (channel?: string | null): string =>
 
 const receiptRow = (label: string, value: string): string => `
     <tr>
-      <td style="padding: 5px 0; font-family: Arial, Helvetica, sans-serif; font-size: 12px; color: ${MUTED};">${esc(label)}</td>
+      <td class="muted" style="padding: 5px 0; font-family: Arial, Helvetica, sans-serif; font-size: 12px; color: ${MUTED};">${esc(label)}</td>
       <td align="right" style="padding: 5px 0; font-family: Arial, Helvetica, sans-serif; font-size: 12px; color: ${INK}; font-weight: 500;">${esc(value)}</td>
     </tr>`;
 
@@ -154,11 +154,11 @@ export const receiptAttachedNotice = (
         <p style="margin: 0 0 4px; font-family: Arial, Helvetica, sans-serif; font-size: 14px; font-weight: 700; color: ${INK};">
           📎 Your receipt is attached
         </p>
-        <p style="margin: 0; font-family: Arial, Helvetica, sans-serif; font-size: 12px; color: ${MUTED}; line-height: 1.6;">
+        <p class="muted" style="margin: 0; font-family: Arial, Helvetica, sans-serif; font-size: 12px; color: ${MUTED}; line-height: 1.6;">
           Receipt no. <strong style="color: ${INK};">${esc(r.receiptNumber)}</strong> &middot; ${esc(r.amountPaid)} paid to ${esc(r.paidTo)} on ${esc(r.paidOn)}.<br />
           Reference: <span style="color: ${INK};">${esc(r.reference)}</span> &middot; paid by ${esc(receiptMethodLabel(r.method))}${
             r.balanceDue
-              ? `<br /><span style="color: ${EMPHASIS};">Balance due at studio: ${esc(r.balanceDue)}</span>`
+              ? `<br /><span class="accent" style="color: ${EMPHASIS};">Balance due at studio: ${esc(r.balanceDue)}</span>`
               : ""
           }
         </p>
@@ -173,7 +173,7 @@ export const receiptBlock = (r: ReceiptDetails, color: string): string => `
         <p style="margin: 0 0 2px; font-family: Georgia, 'Times New Roman', serif; font-size: 15px; font-weight: 700; color: ${INK}; letter-spacing: 0.02em;">
           RECEIPT
         </p>
-        <p style="margin: 0 0 14px; font-family: Arial, Helvetica, sans-serif; font-size: 12px; color: ${MUTED};">
+        <p class="muted" style="margin: 0 0 14px; font-family: Arial, Helvetica, sans-serif; font-size: 12px; color: ${MUTED};">
           No. ${esc(r.receiptNumber)}
         </p>
         <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
@@ -189,20 +189,20 @@ export const receiptBlock = (r: ReceiptDetails, color: string): string => `
             <td style="padding: 12px 0 0; font-family: Arial, Helvetica, sans-serif; font-size: 14px; font-weight: 700; color: ${INK};">
               Amount paid
             </td>
-            <td align="right" style="padding: 12px 0 0; font-family: Arial, Helvetica, sans-serif; font-size: 16px; font-weight: 700; color: ${EMPHASIS};">
+            <td class="accent" align="right" style="padding: 12px 0 0; font-family: Arial, Helvetica, sans-serif; font-size: 16px; font-weight: 700; color: ${EMPHASIS};">
               ${esc(r.amountPaid)}
             </td>
           </tr>
           ${
             r.balanceDue
               ? `<tr>
-            <td style="padding: 6px 0 0; font-family: Arial, Helvetica, sans-serif; font-size: 12px; color: ${MUTED};">Balance due at studio</td>
-            <td align="right" style="padding: 6px 0 0; font-family: Arial, Helvetica, sans-serif; font-size: 12px; color: ${MUTED};">${esc(r.balanceDue)}</td>
+            <td class="muted" style="padding: 6px 0 0; font-family: Arial, Helvetica, sans-serif; font-size: 12px; color: ${MUTED};">Balance due at studio</td>
+            <td class="muted" align="right" style="padding: 6px 0 0; font-family: Arial, Helvetica, sans-serif; font-size: 12px; color: ${MUTED};">${esc(r.balanceDue)}</td>
           </tr>`
               : ""
           }
         </table>
-        <p style="margin: 14px 0 0; font-family: Arial, Helvetica, sans-serif; font-size: 11px; color: ${MUTED}; line-height: 1.5;">
+        <p class="muted" style="margin: 14px 0 0; font-family: Arial, Helvetica, sans-serif; font-size: 11px; color: ${MUTED}; line-height: 1.5;">
           Keep this receipt for your records. Quote the reference above if you need to ask about this payment.
         </p>
       </td>
@@ -224,10 +224,10 @@ export const appointmentCard = (args: {
         <p style="margin: 0 0 4px; font-family: Georgia, 'Times New Roman', serif; font-size: 19px; font-weight: 700; color: ${INK};">
           ${esc(args.serviceName)}
         </p>
-        <p style="margin: 0; font-family: Arial, Helvetica, sans-serif; font-size: 14px; color: ${MUTED};">
+        <p class="muted" style="margin: 0; font-family: Arial, Helvetica, sans-serif; font-size: 14px; color: ${MUTED};">
           ${esc(args.date)} &middot; ${esc(args.time)}${args.duration ? ` &middot; ${esc(args.duration)}` : ""}
         </p>
-        <p style="margin: 8px 0 0; font-family: Arial, Helvetica, sans-serif; font-size: 13px; color: ${MUTED};">
+        <p class="muted" style="margin: 8px 0 0; font-family: Arial, Helvetica, sans-serif; font-size: 13px; color: ${MUTED};">
           at ${esc(args.studioName)}
         </p>
       </td>
@@ -244,7 +244,7 @@ export const itemsTable = (
         (i) => `
     <tr>
       <td style="padding: 6px 0; font-family: Arial, Helvetica, sans-serif; font-size: 14px; color: ${INK};">
-        ${esc(i.name)} <span style="color: ${MUTED};">&times;${i.quantity}</span>
+        ${esc(i.name)} <span class="muted" style="color: ${MUTED};">&times;${i.quantity}</span>
       </td>
       <td align="right" style="padding: 6px 0; font-family: Arial, Helvetica, sans-serif; font-size: 14px; color: ${INK};">
         ${esc(i.total)}
@@ -258,19 +258,19 @@ const footer = (brand: EmailBrand): string => {
   if (brand.kind === "zuri") {
     return `
       <p style="margin: 0 0 4px; font-family: Arial, Helvetica, sans-serif; font-size: 13px; font-weight: 600; color: ${INK};">Zuri Studios</p>
-      <p style="margin: 0; font-family: Arial, Helvetica, sans-serif; font-size: 12px; color: ${MUTED};">
-        <a href="mailto:${esc(brand.zuri.supportEmail)}" style="color: ${MUTED};">${esc(brand.zuri.supportEmail)}</a>
+      <p class="muted" style="margin: 0; font-family: Arial, Helvetica, sans-serif; font-size: 12px; color: ${MUTED};">
+        <a class="muted" href="mailto:${esc(brand.zuri.supportEmail)}" style="color: ${MUTED};">${esc(brand.zuri.supportEmail)}</a>
         &nbsp;&middot;&nbsp;
-        <a href="${esc(brand.zuri.websiteUrl)}" style="color: ${MUTED};">${esc(brand.zuri.websiteUrl.replace(/^https?:\/\//, ""))}</a>
+        <a class="muted" href="${esc(brand.zuri.websiteUrl)}" style="color: ${MUTED};">${esc(brand.zuri.websiteUrl.replace(/^https?:\/\//, ""))}</a>
       </p>`;
   }
   const s = brand.studio;
   const contactLine = [s.phone, s.email].filter(Boolean).join("  &middot;  ");
   return `
       <p style="margin: 0 0 4px; font-family: Arial, Helvetica, sans-serif; font-size: 13px; font-weight: 600; color: ${INK};">${esc(s.name)}</p>
-      ${s.address ? `<p style="margin: 0 0 2px; font-family: Arial, Helvetica, sans-serif; font-size: 12px; color: ${MUTED};">${esc(s.address)}</p>` : ""}
-      ${contactLine ? `<p style="margin: 0 0 10px; font-family: Arial, Helvetica, sans-serif; font-size: 12px; color: ${MUTED};">${contactLine}</p>` : ""}
-      <p style="margin: 0; font-family: Arial, Helvetica, sans-serif; font-size: 11px; color: ${MUTED};">Powered by Zuri Studios</p>`;
+      ${s.address ? `<p class="muted" style="margin: 0 0 2px; font-family: Arial, Helvetica, sans-serif; font-size: 12px; color: ${MUTED};">${esc(s.address)}</p>` : ""}
+      ${contactLine ? `<p class="muted" style="margin: 0 0 10px; font-family: Arial, Helvetica, sans-serif; font-size: 12px; color: ${MUTED};">${contactLine}</p>` : ""}
+      <p class="muted" style="margin: 0; font-family: Arial, Helvetica, sans-serif; font-size: 11px; color: ${MUTED};">Powered by Zuri Studios</p>`;
 };
 
 /**
@@ -283,8 +283,13 @@ export const renderShell = (args: {
   brand: EmailBrand;
   previewText: string;
   bodyHtml: string;
+  // Short label shown opposite the brand ("PAYMENT RECEIPT", "BOOKING
+  // REQUEST"). Gives the header the two-sided structure of a real document
+  // instead of a bare wordmark. Omitted for conversational mail where a
+  // document label would be wrong (a welcome note isn't a document).
+  documentType?: string;
 }): string => {
-  const { brand, previewText, bodyHtml } = args;
+  const { brand, previewText, bodyHtml, documentType } = args;
   const name = brandName(brand);
   const logo = brandLogo(brand);
   const site = brandSiteUrl(brand);
@@ -311,12 +316,51 @@ export const renderShell = (args: {
     .email-container { width: 100% !important; }
     .email-padding { padding-left: 20px !important; padding-right: 20px !important; }
   }
+  /*
+   * Dark mode. Every colour in this system is an INLINE style (email clients
+   * strip most everything else), and an inline style beats a class — so these
+   * rules must use !important and must match by descendant, not by hoping each
+   * element carries a class. The previous version defined .email-ink/.email-muted
+   * but applied them to nothing, so dark-mode Gmail darkened the background and
+   * left the text dark on top of it: invisible.
+   */
   @media (prefers-color-scheme: dark) {
     .email-bg { background-color: #1C1416 !important; }
-    .email-card { background-color: #241A1D !important; }
-    .email-ink { color: #F3E9EA !important; }
-    .email-muted { color: #B6A2A6 !important; }
-    .email-border { border-color: #3A2C2F !important; }
+    .email-card {
+      background-color: #241A1D !important;
+      border-color: #3A2C2F !important;
+    }
+    /* Body copy inside the card. */
+    .email-card td,
+    .email-card p,
+    .email-card span,
+    .email-card div,
+    .email-card h1,
+    .email-card h2,
+    .email-card strong { color: #F3E9EA !important; }
+    /* Header and footer sit outside the card, on the page background. */
+    .email-outer td,
+    .email-outer p,
+    .email-outer span,
+    .email-outer a { color: #E8DDDF !important; }
+    /* Re-establish the hierarchy the blanket rule above flattens. */
+    .email-card .muted, .email-outer .muted { color: #B6A2A6 !important; }
+    .email-card .accent { color: #F7A8C4 !important; }
+    /*
+     * The status pill is light-background/dark-text by design, so the blanket
+     * rule above would paint its text near-white on a pale pill — invisible.
+     * Give it a dark-mode palette of its own instead of exempting it.
+     */
+    .email-card .badge,
+    .email-card .badge .badge-text { color: #14100F !important; }
+    .email-card .badge-success { background-color: #7BE0AE !important; }
+    .email-card .badge-error { background-color: #FFA8A8 !important; }
+    .email-card .badge-warning { background-color: #FFD79A !important; }
+    .email-card .badge-info,
+    .email-card .badge-pending { background-color: #C9D7F5 !important; }
+    /* Hairlines are near-invisible against a dark card otherwise. */
+    .email-card table[style*="border"],
+    .email-card td[style*="border"] { border-color: #3A2C2F !important; }
   }
 </style>
 </head>
@@ -329,18 +373,28 @@ export const renderShell = (args: {
         <table role="presentation" class="email-container" width="600" cellpadding="0" cellspacing="0" border="0" style="width: 600px; max-width: 100%;">
           <!-- Header -->
           <tr>
-            <td align="center" class="email-padding" style="padding: 8px 32px 24px;">
-              <table role="presentation" cellpadding="0" cellspacing="0" border="0">
+            <td align="center" class="email-padding email-outer" style="padding: 8px 32px 24px;">
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
                 <tr>
-                  ${headerLogo ? `<td style="padding-right: 10px; vertical-align: middle;">${headerLogo}</td>` : ""}
-                  <td style="vertical-align: middle;">
+                  ${headerLogo ? `<td style="padding-right: 10px; vertical-align: middle; width: 50px;">${headerLogo}</td>` : ""}
+                  <td align="left" style="vertical-align: middle;">
                     ${
                       site
                         ? `<a href="${esc(site)}" target="_blank" style="font-family: Georgia, 'Times New Roman', serif; font-size: 20px; font-weight: 700; color: ${INK}; text-decoration: none;">${esc(name)}</a>`
                         : `<span style="font-family: Georgia, 'Times New Roman', serif; font-size: 20px; font-weight: 700; color: ${INK};">${esc(name)}</span>`
                     }
                   </td>
+                  ${
+                    documentType
+                      ? `<td align="right" style="vertical-align: middle;">
+                    <span class="muted" style="font-family: Arial, Helvetica, sans-serif; font-size: 11px; font-weight: 700; letter-spacing: 0.08em; color: ${MUTED}; text-transform: uppercase;">${esc(documentType)}</span>
+                  </td>`
+                      : ""
+                  }
                 </tr>
+              </table>
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+                <tr><td style="padding-top: 14px; border-bottom: 2px solid ${brandColor(brand)}; font-size: 0; line-height: 0;">&nbsp;</td></tr>
               </table>
             </td>
           </tr>
@@ -352,7 +406,7 @@ export const renderShell = (args: {
           </tr>
           <!-- Footer -->
           <tr>
-            <td align="center" class="email-padding" style="padding: 24px 32px 8px;">
+            <td align="center" class="email-padding email-outer" style="padding: 24px 32px 8px;">
               ${footer(brand)}
             </td>
           </tr>
