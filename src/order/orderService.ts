@@ -67,12 +67,16 @@ export class OrderService extends Connection {
 
   private async brandForNotification(studioIdOverride?: string | null): Promise<EmailBrand> {
     const studio = await this.currentStudioBranding(studioIdOverride ?? undefined);
-    return studio
-      ? { kind: "studio", studio }
-      : {
-          kind: "zuri",
-          zuri: { name: "Zuri Studios", websiteUrl: "https://zuristudios.com", supportEmail: "hello@zuristudios.com" },
-        };
+    return studio ?
+				{ kind: 'studio', studio }
+			:	{
+					kind: 'zuri',
+					zuri: {
+						name: 'Zuri Studios',
+						websiteUrl: 'https://zuristudios.com',
+						supportEmail: 'customersupport@zuristudios.com',
+					},
+				};
   }
 
   private static readonly POINTS_PER_GHS = 10; // 10 pts = GHS 1

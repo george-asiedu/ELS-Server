@@ -2,6 +2,7 @@ import { Connection } from "../db/dbConnection";
 import { CursorPage, cursorPageArgs, cursorPageResult } from "../utils/cursorPagination";
 import { getTenantContext, runAsSuperAdmin } from "../tenant/context";
 import { ApiError } from "../middleware/apiError";
+import { parseDurationMinutes } from "./duration";
 import { S3BucketService } from "../bucket/s3BucketService";
 import {
   AppointmentStatusInput,
@@ -103,6 +104,11 @@ export interface SlotCheck {
   enforceOpeningHours: boolean;
   // Minimum notice, in hours. 0 for admins.
   minNoticeHours: number;
+  // How long the booking runs. When known, the slot is checked for OVERLAP
+  // against other bookings' durations rather than an exact time match, and the
+  // booking must also finish before the studio closes. Null (unparseable
+  // duration) falls back to exact-slot matching.
+  durationMinutes?: number | null;
 }
 
 const HHMM = /^([01]\d|2[0-3]):([0-5]\d)$/;
@@ -170,6 +176,7 @@ export class AppointmentService extends Connection {
       // Booking for "in a few minutes" is legitimate (a walk-in the studio
       // enters), so creation has no notice floor beyond not being in the past.
       minNoticeHours: 0,
+      durationMinutes: parseDurationMinutes(service.duration),
     });
 
     let designImageUrl: string | undefined;
@@ -236,9 +243,17 @@ export class AppointmentService extends Connection {
     // the customer's confirmation, and a heads-up to the studio owner.
     try {
       const studio = await this.currentStudioBranding();
-      const brand: EmailBrand = studio
-        ? { kind: "studio", studio }
-        : { kind: "zuri", zuri: { name: "Zuri Studios", websiteUrl: "https://zuristudios.com", supportEmail: "hello@zuristudios.com" } };
+      const brand: EmailBrand =
+				studio ?
+					{ kind: 'studio', studio }
+				:	{
+						kind: 'zuri',
+						zuri: {
+							name: 'Zuri Studios',
+							websiteUrl: 'https://zuristudios.com',
+							supportEmail: 'customersupport@zuristudios.com',
+						},
+					};
       const paymentRequired = (await this.paymentSettings.findFirst())?.enabled ?? false;
       const core = {
         serviceName: appointment.service?.name ?? "your service",
@@ -353,7 +368,7 @@ export class AppointmentService extends Connection {
           );
           const brand: EmailBrand = studio
             ? { kind: "studio", studio }
-            : { kind: "zuri", zuri: { name: "Zuri Studios", websiteUrl: "https://zuristudios.com", supportEmail: "hello@zuristudios.com" } };
+            : { kind: "zuri", zuri: { name: "Zuri Studios", websiteUrl: "https://zuristudios.com", supportEmail: "customersupport@zuristudios.com" } };
 
           const payment = await this.payment.findUnique({
             where: { appointmentId: appt.id },
@@ -400,16 +415,38 @@ export class AppointmentService extends Connection {
     });
   }
 
+  /**
+   * What is already booked on a date.
+   *
+   * `data` stays a list of exact start times (unchanged, so existing callers
+   * keep working). `busy` adds each booking's start and length, which is what
+   * a caller needs to grey out a slot that merely OVERLAPS an existing
+   * booking — without it the UI would offer an 11:00 slot that the server
+   * rejects because a 4-hour service started at 10:00.
+   */
   public async takenSlots(date: string) {
     const appointments = await this.appointment.findMany({
       where: {
         appointmentDate: new Date(`${date}T00:00:00.000Z`),
         status: { not: "CANCELLED" },
       },
-      select: { appointmentTime: true },
+      select: {
+        appointmentTime: true,
+        service: { select: { duration: true } },
+      },
     });
     const taken = [...new Set(appointments.map((a) => a.appointmentTime))];
-    return { message: "Availability retrieved successfully", data: taken };
+    const busy = appointments
+      .map((a) => ({
+        start: a.appointmentTime,
+        minutes: parseDurationMinutes(a.service?.duration) ?? 0,
+      }))
+      .filter((b) => /^([01]\d|2[0-3]):([0-5]\d)$/.test(b.start));
+    return {
+      message: "Availability retrieved successfully",
+      data: taken,
+      busy,
+    };
   }
 
   public async listForUser(userId: string, page: CursorPage) {
@@ -503,23 +540,59 @@ export class AppointmentService extends Connection {
       if (close !== null && mins >= close) {
         throw new ApiError(`The studio closes at ${hours!.closeTime}`, 400);
       }
+      // ...and FINISH before closing, when we know how long it runs.
+      if (close !== null && check.durationMinutes) {
+        const ends = mins + check.durationMinutes;
+        if (ends > close) {
+          throw new ApiError(
+            `That service runs past closing time (${hours!.closeTime}). Please pick an earlier slot.`,
+            400,
+          );
+        }
+      }
     }
 
-    // Double-booking. Cancelled bookings free their slot; everything else
-    // holds it, including one awaiting a reschedule decision.
-    const clash = await this.appointment.findFirst({
+    // Double-booking. Cancelled bookings free their slot; everything else holds
+    // it, including one awaiting a reschedule decision.
+    //
+    // Every booking that day is loaded rather than just the matching time,
+    // because a 4-hour service starting at 10:00 collides with an 11:00 slot
+    // that no exact-match query would ever find.
+    const sameDay = await this.appointment.findMany({
       where: {
         appointmentDate: check.date,
-        appointmentTime: check.time,
         status: { not: "CANCELLED" },
         ...(check.ignoreAppointmentId
           ? { id: { not: check.ignoreAppointmentId } }
           : {}),
       },
-      select: { id: true },
+      select: {
+        id: true,
+        appointmentTime: true,
+        service: { select: { duration: true } },
+      },
     });
-    if (clash) {
-      throw new ApiError("That slot is already taken", 409);
+
+    const newStart = mins;
+    // An unknown duration is treated as a single point in time, so it can still
+    // catch an exact collision without inventing a length it might not have.
+    const newEnd = newStart + (check.durationMinutes ?? 0);
+
+    for (const other of sameDay) {
+      const otherStart = minutesOfDay(other.appointmentTime);
+      if (otherStart === null) continue;
+      const otherEnd =
+        otherStart + (parseDurationMinutes(other.service?.duration) ?? 0);
+
+      // Half-open intervals: a booking ending at 12:00 and one starting at
+      // 12:00 do not overlap. Zero-length (unknown duration) still matches an
+      // identical start.
+      const overlaps =
+        newStart === otherStart ||
+        (newStart < otherEnd && otherStart < newEnd);
+      if (overlaps) {
+        throw new ApiError("That slot is already taken", 409);
+      }
     }
 
     return at;
@@ -603,6 +676,7 @@ export class AppointmentService extends Connection {
       ignoreAppointmentId: id,
       enforceOpeningHours: byCustomer,
       minNoticeHours: byCustomer ? await this.rescheduleNoticeHours() : 0,
+      durationMinutes: parseDurationMinutes(existing.service?.duration),
     });
 
     const appointment = await this.appointment.update({
@@ -621,9 +695,17 @@ export class AppointmentService extends Connection {
     });
 
     const studio = await this.currentStudioBranding();
-    const brand: EmailBrand = studio
-      ? { kind: "studio", studio }
-      : { kind: "zuri", zuri: { name: "Zuri Studios", websiteUrl: "https://zuristudios.com", supportEmail: "hello@zuristudios.com" } };
+    const brand: EmailBrand =
+			studio ?
+				{ kind: 'studio', studio }
+			:	{
+					kind: 'zuri',
+					zuri: {
+						name: 'Zuri Studios',
+						websiteUrl: 'https://zuristudios.com',
+						supportEmail: 'customersupport@zuristudios.com',
+					},
+				};
     const core = {
       serviceName: appointment.service?.name ?? "your service",
       date: formatDate(appointment.appointmentDate),
@@ -763,7 +845,7 @@ export class AppointmentService extends Connection {
         const studio = await this.currentStudioBranding();
         const brand: EmailBrand = studio
           ? { kind: "studio", studio }
-          : { kind: "zuri", zuri: { name: "Zuri Studios", websiteUrl: "https://zuristudios.com", supportEmail: "hello@zuristudios.com" } };
+          : { kind: "zuri", zuri: { name: "Zuri Studios", websiteUrl: "https://zuristudios.com", supportEmail: "customersupport@zuristudios.com" } };
         const core = {
           serviceName: appointment.service?.name ?? "your service",
           date: formatDate(appointment.appointmentDate),

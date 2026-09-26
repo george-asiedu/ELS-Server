@@ -668,12 +668,16 @@ export class PaymentService extends Connection {
   // super-admin context — see currentStudioBranding's doc comment).
   private async brandForNotification(studioIdOverride?: string | null): Promise<EmailBrand> {
     const studio = await this.currentStudioBranding(studioIdOverride ?? undefined);
-    return studio
-      ? { kind: "studio", studio }
-      : {
-          kind: "zuri",
-          zuri: { name: "Zuri Studios", websiteUrl: "https://zuristudios.com", supportEmail: "hello@zuristudios.com" },
-        };
+    return studio ?
+				{ kind: 'studio', studio }
+			:	{
+					kind: 'zuri',
+					zuri: {
+						name: 'Zuri Studios',
+						websiteUrl: 'https://zuristudios.com',
+						supportEmail: 'customersupport@zuristudios.com',
+					},
+				};
   }
 
   private async sendReceipt(
