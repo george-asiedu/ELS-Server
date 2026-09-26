@@ -42,7 +42,13 @@ const updateStatusSchema: JSONSchemaType<UpdateAppointmentStatusInput> = {
   properties: {
     status: {
       type: "string",
-      enum: ["PENDING", "CONFIRMED", "COMPLETED", "CANCELLED"],
+      enum: [
+        "PENDING",
+        "CONFIRMED",
+        "PENDING_RESCHEDULE",
+        "COMPLETED",
+        "CANCELLED",
+      ],
     },
   },
   required: ["status"],

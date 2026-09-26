@@ -17,6 +17,7 @@ import {
   bookingConfirmed,
   bookingRescheduled,
   bookingReminder,
+  bookingRescheduleRequested,
 } from "../notifications/templates/booking";
 import { EmailBrand, MoneyLine } from "../notifications/types";
 import { ghs } from "../notifications/format";
@@ -75,6 +76,44 @@ const paymentView = (
   };
 };
 
+/**
+ * Everything that makes a slot bookable, in one place.
+ *
+ * This is deliberately shared by create() and reschedule(): before it existed,
+ * the server validated only that the date matched yyyy-MM-dd and the time was a
+ * non-empty string. Business hours, blocked dates, past dates and — most
+ * importantly — double-booking were enforced nowhere, because the booking UI
+ * filtered slots client-side using /availability. Two customers racing for the
+ * same slot both succeeded, and the studio found out when they both arrived.
+ *
+ * Slots are matched EXACTLY (same date + same "HH:MM" string), which mirrors how
+ * /availability reports taken slots. It does not yet reason about service
+ * duration, so a 4-hour service starting at 10:00 does not block 11:00 — see
+ * the note in the README; that needs the slot grid to become duration-aware on
+ * both sides at once.
+ */
+export interface SlotCheck {
+  date: Date;
+  time: string;
+  // Excluded from the clash check — the booking being moved must not collide
+  // with itself.
+  ignoreAppointmentId?: string | undefined;
+  // Studio admins may deliberately book outside opening hours (a private
+  // after-hours appointment), so those two rules apply to customers only.
+  enforceOpeningHours: boolean;
+  // Minimum notice, in hours. 0 for admins.
+  minNoticeHours: number;
+}
+
+const HHMM = /^([01]\d|2[0-3]):([0-5]\d)$/;
+
+/** "HH:MM" -> minutes since midnight, or null when unparseable. */
+const minutesOfDay = (time: string): number | null => {
+  const m = HHMM.exec(time.trim());
+  if (!m) return null;
+  return Number(m[1]) * 60 + Number(m[2]);
+};
+
 const serviceInclude = {
   service: {
     select: {
@@ -120,6 +159,18 @@ export class AppointmentService extends Connection {
     if (!service) {
       throw new ApiError("Selected service not found", 404);
     }
+
+    // Same gate a reschedule passes through. Until this existed the server
+    // accepted any well-formatted date/time, including one in the past, on a
+    // closed day, or already taken by someone else.
+    await this.assertSlotBookable({
+      date: new Date(`${data.appointmentDate}T00:00:00.000Z`),
+      time: data.appointmentTime,
+      enforceOpeningHours: true,
+      // Booking for "in a few minutes" is legitimate (a walk-in the studio
+      // enters), so creation has no notice floor beyond not being in the past.
+      minNoticeHours: 0,
+    });
 
     let designImageUrl: string | undefined;
     if (data.designImageUrl) designImageUrl = this.s3.assertOwnedMediaUrl(data.designImageUrl, "appointments");
@@ -383,22 +434,140 @@ export class AppointmentService extends Connection {
   }
 
   /**
-   * Move an appointment to a new slot (studio admin).
+   * The single gate every booking and every move passes through. Throws an
+   * ApiError describing the first rule broken; returns the resolved instant.
+   */
+  public async assertSlotBookable(check: SlotCheck): Promise<Date> {
+    const mins = minutesOfDay(check.time);
+    if (mins === null) {
+      throw new ApiError("Pick a time in 24-hour HH:MM format", 400);
+    }
+
+    // The exact instant, built from the date (midnight UTC) plus the slot time.
+    const at = new Date(check.date);
+    at.setUTCHours(Math.floor(mins / 60), mins % 60, 0, 0);
+    if (Number.isNaN(at.getTime())) {
+      throw new ApiError("That date and time aren't valid", 400);
+    }
+
+    const now = Date.now();
+    if (at.getTime() <= now) {
+      throw new ApiError("That time is in the past", 400);
+    }
+    if (check.minNoticeHours > 0) {
+      const earliest = now + check.minNoticeHours * 60 * 60 * 1000;
+      if (at.getTime() < earliest) {
+        throw new ApiError(
+          check.minNoticeHours === 1
+            ? "Please choose a time at least 1 hour from now"
+            : `Please choose a time at least ${check.minNoticeHours} hours from now`,
+          400,
+        );
+      }
+    }
+
+    if (check.enforceOpeningHours) {
+      // Blocked dates are whole days the studio has closed off.
+      const dayStart = new Date(at);
+      dayStart.setUTCHours(0, 0, 0, 0);
+      const dayEnd = new Date(at);
+      dayEnd.setUTCHours(23, 59, 59, 999);
+      const blocked = await this.blockedDate.findFirst({
+        where: { date: { gte: dayStart, lte: dayEnd } },
+        select: { reason: true },
+      });
+      if (blocked) {
+        throw new ApiError(
+          blocked.reason
+            ? `The studio is closed that day (${blocked.reason})`
+            : "The studio is closed that day",
+          400,
+        );
+      }
+
+      // Opening hours for that weekday. No row configured means no restriction
+      // — a studio that has never set its hours should still take bookings.
+      const hours = await this.businessHours.findFirst({
+        where: { dayOfWeek: at.getUTCDay() },
+        select: { isClosed: true, openTime: true, closeTime: true },
+      });
+      if (hours?.isClosed) {
+        throw new ApiError("The studio is closed on that day", 400);
+      }
+      const open = hours?.openTime ? minutesOfDay(hours.openTime) : null;
+      const close = hours?.closeTime ? minutesOfDay(hours.closeTime) : null;
+      if (open !== null && mins < open) {
+        throw new ApiError(`The studio opens at ${hours!.openTime}`, 400);
+      }
+      // The slot must START before closing; a booking cannot begin at close.
+      if (close !== null && mins >= close) {
+        throw new ApiError(`The studio closes at ${hours!.closeTime}`, 400);
+      }
+    }
+
+    // Double-booking. Cancelled bookings free their slot; everything else
+    // holds it, including one awaiting a reschedule decision.
+    const clash = await this.appointment.findFirst({
+      where: {
+        appointmentDate: check.date,
+        appointmentTime: check.time,
+        status: { not: "CANCELLED" },
+        ...(check.ignoreAppointmentId
+          ? { id: { not: check.ignoreAppointmentId } }
+          : {}),
+      },
+      select: { id: true },
+    });
+    if (clash) {
+      throw new ApiError("That slot is already taken", 409);
+    }
+
+    return at;
+  }
+
+  /** How much notice this studio requires of a customer moving their booking. */
+  private async rescheduleNoticeHours(): Promise<number> {
+    const studioId = getTenantContext()?.studioId;
+    if (!studioId) return 2;
+    const settings = await this.studioSettings.findFirst({
+      where: { studioId },
+      select: { rescheduleNoticeHours: true },
+    });
+    return settings?.rescheduleNoticeHours ?? 2;
+  }
+
+  /**
+   * Move an appointment to a new slot.
    *
-   * Cancelled and completed bookings are not movable — rescheduling either
-   * would silently resurrect a finished booking. The previous slot is kept on
-   * the row so the customer's email can show what changed and the studio has a
-   * trail.
+   * Who asks changes the rules, not the mechanics:
+   *  - A studio admin is authoritative. No notice period, may book outside
+   *    opening hours, and the booking keeps whatever status it had.
+   *  - A customer may only move their OWN booking, must give the studio's
+   *    required notice, must land inside opening hours, and the booking drops
+   *    to PENDING_RESCHEDULE until the studio approves it.
+   *
+   * Either way the payment stays attached to the appointment, so a deposit
+   * follows the booking to its new time — nothing is re-charged or released.
    */
   public async reschedule(
     id: string,
     input: { date?: unknown; time?: unknown; reason?: unknown },
+    actor: { role: "ADMIN" | "CUSTOMER"; userId?: string } = { role: "ADMIN" },
   ) {
     const existing = await this.appointment.findUnique({
       where: { id },
       include: serviceInclude,
     });
     if (!existing) throw new ApiError("Appointment not found", 404);
+
+    const byCustomer = actor.role === "CUSTOMER";
+    if (byCustomer) {
+      // Not "not found" — the caller knows the booking exists; hiding that
+      // would just be confusing. Ownership is the actual objection.
+      if (!actor.userId || existing.userId !== actor.userId) {
+        throw new ApiError("You can only reschedule your own booking", 403);
+      }
+    }
     if (existing.status === "CANCELLED" || existing.status === "COMPLETED") {
       throw new ApiError(
         `A ${existing.status.toLowerCase()} appointment can't be rescheduled`,
@@ -411,9 +580,6 @@ export class AppointmentService extends Connection {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(dateRaw)) {
       throw new ApiError("A new date is required (YYYY-MM-DD)", 400);
     }
-    if (!/^\d{2}:\d{2}$/.test(time)) {
-      throw new ApiError("A new time is required (HH:MM)", 400);
-    }
     const date = new Date(`${dateRaw}T00:00:00.000Z`);
     if (Number.isNaN(date.getTime())) {
       throw new ApiError("That date isn't valid", 400);
@@ -424,26 +590,20 @@ export class AppointmentService extends Connection {
         ? input.reason.trim().slice(0, 300)
         : null;
 
-    const sameSlot =
+    if (
       existing.appointmentDate.getTime() === date.getTime() &&
-      existing.appointmentTime === time;
-    if (sameSlot) {
+      existing.appointmentTime === time
+    ) {
       throw new ApiError("That's already the appointment's slot", 400);
     }
 
-    // Don't move it on top of another live booking.
-    const clash = await this.appointment.findFirst({
-      where: {
-        appointmentDate: date,
-        appointmentTime: time,
-        status: { not: "CANCELLED" },
-        id: { not: id },
-      },
-      select: { id: true },
+    await this.assertSlotBookable({
+      date,
+      time,
+      ignoreAppointmentId: id,
+      enforceOpeningHours: byCustomer,
+      minNoticeHours: byCustomer ? await this.rescheduleNoticeHours() : 0,
     });
-    if (clash) {
-      throw new ApiError("That slot is already taken", 409);
-    }
 
     const appointment = await this.appointment.update({
       where: { id },
@@ -453,23 +613,57 @@ export class AppointmentService extends Connection {
         rescheduledFromDate: existing.appointmentDate,
         rescheduledFromTime: existing.appointmentTime,
         rescheduledAt: new Date(),
+        // A customer-initiated move holds the new slot but needs the studio to
+        // agree to it. An admin move is the studio agreeing, so it stands.
+        ...(byCustomer ? { status: "PENDING_RESCHEDULE" as const } : {}),
       },
       include: serviceInclude,
     });
 
-    if (appointment.email) {
+    const studio = await this.currentStudioBranding();
+    const brand: EmailBrand = studio
+      ? { kind: "studio", studio }
+      : { kind: "zuri", zuri: { name: "Zuri Studios", websiteUrl: "https://zuristudios.com", supportEmail: "hello@zuristudios.com" } };
+    const core = {
+      serviceName: appointment.service?.name ?? "your service",
+      date: formatDate(appointment.appointmentDate),
+      time: appointment.appointmentTime,
+      duration: appointment.service?.duration ?? null,
+      studioName: studio?.name ?? "the studio",
+      bookingRef: shortRef("APT", appointment.id),
+    };
+
+    if (byCustomer) {
+      // Tell the STUDIO — they are the ones who have to accept or decline it.
       try {
-        const studio = await this.currentStudioBranding();
-        const brand: EmailBrand = studio
-          ? { kind: "studio", studio }
-          : { kind: "zuri", zuri: { name: "Zuri Studios", websiteUrl: "https://zuristudios.com", supportEmail: "hello@zuristudios.com" } };
+        const to = await this.currentStudioNotifyEmail();
+        if (to) {
+          const { subject, html } = bookingRescheduleRequested(brand, {
+            ...core,
+            customerName: appointment.fullName,
+            previousDate: formatDate(existing.appointmentDate),
+            previousTime: existing.appointmentTime,
+            reason,
+            ...(studio?.bookingUrl ? { reviewUrl: studio.bookingUrl } : {}),
+          });
+          await this.notifications.send({
+            template: NotificationTemplate.BOOKING_RESCHEDULE_REQUESTED,
+            to,
+            subject,
+            html,
+            studioId: getTenantContext()?.studioId ?? null,
+            entityType: "Appointment",
+            entityId: `${appointment.id}:${dateRaw}T${time}`,
+          });
+        }
+      } catch (error) {
+        console.error("Failed to notify studio of reschedule request:", error);
+      }
+    } else if (appointment.email) {
+      // Studio moved it — tell the customer, and it's already settled.
+      try {
         const { subject, html } = bookingRescheduled(brand, {
-          serviceName: appointment.service?.name ?? "your service",
-          date: formatDate(appointment.appointmentDate),
-          time: appointment.appointmentTime,
-          duration: appointment.service?.duration ?? null,
-          studioName: studio?.name ?? "the studio",
-          bookingRef: shortRef("APT", appointment.id),
+          ...core,
           customerFirstName:
             appointment.fullName.split(" ")[0] || appointment.fullName,
           previousDate: formatDate(existing.appointmentDate),
@@ -484,8 +678,8 @@ export class AppointmentService extends Connection {
           html,
           studioId: getTenantContext()?.studioId ?? null,
           entityType: "Appointment",
-          // Keyed by the new slot: an appointment can legitimately be moved
-          // more than once, and each move is its own event to notify about.
+          // Keyed by the new slot: a booking can legitimately move more than
+          // once, and each move is its own event.
           entityId: `${appointment.id}:${dateRaw}T${time}`,
         });
       } catch (error) {
@@ -493,7 +687,12 @@ export class AppointmentService extends Connection {
       }
     }
 
-    return { message: "Appointment rescheduled", data: appointment };
+    return {
+      message: byCustomer
+        ? "Reschedule requested — the studio will confirm your new time."
+        : "Appointment rescheduled",
+      data: appointment,
+    };
   }
 
   public async updateStatus(id: string, status: AppointmentStatusInput) {
@@ -555,7 +754,9 @@ export class AppointmentService extends Connection {
 
     // Status-change notifications (best-effort — never block the transition).
     if (
-      (status === "COMPLETED" || status === "CANCELLED" || status === "CONFIRMED") &&
+      (status === "COMPLETED" ||
+        status === "CANCELLED" ||
+        status === "CONFIRMED") &&
       appointment.email
     ) {
       try {
@@ -573,7 +774,31 @@ export class AppointmentService extends Connection {
         };
         const customerFirstName = appointment.fullName.split(" ")[0] || appointment.fullName;
 
-        if (status === "CONFIRMED") {
+        if (status === "CONFIRMED" && existing.status === "PENDING_RESCHEDULE") {
+          // Approving a customer's reschedule. The right email is the one that
+          // shows what moved, not a generic "you're confirmed" — the customer
+          // already knew they were confirmed; what they're waiting on is
+          // whether the studio accepted the new time.
+          const { subject, html } = bookingRescheduled(brand, {
+            ...core,
+            customerFirstName,
+            previousDate: appointment.rescheduledFromDate
+              ? formatDate(appointment.rescheduledFromDate)
+              : core.date,
+            previousTime: appointment.rescheduledFromTime ?? core.time,
+            reason: null,
+            ...(studio?.bookingUrl ? { bookingUrl: studio.bookingUrl } : {}),
+          });
+          await this.notifications.send({
+            template: NotificationTemplate.BOOKING_RESCHEDULED,
+            to: appointment.email,
+            subject,
+            html,
+            studioId: getTenantContext()?.studioId ?? null,
+            entityType: "Appointment",
+            entityId: `${appointment.id}:approved:${appointment.appointmentTime}`,
+          });
+        } else if (status === "CONFIRMED") {
           // Money state is read from the payment row, not assumed from the
           // fact that the studio approved the booking.
           const payment = await this.payment.findUnique({

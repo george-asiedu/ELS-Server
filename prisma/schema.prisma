@@ -31,6 +31,10 @@ enum FeatureRequestStatus {
 enum AppointmentStatus {
   PENDING
   CONFIRMED
+  // A customer has asked to move a confirmed booking. The new slot is already
+  // held on the row (so nobody else can take it) but the studio has not agreed
+  // to it yet — approving returns the booking to CONFIRMED.
+  PENDING_RESCHEDULE
   COMPLETED
   CANCELLED
 }
@@ -214,6 +218,11 @@ model StudioSettings {
 
   // Max share of a booking a customer can pay with loyalty points (percent).
   loyaltyCapPercent Int @default(30)
+
+  // How much warning a CUSTOMER must give to move their own booking, in hours.
+  // Studio admins are not subject to it — they are the ones absorbing the
+  // disruption. Default 2h; a studio wanting a full day's notice sets 24.
+  rescheduleNoticeHours Int @default(2)
 
   studio Studio @relation(fields: [studioId], references: [id], onDelete: Cascade)
 

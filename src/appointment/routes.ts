@@ -28,11 +28,14 @@ router.patch(
   requireAdmin,
   AppointmentController.updateStatus,
 );
-// Move a booking to a new slot; emails the customer the old and new times.
+// Move a booking to a new slot. Open to any signed-in user: the controller
+// reads the role from the session and the service applies the matching rules —
+// a customer may only move their OWN booking, must give the studio's required
+// notice and stay inside opening hours, and the booking drops to
+// PENDING_RESCHEDULE for the studio to approve. An admin move is final.
 router.patch(
   "/:id/reschedule",
   authenticate,
-  requireAdmin,
   reenterTenant,
   AppointmentController.reschedule,
 );

@@ -250,3 +250,45 @@ export const bookingReminder = (
     }),
   };
 };
+
+/**
+ * Sent to the STUDIO when a customer asks to move their own booking. It is a
+ * request, not a notification of a done deal — the slot is held but the
+ * booking sits in PENDING_RESCHEDULE until the studio approves it.
+ */
+export const bookingRescheduleRequested = (
+  brand: EmailBrand,
+  data: BookingCore & {
+    customerName: string;
+    previousDate: string;
+    previousTime: string;
+    reason?: string | null;
+    reviewUrl?: string;
+  },
+) => {
+  const color = brandColor(brand);
+  return {
+    subject: `${data.customerName} asked to move their appointment`,
+    html: renderShell({
+      brand,
+      previewText: `${data.serviceName}: ${data.previousDate} → ${data.date}.`,
+      documentType: "Reschedule request",
+      bodyHtml: `
+        ${statusBadge("pending", "AWAITING YOUR APPROVAL")}
+        <h1 style="margin: 0 0 12px; font-family: Georgia, serif; font-size: 22px; color: #2A1B1F; text-align: center;">Reschedule request</h1>
+        <p style="margin: 0; font-family: Arial, sans-serif; font-size: 15px; color: #2A1B1F; line-height: 1.6; text-align: center;">
+          <strong>${esc(data.customerName)}</strong> has asked to move their ${esc(data.serviceName)} appointment.
+          The new slot is held for them until you approve or decline.
+        </p>
+        ${data.reason ? `<p class="muted" style="margin: 10px 0 0; font-family: Arial, sans-serif; font-size: 13px; color: #7A6A6E; text-align: center;">Their reason: ${esc(data.reason)}</p>` : ""}
+        <p class="muted" style="margin: 20px 0 2px; font-family: Arial, sans-serif; font-size: 12px; color: #7A6A6E; text-align: center; letter-spacing: 0.04em;">WAS</p>
+        <p class="muted" style="margin: 0 0 12px; font-family: Arial, sans-serif; font-size: 14px; color: #7A6A6E; text-align: center; text-decoration: line-through;">
+          ${esc(data.previousDate)} &middot; ${esc(data.previousTime)}
+        </p>
+        <p class="muted" style="margin: 0 0 2px; font-family: Arial, sans-serif; font-size: 12px; color: #7A6A6E; text-align: center; letter-spacing: 0.04em;">REQUESTED</p>
+        ${appointmentCard({ serviceName: data.serviceName, date: data.date, time: data.time, duration: data.duration ?? null, studioName: data.studioName, color })}
+        <p class="muted" style="margin: 0; font-family: Arial, sans-serif; font-size: 12px; color: #7A6A6E; text-align: center;">Booking ${esc(data.bookingRef)}</p>
+        ${data.reviewUrl ? button("Review Request", data.reviewUrl, color) : ""}`,
+    }),
+  };
+};

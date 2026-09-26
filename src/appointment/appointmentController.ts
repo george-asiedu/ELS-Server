@@ -89,11 +89,21 @@ export class AppointmentController {
     try {
       const { id } = req.params;
       if (!id) throw new ApiError("Appointment ID is required", 400);
-      const result = await appointmentService.reschedule(id, {
-        date: req.body?.date,
-        time: req.body?.time,
-        reason: req.body?.reason,
-      });
+      // One service method, two actors. The role comes from the authenticated
+      // session, never from the body, so a customer cannot claim admin rules.
+      const isAdmin =
+        req.user?.role === "ADMIN" || req.user?.role === "SUPER_ADMIN";
+      const result = await appointmentService.reschedule(
+        id,
+        {
+          date: req.body?.date,
+          time: req.body?.time,
+          reason: req.body?.reason,
+        },
+        isAdmin
+          ? { role: "ADMIN" }
+          : { role: "CUSTOMER", ...(req.user?.id ? { userId: req.user.id } : {}) },
+      );
       return res.status(200).json(result);
     } catch (error) {
       return next(error);
