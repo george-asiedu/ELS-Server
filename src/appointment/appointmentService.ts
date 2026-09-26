@@ -87,8 +87,12 @@ const serviceInclude = {
   },
   payment: {
     select: {
+      // The id and running refund total are what the admin UI needs to offer a
+      // refund and show how much is left to give back.
+      id: true,
       amount: true,
       totalAmount: true,
+      refundedAmount: true,
       type: true,
       status: true,
       reference: true,
