@@ -30,6 +30,17 @@ export interface PaystackVerifyData {
   paid_at: string | null;
 }
 
+// POST /refund. Paystack queues the reversal and reports the outcome later via
+// the refund.processed / refund.failed webhook, so `status` here is the state
+// at creation time — usually "pending", never proof the money is back.
+export interface PaystackRefundData {
+  id: number;
+  status: string; // "pending" | "processed" | "failed"
+  amount: number; // pesewas actually being refunded
+  currency: string;
+  transaction: { id: number; reference: string };
+}
+
 // Mobile-money charge lifecycle status from POST /charge and /charge/submit_otp.
 export interface PaystackChargeData {
   status: string; // "send_otp" | "pay_offline" | "pending" | "success" | "failed" | "timeout"
@@ -87,6 +98,28 @@ export const paystack = {
     return call<PaystackVerifyData>(
       `/transaction/verify/${encodeURIComponent(reference)}`,
     );
+  },
+
+  /**
+   * Reverse all or part of a settled transaction.
+   *
+   * `amountPesewas` omitted refunds the full amount. Paystack refuses an amount
+   * greater than what remains refundable, so an over-refund fails at their end
+   * as well as ours.
+   */
+  async refund(args: {
+    transactionReference: string;
+    amountPesewas?: number;
+    reason?: string;
+  }): Promise<PaystackRefundData> {
+    return call<PaystackRefundData>("/refund", {
+      method: "POST",
+      body: JSON.stringify({
+        transaction: args.transactionReference,
+        ...(args.amountPesewas ? { amount: args.amountPesewas } : {}),
+        ...(args.reason ? { merchant_note: args.reason } : {}),
+      }),
+    });
   },
 
   // Start a subscription payment: initializing a transaction with a `plan` code

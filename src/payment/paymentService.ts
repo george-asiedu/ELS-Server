@@ -8,6 +8,7 @@ import { OnboardingService, isSignupReference } from "../onboarding/onboardingSe
 import { forgetStudioSlug } from "../tenant/studioResolver";
 import { AuditService } from "../audit/auditService";
 import { LedgerService } from "../ledger/ledgerService";
+import { RefundService } from "../refund/refundService";
 import { safeClientOrigin } from "../utils/helper";
 import { runAsSuperAdmin } from "../tenant/context";
 import { NotificationService } from "../notifications/notificationService";
@@ -56,6 +57,7 @@ export class PaymentService extends Connection {
   private onboarding = new OnboardingService();
   private audit = new AuditService();
   private ledger = new LedgerService();
+  private refunds = new RefundService();
 
   private async settings() {
     const existing = await this.paymentSettings.findFirst();
@@ -825,6 +827,33 @@ export class PaymentService extends Connection {
           const vd = await paystack.verify(reference);
           await this.processVerification(reference, vd);
           await this.orders.finalizeByReference(reference, vd);
+        }
+      } else if (type.startsWith("refund.")) {
+        // Paystack confirms a refund asynchronously. Resolve by OUR reference
+        // when they echo it, else by their own refund id — a refund created
+        // through the dashboard rather than the API won't carry ours.
+        const ourRef: string | undefined =
+          data?.merchant_note_reference ??
+          data?.transaction_reference ??
+          undefined;
+        const providerId = data?.id ? String(data.id) : null;
+        const row = ourRef
+          ? await this.refunds.findByReference(ourRef)
+          : providerId
+            ? await this.refunds.findByProviderId(providerId)
+            : null;
+        if (row) {
+          if (type === "refund.processed" || type === "refund.processing") {
+            if (type === "refund.processed") {
+              await this.refunds.settle(row.reference, "PROCESSED");
+            }
+          } else if (type === "refund.failed") {
+            await this.refunds.settle(
+              row.reference,
+              "FAILED",
+              data?.reason ?? data?.message ?? null,
+            );
+          }
         }
       } else if (type.startsWith("subscription.") || type.startsWith("invoice.")) {
         await this.handleBillingEvent(type, data);

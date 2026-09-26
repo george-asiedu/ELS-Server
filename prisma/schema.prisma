@@ -40,6 +40,7 @@ enum PaymentStatus {
   PAID
   FAILED
   REFUNDED
+  PARTIALLY_REFUNDED
 }
 
 enum PaymentType {
@@ -496,6 +497,13 @@ model Appointment {
   pointsRedeemed Int     @default(0)
   pointsRefunded Boolean @default(false)
 
+  // Previous slot, kept when an appointment is moved so the customer's email can
+  // show "was X, now Y" and the studio has a trail. Only the most recent move is
+  // retained — a full history would need its own table.
+  rescheduledFromDate DateTime?
+  rescheduledFromTime String?
+  rescheduledAt       DateTime?
+
   // Nullable so guests (not logged in) can book
   userId    String?
   serviceId String 
@@ -576,6 +584,10 @@ model Payment {
   transactionId String?
   channel       String?
   paidAt        DateTime?
+
+  // Sum of PROCESSED refunds against this payment. `amount - refundedAmount` is
+  // what the studio actually kept.
+  refundedAmount Float @default(0)
 
   appointmentId String      @unique
   appointment   Appointment @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
@@ -868,6 +880,9 @@ model Order {
   customerEmail String?
   customerPhone String?
 
+  // Sum of PROCESSED refunds against this order.
+  refundedAmount Float       @default(0)
+
   subtotal       Float
   // Loyalty redemption applied to the product subtotal (customers only).
   discountAmount Float       @default(0)
@@ -1075,4 +1090,64 @@ model LedgerEntry {
   @@index([studioId, status])
   @@index([reference])
   @@map("ledger_entries")
+}
+
+// Refunds
+
+enum RefundStatus {
+  PENDING
+  PROCESSED
+  FAILED
+}
+
+/// A refund issued against a booking payment or a shop order.
+///
+/// Money moves back to the customer through Paystack, so a Refund row is a
+/// record of a request whose outcome arrives asynchronously (webhook
+/// refund.processed / refund.failed) — never assume PENDING means refunded.
+/// Partial refunds are supported: several rows can point at one payment, and
+/// Payment.refundedAmount / Order.refundedAmount carry the running total.
+model Refund {
+  id       String @id @default(cuid())
+  studioId String?
+
+  // Exactly one of these is set — what is being refunded.
+  paymentId     String?
+  orderId       String?
+  appointmentId String?
+
+  // Amount returned to the customer, in `currency`. Never exceeds the amount
+  // actually collected minus what has already been refunded.
+  amount   Float
+  currency String @default("GHS")
+
+  status RefundStatus @default(PENDING)
+  // Studio-supplied note ("customer cancelled"), shown on the refund document.
+  reason String?
+
+  // Our own reference (RF-…), globally unique so a webhook can resolve it with
+  // no tenant context.
+  reference String @unique
+  // The Paystack transaction being reversed, and their id for the refund.
+  transactionId    String?
+  providerRefundId String?
+  failureReason    String?
+  processedAt      DateTime?
+
+  // Customer snapshot, so the record stays readable if the booking is deleted.
+  customerName  String?
+  customerEmail String?
+
+  // Who issued it (studio admin or super admin).
+  initiatedByEmail String?
+  initiatedByRole  String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([studioId, createdAt])
+  @@index([paymentId])
+  @@index([orderId])
+  @@index([status, createdAt])
+  @@map("refunds")
 }

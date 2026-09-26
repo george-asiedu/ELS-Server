@@ -66,6 +66,7 @@ export class Connection {
   get promoBanner() { return this.db.promoBanner; }
   get paymentAttempt() { return this.db.paymentAttempt; }
   get ledgerEntry() { return this.db.ledgerEntry; }
+  get refund() { return this.db.refund; }
 
   // The current studio's Paystack subaccount code (for split settlement), or
   // null when the studio hasn't connected a payout account — in which case

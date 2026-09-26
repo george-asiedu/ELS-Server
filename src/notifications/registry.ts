@@ -7,16 +7,15 @@
 // Deliberately NOT implemented (see notifications/README.md for why each one
 // doesn't apply to this app's actual architecture today):
 //   AUTH_VERIFY_EMAIL                     — no email-verification flow exists.
-//   BOOKING_RESCHEDULED                   — no reschedule flow exists.
-//   BOOKING_REMINDER_24H / _1H            — needs a new scheduled sweep over
-//     upcoming appointments; a real follow-up, not implemented yet.
-//   REFUND_SUCCESS / PARTIAL_REFUND       — no refund model/flow exists.
+//   (Reschedule, reminders and refunds now exist — see the entries below.)
 //   SHOP_ORDER_SHIPPED / tracking numbers — no shipping/tracking model exists
 //     (fulfilment is PICKUP/DELIVERY only) — see SHOP_ORDER_FULFILLED instead.
 //   STUDIO_ONBOARDING_COMPLETED checklist — "setup completeness" isn't modeled.
-//   STUDIO_SETTLEMENT_SUCCESS/FAILED      — doesn't apply: Paystack subaccounts
-//     settle directly to the studio's own account; the platform never holds
-//     or transfers a studio's money, so there's no settlement event to report.
+//   STUDIO_SETTLEMENT_SUCCESS/FAILED      — STRUCK FROM THE SPEC, permanently.
+//     Paystack subaccounts settle directly to the studio's own bank account;
+//     the platform never holds, batches or transfers a studio's money, so
+//     there is no settlement event to report and no settlement document to
+//     issue. Revisit only if payouts ever move through a platform balance.
 export const NotificationTemplate = {
   AUTH_PASSWORD_RESET_REQUESTED: "AUTH_PASSWORD_RESET_REQUESTED",
   AUTH_PASSWORD_CHANGED: "AUTH_PASSWORD_CHANGED",
@@ -45,6 +44,14 @@ export const NotificationTemplate = {
   // that request is progressing.
   FEATURE_REQUEST_SUBMITTED_PLATFORM: "FEATURE_REQUEST_SUBMITTED_PLATFORM",
   FEATURE_REQUEST_STATUS_STUDIO: "FEATURE_REQUEST_STATUS_STUDIO",
+
+  REFUND_PROCESSED: "REFUND_PROCESSED",
+  REFUND_FAILED: "REFUND_FAILED",
+
+  BOOKING_CONFIRMED: "BOOKING_CONFIRMED",
+  BOOKING_RESCHEDULED: "BOOKING_RESCHEDULED",
+  BOOKING_REMINDER_24H: "BOOKING_REMINDER_24H",
+  BOOKING_REMINDER_1H: "BOOKING_REMINDER_1H",
 } as const;
 
 export type NotificationTemplateKey =
