@@ -28,6 +28,14 @@ router.patch(
   requireAdmin,
   AppointmentController.updateStatus,
 );
+// Move a booking to a new slot; emails the customer the old and new times.
+router.patch(
+  "/:id/reschedule",
+  authenticate,
+  requireAdmin,
+  reenterTenant,
+  AppointmentController.reschedule,
+);
 router.delete("/:id", authenticate, requireAdmin, AppointmentController.remove);
 
 export default router;

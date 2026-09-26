@@ -1,6 +1,6 @@
 import { Connection } from "../db/dbConnection";
 import { CursorPage, cursorPageArgs, cursorPageResult } from "../utils/cursorPagination";
-import { getTenantContext } from "../tenant/context";
+import { getTenantContext, runAsSuperAdmin } from "../tenant/context";
 import { ApiError } from "../middleware/apiError";
 import { S3BucketService } from "../bucket/s3BucketService";
 import {
@@ -14,8 +14,12 @@ import {
   bookingRequestStudio,
   bookingCompleted,
   bookingCancelled,
+  bookingConfirmed,
+  bookingRescheduled,
+  bookingReminder,
 } from "../notifications/templates/booking";
-import { EmailBrand } from "../notifications/types";
+import { EmailBrand, MoneyLine } from "../notifications/types";
+import { ghs } from "../notifications/format";
 
 // A short, human-friendly reference derived from the real record id (not a
 // separately-tracked field) — e.g. "APT-4F9C2A1B".
@@ -24,6 +28,52 @@ const shortRef = (prefix: string, id: string) =>
 
 const formatDate = (d: Date) =>
   d.toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "long", year: "numeric" });
+
+/**
+ * Where a booking stands on money, derived from the payment row rather than
+ * from the booking's own status. Booking state and payment state are
+ * independent: a CONFIRMED appointment can be unpaid, and a PENDING one can be
+ * paid in full.
+ */
+const paymentView = (
+  payment: { amount: number; totalAmount: number; status: string } | null | undefined,
+  amountDue: number,
+): {
+  label: "UNPAID" | "PARTIALLY PAID" | "PAID IN FULL";
+  lines: MoneyLine[];
+  balanceDue: string | null;
+} => {
+  const paid = payment && payment.status === "PAID" ? payment.amount : 0;
+  const total = payment?.totalAmount || amountDue || 0;
+  const balance = Math.max(0, Math.round((total - paid) * 100) / 100);
+
+  if (paid <= 0) {
+    return {
+      label: "UNPAID",
+      lines: total > 0 ? [{ label: "Amount due", value: ghs(total) }] : [],
+      balanceDue: total > 0 ? ghs(total) : null,
+    };
+  }
+  if (balance > 0) {
+    return {
+      label: "PARTIALLY PAID",
+      lines: [
+        { label: "Total", value: ghs(total) },
+        { label: "Paid", value: ghs(paid) },
+        { label: "Balance due", value: ghs(balance), emphasis: true },
+      ],
+      balanceDue: ghs(balance),
+    };
+  }
+  return {
+    label: "PAID IN FULL",
+    lines: [
+      { label: "Total", value: ghs(total) },
+      { label: "Paid", value: ghs(paid) },
+    ],
+    balanceDue: null,
+  };
+};
 
 const serviceInclude = {
   service: {
@@ -190,6 +240,111 @@ export class AppointmentService extends Connection {
   }
 
   // Times already taken (any non-cancelled appointment) for a given date.
+  /**
+   * Send appointment reminders. Run on a schedule (see queue/index.ts): the
+   * 24h sweep hourly, the 1h sweep every 15 minutes.
+   *
+   * Runs across every studio, so it must run in the super-admin context —
+   * scoped models would otherwise fail closed outside a request.
+   *
+   * Duplicate suppression is the NotificationLog's job, not a flag on the
+   * appointment: the entity key is `${id}:${window}`, so an overlapping sweep
+   * (or a redeploy that re-fires the schedule) cannot send the same reminder
+   * twice, and the two windows never collide with each other.
+   */
+  public async sendDueReminders(window: "24H" | "1H") {
+    return runAsSuperAdmin(async () => {
+      const now = Date.now();
+      // Each sweep covers the span until the next one runs, so no appointment
+      // falls between two passes. Generous on the near edge: a reminder a few
+      // minutes late is fine, one that never arrives is not.
+      const [from, to] =
+        window === "24H"
+          ? [now + 23 * 60 * 60 * 1000, now + 25 * 60 * 60 * 1000]
+          : [now + 30 * 60 * 1000, now + 90 * 60 * 1000];
+
+      // appointmentDate is a date at midnight UTC and appointmentTime a "HH:MM"
+      // string, so the exact moment can only be reconstructed in JS. Scan the
+      // days the window touches, then filter precisely below.
+      const dayStart = new Date(new Date(from).setUTCHours(0, 0, 0, 0));
+      const dayEnd = new Date(new Date(to).setUTCHours(23, 59, 59, 999));
+
+      const candidates = await this.appointment.findMany({
+        where: {
+          appointmentDate: { gte: dayStart, lte: dayEnd },
+          status: { in: ["PENDING", "CONFIRMED"] },
+          email: { not: null },
+        },
+        include: serviceInclude,
+      });
+
+      let sent = 0;
+      let skipped = 0;
+      const errors: string[] = [];
+
+      for (const appt of candidates) {
+        const [hh, mm] = appt.appointmentTime.split(":");
+        const at = new Date(appt.appointmentDate);
+        at.setUTCHours(Number(hh ?? 0), Number(mm ?? 0), 0, 0);
+        const ms = at.getTime();
+        if (Number.isNaN(ms) || ms < from || ms > to) {
+          skipped++;
+          continue;
+        }
+
+        try {
+          const studio = await this.currentStudioBranding(
+            appt.studioId ?? undefined,
+          );
+          const brand: EmailBrand = studio
+            ? { kind: "studio", studio }
+            : { kind: "zuri", zuri: { name: "Zuri Studios", websiteUrl: "https://zuristudios.com", supportEmail: "hello@zuristudios.com" } };
+
+          const payment = await this.payment.findUnique({
+            where: { appointmentId: appt.id },
+            select: { amount: true, totalAmount: true, status: true },
+          });
+          const amountDue =
+            (appt.totalPrice ?? 0) - (appt.discountAmount ?? 0);
+          const view = paymentView(payment, amountDue);
+
+          const { subject, html } = bookingReminder(brand, {
+            serviceName: appt.service?.name ?? "your service",
+            date: formatDate(appt.appointmentDate),
+            time: appt.appointmentTime,
+            duration: appt.service?.duration ?? null,
+            studioName: studio?.name ?? "the studio",
+            bookingRef: shortRef("APT", appt.id),
+            customerFirstName: appt.fullName.split(" ")[0] || appt.fullName,
+            window,
+            ...(view.balanceDue ? { balanceDue: view.balanceDue } : {}),
+            ...(studio?.bookingUrl ? { bookingUrl: studio.bookingUrl } : {}),
+          });
+
+          await this.notifications.send({
+            template:
+              window === "24H"
+                ? NotificationTemplate.BOOKING_REMINDER_24H
+                : NotificationTemplate.BOOKING_REMINDER_1H,
+            to: appt.email!,
+            subject,
+            html,
+            studioId: appt.studioId ?? null,
+            entityType: "Appointment",
+            entityId: `${appt.id}:${window}`,
+          });
+          sent++;
+        } catch (error) {
+          errors.push(
+            `${appt.id}: ${error instanceof Error ? error.message : "unknown"}`,
+          );
+        }
+      }
+
+      return { window, scanned: candidates.length, sent, skipped, errors };
+    });
+  }
+
   public async takenSlots(date: string) {
     const appointments = await this.appointment.findMany({
       where: {
@@ -221,6 +376,120 @@ export class AppointmentService extends Connection {
     });
     appointments.forEach((item) => { item.designImageUrl = this.s3.deliveryUrl(item.designImageUrl); });
     return { message: "Appointments retrieved successfully", ...cursorPageResult(appointments, page) };
+  }
+
+  /**
+   * Move an appointment to a new slot (studio admin).
+   *
+   * Cancelled and completed bookings are not movable — rescheduling either
+   * would silently resurrect a finished booking. The previous slot is kept on
+   * the row so the customer's email can show what changed and the studio has a
+   * trail.
+   */
+  public async reschedule(
+    id: string,
+    input: { date?: unknown; time?: unknown; reason?: unknown },
+  ) {
+    const existing = await this.appointment.findUnique({
+      where: { id },
+      include: serviceInclude,
+    });
+    if (!existing) throw new ApiError("Appointment not found", 404);
+    if (existing.status === "CANCELLED" || existing.status === "COMPLETED") {
+      throw new ApiError(
+        `A ${existing.status.toLowerCase()} appointment can't be rescheduled`,
+        400,
+      );
+    }
+
+    const dateRaw = String(input.date ?? "").trim();
+    const time = String(input.time ?? "").trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(dateRaw)) {
+      throw new ApiError("A new date is required (YYYY-MM-DD)", 400);
+    }
+    if (!/^\d{2}:\d{2}$/.test(time)) {
+      throw new ApiError("A new time is required (HH:MM)", 400);
+    }
+    const date = new Date(`${dateRaw}T00:00:00.000Z`);
+    if (Number.isNaN(date.getTime())) {
+      throw new ApiError("That date isn't valid", 400);
+    }
+
+    const reason =
+      typeof input.reason === "string" && input.reason.trim()
+        ? input.reason.trim().slice(0, 300)
+        : null;
+
+    const sameSlot =
+      existing.appointmentDate.getTime() === date.getTime() &&
+      existing.appointmentTime === time;
+    if (sameSlot) {
+      throw new ApiError("That's already the appointment's slot", 400);
+    }
+
+    // Don't move it on top of another live booking.
+    const clash = await this.appointment.findFirst({
+      where: {
+        appointmentDate: date,
+        appointmentTime: time,
+        status: { not: "CANCELLED" },
+        id: { not: id },
+      },
+      select: { id: true },
+    });
+    if (clash) {
+      throw new ApiError("That slot is already taken", 409);
+    }
+
+    const appointment = await this.appointment.update({
+      where: { id },
+      data: {
+        appointmentDate: date,
+        appointmentTime: time,
+        rescheduledFromDate: existing.appointmentDate,
+        rescheduledFromTime: existing.appointmentTime,
+        rescheduledAt: new Date(),
+      },
+      include: serviceInclude,
+    });
+
+    if (appointment.email) {
+      try {
+        const studio = await this.currentStudioBranding();
+        const brand: EmailBrand = studio
+          ? { kind: "studio", studio }
+          : { kind: "zuri", zuri: { name: "Zuri Studios", websiteUrl: "https://zuristudios.com", supportEmail: "hello@zuristudios.com" } };
+        const { subject, html } = bookingRescheduled(brand, {
+          serviceName: appointment.service?.name ?? "your service",
+          date: formatDate(appointment.appointmentDate),
+          time: appointment.appointmentTime,
+          duration: appointment.service?.duration ?? null,
+          studioName: studio?.name ?? "the studio",
+          bookingRef: shortRef("APT", appointment.id),
+          customerFirstName:
+            appointment.fullName.split(" ")[0] || appointment.fullName,
+          previousDate: formatDate(existing.appointmentDate),
+          previousTime: existing.appointmentTime,
+          reason,
+          ...(studio?.bookingUrl ? { bookingUrl: studio.bookingUrl } : {}),
+        });
+        await this.notifications.send({
+          template: NotificationTemplate.BOOKING_RESCHEDULED,
+          to: appointment.email,
+          subject,
+          html,
+          studioId: getTenantContext()?.studioId ?? null,
+          entityType: "Appointment",
+          // Keyed by the new slot: an appointment can legitimately be moved
+          // more than once, and each move is its own event to notify about.
+          entityId: `${appointment.id}:${dateRaw}T${time}`,
+        });
+      } catch (error) {
+        console.error("Failed to send reschedule notification:", error);
+      }
+    }
+
+    return { message: "Appointment rescheduled", data: appointment };
   }
 
   public async updateStatus(id: string, status: AppointmentStatusInput) {
@@ -281,7 +550,10 @@ export class AppointmentService extends Connection {
     }
 
     // Status-change notifications (best-effort — never block the transition).
-    if ((status === "COMPLETED" || status === "CANCELLED") && appointment.email) {
+    if (
+      (status === "COMPLETED" || status === "CANCELLED" || status === "CONFIRMED") &&
+      appointment.email
+    ) {
       try {
         const studio = await this.currentStudioBranding();
         const brand: EmailBrand = studio
@@ -297,7 +569,34 @@ export class AppointmentService extends Connection {
         };
         const customerFirstName = appointment.fullName.split(" ")[0] || appointment.fullName;
 
-        if (status === "COMPLETED") {
+        if (status === "CONFIRMED") {
+          // Money state is read from the payment row, not assumed from the
+          // fact that the studio approved the booking.
+          const payment = await this.payment.findUnique({
+            where: { appointmentId: appointment.id },
+            select: { amount: true, totalAmount: true, status: true },
+          });
+          const amountDue =
+            (appointment.totalPrice ?? 0) - (appointment.discountAmount ?? 0);
+          const view = paymentView(payment, amountDue);
+          const { subject, html } = bookingConfirmed(brand, {
+            ...core,
+            customerFirstName,
+            paymentStatusLabel: view.label,
+            ...(view.lines.length ? { paymentLines: view.lines } : {}),
+            ...(view.balanceDue ? { balanceDue: view.balanceDue } : {}),
+            ...(studio?.bookingUrl ? { bookingUrl: studio.bookingUrl } : {}),
+          });
+          await this.notifications.send({
+            template: NotificationTemplate.BOOKING_CONFIRMED,
+            to: appointment.email,
+            subject,
+            html,
+            studioId: getTenantContext()?.studioId ?? null,
+            entityType: "Appointment",
+            entityId: appointment.id,
+          });
+        } else if (status === "COMPLETED") {
           const { subject, html } = bookingCompleted(brand, {
             ...core,
             customerFirstName,

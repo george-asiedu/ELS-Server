@@ -24,10 +24,18 @@ export interface BillingRemindersJobData {
   triggeredBy?: "cron" | "manual";
 }
 
+// Which reminder window the sweep should cover. One queue, two schedules —
+// the work is identical apart from the window.
+export interface BookingRemindersJobData {
+  window: "24H" | "1H";
+  triggeredBy?: "cron" | "manual";
+}
+
 const QUEUE_NAMES = {
   email: "email",
   reconcilePayments: "reconcile-payments",
   billingReminders: "billing-reminders",
+  bookingReminders: "booking-reminders",
 } as const;
 
 // Queues are only constructed when Redis is configured. Callers must check
@@ -65,6 +73,21 @@ export const billingRemindersQueue = isQueueEnabled()
         backoff: { type: "exponential", delay: 60_000 },
         removeOnComplete: { age: 60 * 60 * 24 * 3, count: 100 },
         removeOnFail: { age: 60 * 60 * 24 * 14 },
+      },
+    })
+  : null;
+
+export const bookingRemindersQueue = isQueueEnabled()
+  ? new Queue<BookingRemindersJobData>(QUEUE_NAMES.bookingReminders, {
+      connection: getRedisConnection()!,
+      defaultJobOptions: {
+        // A reminder that arrives very late is worse than none, so retry a
+        // couple of times quickly and then give up rather than mailing someone
+        // about an appointment that has already happened.
+        attempts: 2,
+        backoff: { type: "fixed", delay: 60_000 },
+        removeOnComplete: { age: 60 * 60 * 24 * 2, count: 100 },
+        removeOnFail: { age: 60 * 60 * 24 * 7 },
       },
     })
   : null;

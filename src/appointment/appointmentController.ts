@@ -79,6 +79,27 @@ export class AppointmentController {
     }
   };
 
+  // Body validation lives in the service here, not in an AJV schema, because
+  // the slot rules (clash, terminal status, same-slot) need the existing row.
+  public static reschedule = async (
+    req: Request,
+    res: Response,
+    next: NextFunction,
+  ) => {
+    try {
+      const { id } = req.params;
+      if (!id) throw new ApiError("Appointment ID is required", 400);
+      const result = await appointmentService.reschedule(id, {
+        date: req.body?.date,
+        time: req.body?.time,
+        reason: req.body?.reason,
+      });
+      return res.status(200).json(result);
+    } catch (error) {
+      return next(error);
+    }
+  };
+
   public static updateStatus = async (
     req: Request,
     res: Response,

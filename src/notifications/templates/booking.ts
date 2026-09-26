@@ -5,8 +5,9 @@ import {
   appointmentCard,
   brandColor,
   statusBadge,
+  moneyTable,
 } from "../design/shell";
-import { EmailBrand } from "../types";
+import { EmailBrand, MoneyLine } from "../types";
 
 interface BookingCore {
   serviceName: string;
@@ -123,3 +124,129 @@ export const bookingCancelled = (
       ${data.bookingUrl ? button("Book Again", data.bookingUrl, brandColor(brand)) : ""}`,
   }),
 });
+
+/**
+ * Sent when the studio approves a booking.
+ *
+ * Booking state and payment state are independent here, deliberately: a
+ * confirmed appointment may be unpaid, part-paid or paid in full, and the
+ * email must not imply otherwise. `paymentLines` is omitted entirely when
+ * there is nothing to say about money.
+ */
+export const bookingConfirmed = (
+  brand: EmailBrand,
+  data: BookingCore & {
+    customerFirstName: string;
+    paymentStatusLabel: "UNPAID" | "PARTIALLY PAID" | "PAID IN FULL";
+    paymentLines?: MoneyLine[];
+    balanceDue?: string | null;
+    bookingUrl?: string;
+  },
+) => {
+  const color = brandColor(brand);
+  return {
+    subject: "Your appointment is confirmed ✨",
+    html: renderShell({
+      brand,
+      previewText: `${data.serviceName} on ${data.date} at ${data.time}.`,
+      documentType: "Appointment confirmed",
+      bodyHtml: `
+        ${statusBadge("success", "APPOINTMENT CONFIRMED")}
+        <h1 style="margin: 0 0 12px; font-family: Georgia, serif; font-size: 22px; color: #2A1B1F; text-align: center;">You're all set, ${esc(data.customerFirstName)}</h1>
+        <p class="muted" style="margin: 0; font-family: Arial, sans-serif; font-size: 14px; color: #7A6A6E; text-align: center;">
+          ${esc(data.studioName)} has confirmed your appointment.
+        </p>
+        ${appointmentCard({ serviceName: data.serviceName, date: data.date, time: data.time, duration: data.duration ?? null, studioName: data.studioName, color })}
+        <p class="muted" style="margin: 0 0 4px; font-family: Arial, sans-serif; font-size: 12px; color: #7A6A6E; text-align: center; letter-spacing: 0.04em;">
+          PAYMENT STATUS &middot; <strong style="color: #2A1B1F;">${esc(data.paymentStatusLabel)}</strong>
+        </p>
+        ${data.paymentLines?.length ? moneyTable(data.paymentLines) : ""}
+        ${
+          data.balanceDue
+            ? `<p class="muted" style="margin: 0; font-family: Arial, sans-serif; font-size: 13px; color: #7A6A6E; text-align: center;">Please bring <strong style="color: #2A1B1F;">${esc(data.balanceDue)}</strong> to your appointment.</p>`
+            : ""
+        }
+        <p class="muted" style="margin: 16px 0 0; font-family: Arial, sans-serif; font-size: 12px; color: #7A6A6E; text-align: center;">Booking ${esc(data.bookingRef)}</p>
+        ${data.bookingUrl ? button("View Appointment", data.bookingUrl, color) : ""}`,
+    }),
+  };
+};
+
+/** Sent when the studio moves an appointment. Leads with the NEW slot. */
+export const bookingRescheduled = (
+  brand: EmailBrand,
+  data: BookingCore & {
+    customerFirstName: string;
+    previousDate: string;
+    previousTime: string;
+    reason?: string | null;
+    bookingUrl?: string;
+  },
+) => {
+  const color = brandColor(brand);
+  return {
+    subject: "Your appointment has been rescheduled",
+    html: renderShell({
+      brand,
+      previewText: `Now ${data.date} at ${data.time}.`,
+      documentType: "Appointment rescheduled",
+      bodyHtml: `
+        ${statusBadge("info", "RESCHEDULED")}
+        <h1 style="margin: 0 0 12px; font-family: Georgia, serif; font-size: 22px; color: #2A1B1F; text-align: center;">Your appointment has moved</h1>
+        <p style="margin: 0; font-family: Arial, sans-serif; font-size: 15px; color: #2A1B1F; line-height: 1.6; text-align: center;">
+          ${esc(data.customerFirstName)}, ${esc(data.studioName)} has rescheduled your ${esc(data.serviceName)} appointment.
+        </p>
+        ${data.reason ? `<p class="muted" style="margin: 10px 0 0; font-family: Arial, sans-serif; font-size: 13px; color: #7A6A6E; text-align: center;">${esc(data.reason)}</p>` : ""}
+        <p class="muted" style="margin: 20px 0 2px; font-family: Arial, sans-serif; font-size: 12px; color: #7A6A6E; text-align: center; letter-spacing: 0.04em;">PREVIOUSLY</p>
+        <p class="muted" style="margin: 0 0 12px; font-family: Arial, sans-serif; font-size: 14px; color: #7A6A6E; text-align: center; text-decoration: line-through;">
+          ${esc(data.previousDate)} &middot; ${esc(data.previousTime)}
+        </p>
+        <p class="muted" style="margin: 0 0 2px; font-family: Arial, sans-serif; font-size: 12px; color: #7A6A6E; text-align: center; letter-spacing: 0.04em;">NOW</p>
+        ${appointmentCard({ serviceName: data.serviceName, date: data.date, time: data.time, duration: data.duration ?? null, studioName: data.studioName, color })}
+        <p class="muted" style="margin: 0; font-family: Arial, sans-serif; font-size: 12px; color: #7A6A6E; text-align: center;">Booking ${esc(data.bookingRef)}</p>
+        ${data.bookingUrl ? button("View Updated Appointment", data.bookingUrl, color) : ""}`,
+    }),
+  };
+};
+
+/**
+ * Appointment reminders. One template, two windows — the only real difference
+ * is urgency, and a separate near-identical template would drift.
+ */
+export const bookingReminder = (
+  brand: EmailBrand,
+  data: BookingCore & {
+    customerFirstName: string;
+    window: "24H" | "1H";
+    balanceDue?: string | null;
+    bookingUrl?: string;
+  },
+) => {
+  const color = brandColor(brand);
+  const soon = data.window === "1H";
+  return {
+    subject: soon
+      ? "Your appointment starts in 1 hour"
+      : "Your appointment is tomorrow",
+    html: renderShell({
+      brand,
+      previewText: soon
+        ? `${data.serviceName} at ${data.time}.`
+        : `${data.serviceName} tomorrow at ${data.time}.`,
+      documentType: "Appointment reminder",
+      bodyHtml: `
+        ${statusBadge("info", soon ? "STARTING SOON" : "TOMORROW")}
+        <h1 style="margin: 0 0 12px; font-family: Georgia, serif; font-size: 22px; color: #2A1B1F; text-align: center;">
+          ${soon ? `See you shortly, ${esc(data.customerFirstName)}` : `See you tomorrow, ${esc(data.customerFirstName)}`}
+        </h1>
+        ${appointmentCard({ serviceName: data.serviceName, date: data.date, time: data.time, duration: data.duration ?? null, studioName: data.studioName, color })}
+        ${
+          data.balanceDue
+            ? `<p class="muted" style="margin: 0; font-family: Arial, sans-serif; font-size: 13px; color: #7A6A6E; text-align: center;">Please bring <strong style="color: #2A1B1F;">${esc(data.balanceDue)}</strong> with you.</p>`
+            : ""
+        }
+        <p class="muted" style="margin: 14px 0 0; font-family: Arial, sans-serif; font-size: 12px; color: #7A6A6E; text-align: center;">Booking ${esc(data.bookingRef)}</p>
+        ${data.bookingUrl ? button("View Appointment", data.bookingUrl, color) : ""}`,
+    }),
+  };
+};
