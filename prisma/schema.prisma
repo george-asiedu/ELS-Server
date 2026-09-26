@@ -951,3 +951,128 @@ model CommerceSettings {
 
   @@map("commerce_settings")
 }
+
+// ---------------------------------------------------------------------------
+// Money: payment attempts + the studio ledger
+// ---------------------------------------------------------------------------
+
+// Where a ledger entry came from. Kept coarse — the source row ids carry detail.
+enum LedgerEntryType {
+  BOOKING_PAYMENT
+  ORDER_PAYMENT
+  SUBSCRIPTION_PAYMENT
+  REFUND
+  ADJUSTMENT
+}
+
+// Money in (to the studio) vs money out.
+enum LedgerDirection {
+  CREDIT
+  DEBIT
+}
+
+enum LedgerStatus {
+  PENDING
+  SUCCESS
+  FAILED
+  ABANDONED
+  REVERSED
+}
+
+/// One Paystack transaction attempt. Immutable identity: a `reference` is
+/// written once and never rewritten, so a customer who abandons a checkout and
+/// retries produces TWO rows. That is the point — if the abandoned attempt is
+/// later completed on their phone, the webhook can still find it. (The old
+/// design rotated `reference` on a single Payment row, which orphaned the first
+/// attempt and lost the money.)
+model PaymentAttempt {
+  id       String @id @default(cuid())
+  studioId String?
+
+  // Handed to Paystack; globally unique so a webhook can resolve it with no
+  // tenant context.
+  reference String @unique
+
+  // Exactly one of these is set — what the attempt is paying for. A combined
+  // booking+products charge sets both.
+  paymentId     String?
+  orderId       String?
+  appointmentId String?
+
+  // What we asked Paystack to charge, in GHS. Compared against the verified
+  // amount before anything is marked paid.
+  expectedAmount Float
+  currency       String @default("GHS")
+
+  status LedgerStatus @default(PENDING)
+
+  // Filled in from Paystack's verify response.
+  paidAmount    Float?
+  transactionId String?
+  channel       String?
+  paidAt        DateTime?
+  failureReason String?
+
+  // Customer snapshot, so an attempt stays readable if the booking is deleted.
+  customerEmail String?
+  customerName  String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([studioId, createdAt])
+  @@index([paymentId])
+  @@index([orderId])
+  @@index([status, createdAt])
+  @@map("payment_attempts")
+}
+
+/// Append-only ledger of every money movement on a studio. One row per
+/// settled (or definitively failed) transaction, written at the moment it is
+/// finalized. Never updated in place — a reversal is its own DEBIT row.
+model LedgerEntry {
+  id       String @id @default(cuid())
+  studioId String?
+
+  type      LedgerEntryType
+  direction LedgerDirection
+  status    LedgerStatus
+
+  // Positive magnitude in `currency`; `direction` carries the sign.
+  amount   Float
+  currency String @default("GHS")
+
+  // Idempotency guard. Built from the source + reference (see LedgerService),
+  // so a replayed webhook or a reconcile sweep cannot double-post.
+  dedupeKey String @unique
+
+  reference     String?
+  transactionId String?
+  channel       String?
+
+  // Human-readable snapshot, frozen at write time so the ledger still reads
+  // correctly after a service is renamed or a booking is deleted.
+  description   String
+  customerName  String?
+  customerEmail String?
+
+  // Soft links to the source rows (no FK: the ledger must outlive them).
+  paymentAttemptId String?
+  paymentId        String?
+  orderId          String?
+  appointmentId    String?
+
+  // Who caused it, for the "by their customers and they themself" split.
+  actorEmail String?
+  actorRole  String?
+
+  // When the money actually moved (Paystack's paid_at when known).
+  occurredAt DateTime @default(now())
+  createdAt  DateTime @default(now())
+
+  @@index([studioId, occurredAt])
+  @@index([studioId, type, occurredAt])
+  @@index([studioId, status])
+  @@index([reference])
+  @@map("ledger_entries")
+}

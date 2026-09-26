@@ -168,6 +168,9 @@ app.use("/api/auth/forgot-password", recoveryLimiter);
 app.use("/api/auth/reset-password", recoveryLimiter);
 app.use("/api/platform/auth/forgot-password", recoveryLimiter);
 app.use("/api/platform/auth/reset-password", recoveryLimiter);
+// Super-admin-triggered reset sends an email to a studio admin — rate-limit it
+// like the other recovery paths so it can't be used to mailbomb an owner.
+app.use("/api/platform/studios/:id/send-password-reset", recoveryLimiter);
 
 app.use(
   express.json({

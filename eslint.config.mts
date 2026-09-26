@@ -4,25 +4,23 @@ import tseslint from "typescript-eslint";
 import json from "@eslint/json";
 import markdown from "@eslint/markdown";
 import css from "@eslint/css";
-import prettierPlugin from "eslint-plugin-prettier";
+import prettierRecommended from "eslint-plugin-prettier/recommended";
 import { defineConfig } from "eslint/config";
 
 export default defineConfig([
   {
+    // Flat config only accepts config objects or plugin-namespaced strings here.
+    // The eslintrc spellings that used to live in this list ("eslint:recommended",
+    // "plugin:@typescript-eslint/recommended", "plugin:prettier/recommended")
+    // are not resolvable in flat config and made every run die with
+    // `Plugin "" not found`. Their flat equivalents are composed below instead.
     files: ["**/*.{js,mjs,cjs,ts,mts,cts}"],
-    plugins: { js, "@typescript-eslint": tseslint, prettier: prettierPlugin },
-    extends: [
-      "js/recommended",
-      "eslint:recommended",
-      "plugin:@typescript-eslint/recommended",
-      "plugin:prettier/recommended",
-    ],
+    plugins: { js },
+    extends: ["js/recommended"],
     languageOptions: { globals: globals.node },
-    rules: {
-      "prettier/prettier": "error",
-    },
   },
   tseslint.configs.recommended,
+  prettierRecommended,
   {
     files: ["**/*.json"],
     plugins: { json },

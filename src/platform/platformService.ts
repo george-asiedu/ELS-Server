@@ -10,6 +10,9 @@ import { NotificationTemplate } from "../notifications/registry";
 import { studioAccountSuspended } from "../notifications/templates/studio";
 import { EmailBrand } from "../notifications/types";
 import { env } from "../config/env.config";
+import { randomBytes, createHash } from "crypto";
+import { passwordResetRequested } from "../notifications/templates/auth";
+import { AuditService } from "../audit/auditService";
 
 const zuriBrand: EmailBrand = {
   kind: "zuri",
@@ -652,6 +655,128 @@ export class PlatformService extends Connection {
    * that studio's admin dashboard. The frontend uses the returned slug to scope
    * subsequent requests to the studio.
    */
+  /**
+   * Send a studio admin a password-reset link, on behalf of a super admin who
+   * was asked for help getting back in.
+   *
+   * Note this does NOT reveal the existing password: passwords are bcrypt
+   * hashes (see utils/helper.getPasswordHash), which are one-way — the original
+   * is not stored anywhere and cannot be recovered by us or by anyone else.
+   * A reset is the only way back in, and it keeps the super admin out of the
+   * business of handling someone else's credentials.
+   *
+   * The reset link goes to the studio admin's own email, never back in the API
+   * response, so a compromised super-admin session cannot take over a studio
+   * without also holding that mailbox. Every use is recorded in the audit log.
+   */
+  public async sendStudioAdminPasswordReset(
+    studioId: string,
+    actor: { id?: string | null; email?: string; role?: string },
+    targetUserId?: string,
+  ) {
+    const studio = await this.studio.findUnique({ where: { id: studioId } });
+    if (!studio) throw new ApiError("Studio not found", HttpCode.NOT_FOUND);
+
+    // Default to the studio owner; allow naming another admin on that studio.
+    const where = targetUserId
+      ? { id: targetUserId }
+      : studio.ownerUserId
+        ? { id: studio.ownerUserId }
+        : null;
+    if (!where) {
+      throw new ApiError(
+        "This studio has no owner account to reset",
+        HttpCode.BAD_REQUEST,
+      );
+    }
+
+    const user = await this.user.findUnique({
+      where,
+      select: { id: true, email: true, role: true, studioId: true },
+    });
+    if (!user) throw new ApiError("Account not found", HttpCode.NOT_FOUND);
+
+    // Guard against resetting an account that isn't an admin of THIS studio —
+    // a super admin helping studio A must not be able to aim this at a
+    // customer, or at an admin of studio B, by passing an arbitrary id.
+    if (user.studioId !== studioId) {
+      throw new ApiError(
+        "That account does not belong to this studio",
+        HttpCode.FORBIDDEN,
+      );
+    }
+    if (user.role !== "ADMIN") {
+      throw new ApiError(
+        "Only a studio admin account can be reset here",
+        HttpCode.FORBIDDEN,
+      );
+    }
+
+    const resetToken = randomBytes(32).toString("hex");
+    const hashedToken = createHash("sha256").update(resetToken).digest("hex");
+    const expiry = new Date(Date.now() + 60 * 60 * 1000);
+    await this.user.update({
+      where: { id: user.id },
+      data: { resetToken: hashedToken, resetTokenExpiry: expiry },
+    });
+
+    const resetUrl = `${env.clientUrl}/reset-password/${resetToken}`;
+    try {
+      const branding = await this.currentStudioBranding(studioId);
+      const brand: EmailBrand = branding
+        ? { kind: "studio", studio: branding }
+        : {
+            kind: "zuri",
+            zuri: {
+              name: "Zuri Studios",
+              websiteUrl: env.clientUrl,
+              supportEmail: env.senderEmail,
+            },
+          };
+      const { subject, html } = passwordResetRequested(brand, {
+        resetUrl,
+        expiresInMinutes: 60,
+      });
+      await this.notifications.send({
+        template: NotificationTemplate.AUTH_PASSWORD_RESET_REQUESTED,
+        to: user.email,
+        subject,
+        html,
+        studioId,
+        entityType: "User",
+        entityId: hashedToken,
+      });
+    } catch {
+      // Don't leave a live token behind if the mail couldn't be queued.
+      await this.user.update({
+        where: { id: user.id },
+        data: { resetToken: "", resetTokenExpiry: new Date(0) },
+      });
+      throw new ApiError(
+        "Couldn't send the reset email. Please try again.",
+        HttpCode.INTERNAL_SERVER_ERROR,
+      );
+    }
+
+    await new AuditService().record({
+      actor,
+      action: "studio.admin.password_reset_sent",
+      targetType: "User",
+      targetId: user.id,
+      studioId,
+      metadata: {
+        studioSlug: studio.slug,
+        sentToEmail: user.email,
+        expiresAt: expiry.toISOString(),
+      },
+    });
+
+    return {
+      message: `A password reset link has been sent to ${user.email}. It expires in 1 hour.`,
+      data: { email: user.email, expiresAt: expiry },
+    };
+  }
+
   public async impersonate(id: string) {
     const studio = await this.studio.findUnique({ where: { id } });
     if (!studio) throw new ApiError("Studio not found", HttpCode.NOT_FOUND);

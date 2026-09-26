@@ -5,6 +5,7 @@ import { ApiError } from "../middleware/apiError";
 import { env } from "../config/env.config";
 import { paystack, PaystackVerifyData } from "../payment/paystackClient";
 import { AuditService } from "../audit/auditService";
+import { LedgerService } from "../ledger/ledgerService";
 import { safeClientOrigin } from "../utils/helper";
 import { NotificationService } from "../notifications/notificationService";
 import { NotificationTemplate } from "../notifications/registry";
@@ -60,6 +61,7 @@ const effectivePrice = (p: { price: number; promoPrice: number | null }) =>
 export class OrderService extends Connection {
   private notifications = new NotificationService();
   private audit = new AuditService();
+  private ledger = new LedgerService();
 
   private async brandForNotification(studioIdOverride?: string | null): Promise<EmailBrand> {
     const studio = await this.currentStudioBranding(studioIdOverride ?? undefined);
@@ -239,6 +241,14 @@ export class OrderService extends Connection {
         },
       });
     }
+
+    await this.ledger.openAttempt({
+      reference,
+      expectedAmount: total,
+      orderId: order.id,
+      customerEmail: params.contact.email,
+      customerName: params.contact.name ?? null,
+    });
 
     const subaccount = await this.currentStudioSubaccount();
     const init = await paystack.initialize({
@@ -443,6 +453,23 @@ export class OrderService extends Connection {
       include: orderInclude,
     });
 
+    // One reference covers BOTH the service payment and the product order, so
+    // the attempt links to both — either finalizer must be able to resolve it —
+    // and its expected amount is the combined total Paystack will charge.
+    const combinedPayment = await this.payment.findUnique({
+      where: { appointmentId: appt.id },
+      select: { id: true },
+    });
+    await this.ledger.openAttempt({
+      reference,
+      expectedAmount: combined,
+      orderId: order.id,
+      appointmentId: appt.id,
+      ...(combinedPayment ? { paymentId: combinedPayment.id } : {}),
+      customerEmail: email,
+      customerName: order.customerName ?? null,
+    });
+
     const subaccount = await this.currentStudioSubaccount();
     const init = await paystack.initialize({
       email,
@@ -599,6 +626,15 @@ export class OrderService extends Connection {
       where: { id: order.id },
       data: { reference },
     });
+    // The Order row's reference has just been rotated; the attempt preserves the
+    // old one so a late completion of the previous checkout is still resolvable.
+    await this.ledger.openAttempt({
+      reference,
+      expectedAmount: order.total,
+      orderId: order.id,
+      customerEmail: email,
+      customerName: order.customerName ?? null,
+    });
     await this.audit.record({
       actor: { email, role: "customer" },
       action: "payment.order.retried",
@@ -629,17 +665,133 @@ export class OrderService extends Connection {
     reference: string,
     data: PaystackVerifyData,
   ) {
-    const order = await this.order.findUnique({
+    // Same two-step resolution as bookings: the attempt row keeps a reference
+    // that `repay` has since rotated off the Order, so a late completion of an
+    // abandoned checkout still finds its order instead of being dropped.
+    const attempt = await this.ledger.findAttempt(reference);
+    let order = await this.order.findUnique({
       where: { reference },
       include: orderInclude,
     });
+    if (!order && attempt?.orderId) {
+      order = await this.order.findUnique({
+        where: { id: attempt.orderId },
+        include: orderInclude,
+      });
+    }
     if (!order) return null;
 
     const succeeded = data.status === "success";
+
+    if (succeeded) {
+      // Confirm Paystack charged what we asked before releasing stock/loyalty.
+      const expectedAmount = attempt?.expectedAmount ?? order.total;
+      const check = this.ledger.assertAmountMatches(
+        expectedAmount,
+        attempt?.currency ?? "GHS",
+        data,
+      );
+      if (!check.ok) {
+        await this.ledger.settleAttempt(reference, data, {
+          status: "FAILED",
+          failureReason: check.reason,
+        });
+        await this.audit.record({
+          actor: { email: order.customerEmail ?? "system", role: "system" },
+          action: "payment.order.amount_mismatch",
+          targetType: "Order",
+          targetId: order.id,
+          studioId: order.studioId ?? undefined,
+          metadata: {
+            reference,
+            reason: check.reason,
+            expectedAmount,
+            reportedAmountPesewas: data.amount,
+            orderNumber: order.orderNumber,
+          },
+        });
+        await this.ledger.post({
+          studioId: order.studioId,
+          type: "ORDER_PAYMENT",
+          direction: "CREDIT",
+          status: "FAILED",
+          amount: Number(data.amount ?? 0) / 100,
+          dedupeKey: `order:mismatch:${reference}`,
+          reference,
+          transactionId: String(data.id),
+          description: `Rejected order ${order.orderNumber} (${check.reason})`,
+          customerName: order.customerName ?? null,
+          customerEmail: order.customerEmail ?? null,
+          orderId: order.id,
+          ...(attempt ? { paymentAttemptId: attempt.id } : {}),
+        });
+        throw new ApiError(
+          "This payment could not be confirmed. Our team has been notified and " +
+            "will be in touch about your order.",
+          400,
+        );
+      }
+
+      // Already settled by a different reference — a real second charge.
+      if (order.status === "PAID" && order.reference !== reference) {
+        await this.ledger.settleAttempt(reference, data, { status: "SUCCESS" });
+        await this.audit.record({
+          actor: { email: order.customerEmail ?? "system", role: "system" },
+          action: "payment.order.duplicate_charge",
+          targetType: "Order",
+          targetId: order.id,
+          studioId: order.studioId ?? undefined,
+          metadata: {
+            reference,
+            settledReference: order.reference,
+            orderNumber: order.orderNumber,
+            amount: expectedAmount,
+            note: "Customer charged twice for one order — refund required.",
+          },
+        });
+        await this.ledger.post({
+          studioId: order.studioId,
+          type: "ORDER_PAYMENT",
+          direction: "CREDIT",
+          status: "SUCCESS",
+          amount: expectedAmount,
+          dedupeKey: `order:duplicate:${reference}`,
+          reference,
+          transactionId: String(data.id),
+          description: `Duplicate payment for order ${order.orderNumber} — refund required`,
+          customerName: order.customerName ?? null,
+          customerEmail: order.customerEmail ?? null,
+          orderId: order.id,
+          occurredAt: data.paid_at ? new Date(data.paid_at) : null,
+          ...(attempt ? { paymentAttemptId: attempt.id } : {}),
+        });
+        return order;
+      }
+    }
     if (!succeeded || order.status !== "PENDING_PAYMENT") {
       // Record a definitive failure (not a still-pending/abandoned check) so the
       // studio + platform have a trail of failed order payments.
       if (data.status === "failed" && order.status === "PENDING_PAYMENT") {
+        await this.ledger.settleAttempt(reference, data, {
+          status: "FAILED",
+          failureReason: `Paystack reported "${data.status}"`,
+        });
+        await this.ledger.post({
+          studioId: order.studioId,
+          type: "ORDER_PAYMENT",
+          direction: "CREDIT",
+          status: "FAILED",
+          amount: order.total,
+          dedupeKey: `order:failed:${reference}`,
+          reference,
+          description: `Failed payment for order ${order.orderNumber}`,
+          customerName: order.customerName ?? null,
+          customerEmail: order.customerEmail ?? null,
+          orderId: order.id,
+          actorEmail: order.customerEmail ?? null,
+          actorRole: "customer",
+          ...(attempt ? { paymentAttemptId: attempt.id } : {}),
+        });
         await this.audit.record({
           actor: { email: order.customerEmail ?? "system", role: "customer" },
           action: "payment.order.failed",
@@ -691,6 +843,27 @@ export class OrderService extends Connection {
         paidAt: data.paid_at ? new Date(data.paid_at) : new Date(),
       },
       include: orderInclude,
+    });
+
+    await this.ledger.settleAttempt(reference, data, { status: "SUCCESS" });
+    await this.ledger.post({
+      studioId: paid.studioId,
+      type: "ORDER_PAYMENT",
+      direction: "CREDIT",
+      status: "SUCCESS",
+      amount: paid.total,
+      dedupeKey: `order:paid:${reference}`,
+      reference,
+      transactionId: String(data.id),
+      channel: data.channel ?? null,
+      description: `Order ${paid.orderNumber}`,
+      customerName: paid.customerName ?? null,
+      customerEmail: paid.customerEmail ?? null,
+      orderId: paid.id,
+      actorEmail: paid.customerEmail ?? null,
+      actorRole: "customer",
+      occurredAt: data.paid_at ? new Date(data.paid_at) : null,
+      ...(attempt ? { paymentAttemptId: attempt.id } : {}),
     });
 
     // Per-studio payment audit trail (best-effort).

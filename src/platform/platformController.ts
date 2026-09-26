@@ -293,6 +293,34 @@ export class PlatformController {
     }
   };
 
+  /**
+   * Super admin asks us to send a studio admin a password-reset link. There is
+   * deliberately no "show me their password" counterpart: stored passwords are
+   * bcrypt hashes and the original cannot be recovered.
+   */
+  public static sendStudioAdminPasswordReset = async (
+    req: Request,
+    res: Response,
+    next: NextFunction,
+  ) => {
+    try {
+      const { id } = req.params;
+      if (!id) throw new ApiError("Studio id is required", HttpCode.BAD_REQUEST);
+      const userId =
+        typeof req.body?.userId === "string" && req.body.userId.trim()
+          ? req.body.userId.trim()
+          : undefined;
+      const result = await platformService.sendStudioAdminPasswordReset(
+        id,
+        actor(req),
+        userId,
+      );
+      return res.status(200).json(result);
+    } catch (error) {
+      return next(error);
+    }
+  };
+
   public static impersonate = async (
     req: Request,
     res: Response,

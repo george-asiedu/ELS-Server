@@ -5,6 +5,7 @@ import { PlatformReviewController } from "../platformReview/platformReviewContro
 import { authenticate, requireSuperAdmin } from "../middleware/auth";
 import { getQueueStatus } from "../queue/queueStatus";
 import { PlatformActivityLogService } from "./platformActivityLog";
+import { LedgerController } from "../ledger/ledgerController";
 
 const activityLogs = new PlatformActivityLogService();
 
@@ -32,11 +33,26 @@ router.patch("/studios/:id/status", PlatformController.setStatus);
 router.delete("/studios/:id", PlatformController.deleteStudio);
 router.patch("/studios/:id/settings", PlatformController.updateSettings);
 router.post("/studios/:id/impersonate", PlatformController.impersonate);
+// Help a studio admin who can't sign in: emails THEM a reset link. There is no
+// endpoint that reveals a password — hashes are one-way.
+router.post(
+  "/studios/:id/send-password-reset",
+  PlatformController.sendStudioAdminPasswordReset,
+);
 
 // Testimonials moderation (studio-submitted → approved for the landing).
 router.get("/reviews", PlatformReviewController.listAll);
 router.patch("/reviews/:id", PlatformReviewController.setApproved);
 router.delete("/reviews/:id", PlatformReviewController.remove);
+
+// Per-studio transaction ledger (pass ?studioId=, omit it for platform-wide).
+router.get("/transactions", LedgerController.platformList);
+router.get("/transactions/summary", LedgerController.platformSummary);
+router.get("/studios/:studioId/transactions", LedgerController.platformList);
+router.get(
+  "/studios/:studioId/transactions/summary",
+  LedgerController.platformSummary,
+);
 
 // Audit trail of platform actions.
 router.get("/audit-logs", PlatformController.listAudit);

@@ -32,6 +32,8 @@ const SCOPED_MODELS = new Set<string>([
   "ReferralOrderReward",
   "CommerceSettings",
   "PromoBanner",
+  "PaymentAttempt",
+  "LedgerEntry",
 ]);
 
 const lcFirst = (s: string) => s.charAt(0).toLowerCase() + s.slice(1);

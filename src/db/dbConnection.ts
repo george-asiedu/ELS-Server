@@ -64,6 +64,8 @@ export class Connection {
   get referralOrderReward() { return this.db.referralOrderReward; }
   get commerceSettings() { return this.db.commerceSettings; }
   get promoBanner() { return this.db.promoBanner; }
+  get paymentAttempt() { return this.db.paymentAttempt; }
+  get ledgerEntry() { return this.db.ledgerEntry; }
 
   // The current studio's Paystack subaccount code (for split settlement), or
   // null when the studio hasn't connected a payout account — in which case
