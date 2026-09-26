@@ -3,6 +3,7 @@ import { CursorPage, cursorPageArgs, cursorPageResult } from "../utils/cursorPag
 import { getTenantContext, runAsSuperAdmin } from "../tenant/context";
 import { ApiError } from "../middleware/apiError";
 import { parseDurationMinutes } from "./duration";
+import { parseTimeMinutes, sameTime, formatTimeHHMM } from "./time";
 import { AuditService } from "../audit/auditService";
 import { LedgerService } from "../ledger/ledgerService";
 import { RefundService } from "../refund/refundService";
@@ -115,14 +116,7 @@ export interface SlotCheck {
   durationMinutes?: number | null;
 }
 
-const HHMM = /^([01]\d|2[0-3]):([0-5]\d)$/;
 
-/** "HH:MM" -> minutes since midnight, or null when unparseable. */
-const minutesOfDay = (time: string): number | null => {
-  const m = HHMM.exec(time.trim());
-  if (!m) return null;
-  return Number(m[1]) * 60 + Number(m[2]);
-};
 
 const serviceInclude = {
   service: {
@@ -360,9 +354,15 @@ export class AppointmentService extends Connection {
       const errors: string[] = [];
 
       for (const appt of candidates) {
-        const [hh, mm] = appt.appointmentTime.split(":");
+        // Times are stored in whatever format the picker used, so they must be
+        // parsed rather than split — "10:00 AM".split(":") yields "00 AM".
+        const mins = parseTimeMinutes(appt.appointmentTime);
+        if (mins === null) {
+          skipped++;
+          continue;
+        }
         const at = new Date(appt.appointmentDate);
-        at.setUTCHours(Number(hh ?? 0), Number(mm ?? 0), 0, 0);
+        at.setUTCHours(Math.floor(mins / 60), mins % 60, 0, 0);
         const ms = at.getTime();
         if (Number.isNaN(ms) || ms < from || ms > to) {
           skipped++;
@@ -443,12 +443,20 @@ export class AppointmentService extends Connection {
       },
     });
     const taken = [...new Set(appointments.map((a) => a.appointmentTime))];
+    // `start` is normalised to 24-hour so a client can compare slots without
+    // re-implementing the format tolerance; `label` keeps what was stored.
     const busy = appointments
-      .map((a) => ({
-        start: a.appointmentTime,
-        minutes: parseDurationMinutes(a.service?.duration) ?? 0,
-      }))
-      .filter((b) => /^([01]\d|2[0-3]):([0-5]\d)$/.test(b.start));
+      .map((a) => {
+        const mins = parseTimeMinutes(a.appointmentTime);
+        return mins === null
+          ? null
+          : {
+              start: formatTimeHHMM(mins),
+              label: a.appointmentTime,
+              minutes: parseDurationMinutes(a.service?.duration) ?? 0,
+            };
+      })
+      .filter((b): b is { start: string; label: string; minutes: number } => b !== null);
     return {
       message: "Availability retrieved successfully",
       data: taken,
@@ -482,9 +490,9 @@ export class AppointmentService extends Connection {
    * ApiError describing the first rule broken; returns the resolved instant.
    */
   public async assertSlotBookable(check: SlotCheck): Promise<Date> {
-    const mins = minutesOfDay(check.time);
+    const mins = parseTimeMinutes(check.time);
     if (mins === null) {
-      throw new ApiError("Pick a time in 24-hour HH:MM format", 400);
+      throw new ApiError("Pick a valid time", 400);
     }
 
     // The exact instant, built from the date (midnight UTC) plus the slot time.
@@ -538,8 +546,8 @@ export class AppointmentService extends Connection {
       if (hours?.isClosed) {
         throw new ApiError("The studio is closed on that day", 400);
       }
-      const open = hours?.openTime ? minutesOfDay(hours.openTime) : null;
-      const close = hours?.closeTime ? minutesOfDay(hours.closeTime) : null;
+      const open = hours?.openTime ? parseTimeMinutes(hours.openTime) : null;
+      const close = hours?.closeTime ? parseTimeMinutes(hours.closeTime) : null;
       if (open !== null && mins < open) {
         throw new ApiError(`The studio opens at ${hours!.openTime}`, 400);
       }
@@ -586,7 +594,7 @@ export class AppointmentService extends Connection {
     const newEnd = newStart + (check.durationMinutes ?? 0);
 
     for (const other of sameDay) {
-      const otherStart = minutesOfDay(other.appointmentTime);
+      const otherStart = parseTimeMinutes(other.appointmentTime);
       if (otherStart === null) continue;
       const otherEnd =
         otherStart + (parseDurationMinutes(other.service?.duration) ?? 0);
@@ -595,8 +603,7 @@ export class AppointmentService extends Connection {
       // 12:00 do not overlap. Zero-length (unknown duration) still matches an
       // identical start.
       const overlaps =
-        newStart === otherStart ||
-        (newStart < otherEnd && otherStart < newEnd);
+        newStart === otherStart || (newStart < otherEnd && otherStart < newEnd);
       if (overlaps) {
         throw new ApiError("That slot is already taken", 409);
       }
@@ -672,7 +679,7 @@ export class AppointmentService extends Connection {
 
     if (
       existing.appointmentDate.getTime() === date.getTime() &&
-      existing.appointmentTime === time
+      sameTime(existing.appointmentTime, time)
     ) {
       throw new ApiError("That's already the appointment's slot", 400);
     }
