@@ -99,6 +99,90 @@ export const moneyTable = (lines: MoneyLine[]): string => `
       .join("")}
   </table>`;
 
+// Receipt details for a completed payment. Every payment email carries one so
+// the customer has a self-contained record they can keep or forward: who was
+// paid, what for, how much, by what method, when, and the reference to quote if
+// anything needs chasing up. Rendered as a bordered panel so it reads as a
+// receipt rather than as body copy.
+export interface ReceiptDetails {
+  receiptNumber: string;
+  paidOn: string; // pre-formatted date/time
+  method?: string | null; // Paystack channel, e.g. "card", "mobile_money"
+  reference: string;
+  transactionId?: string | null;
+  paidTo: string; // studio (or platform) name
+  paidToEmail?: string | null;
+  amountPaid: string; // pre-formatted, e.g. "GHS 150.00"
+  // Set when this payment is a deposit and a balance remains.
+  balanceDue?: string | null;
+}
+
+const RECEIPT_METHOD_LABELS: Record<string, string> = {
+  card: "Card",
+  bank: "Bank transfer",
+  bank_transfer: "Bank transfer",
+  mobile_money: "Mobile money",
+  ussd: "USSD",
+  qr: "QR",
+  eft: "EFT",
+  apple_pay: "Apple Pay",
+};
+
+export const receiptMethodLabel = (channel?: string | null): string =>
+  channel
+    ? (RECEIPT_METHOD_LABELS[channel] ??
+      channel.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()))
+    : "Online payment";
+
+const receiptRow = (label: string, value: string): string => `
+    <tr>
+      <td style="padding: 5px 0; font-family: Arial, Helvetica, sans-serif; font-size: 12px; color: ${MUTED};">${esc(label)}</td>
+      <td align="right" style="padding: 5px 0; font-family: Arial, Helvetica, sans-serif; font-size: 12px; color: ${INK}; font-weight: 500;">${esc(value)}</td>
+    </tr>`;
+
+export const receiptBlock = (r: ReceiptDetails, color: string): string => `
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin: 24px 0; border: 1px solid ${BORDER}; border-radius: 12px; border-top: 3px solid ${color};">
+    <tr>
+      <td style="padding: 18px 22px 14px;">
+        <p style="margin: 0 0 2px; font-family: Georgia, 'Times New Roman', serif; font-size: 15px; font-weight: 700; color: ${INK}; letter-spacing: 0.02em;">
+          RECEIPT
+        </p>
+        <p style="margin: 0 0 14px; font-family: Arial, Helvetica, sans-serif; font-size: 12px; color: ${MUTED};">
+          No. ${esc(r.receiptNumber)}
+        </p>
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+          ${receiptRow("Paid to", r.paidTo)}
+          ${r.paidToEmail ? receiptRow("Contact", r.paidToEmail) : ""}
+          ${receiptRow("Date paid", r.paidOn)}
+          ${receiptRow("Payment method", receiptMethodLabel(r.method))}
+          ${receiptRow("Reference", r.reference)}
+          ${r.transactionId ? receiptRow("Transaction ID", r.transactionId) : ""}
+        </table>
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-top: 12px; border-top: 1px solid ${BORDER};">
+          <tr>
+            <td style="padding: 12px 0 0; font-family: Arial, Helvetica, sans-serif; font-size: 14px; font-weight: 700; color: ${INK};">
+              Amount paid
+            </td>
+            <td align="right" style="padding: 12px 0 0; font-family: Arial, Helvetica, sans-serif; font-size: 16px; font-weight: 700; color: ${EMPHASIS};">
+              ${esc(r.amountPaid)}
+            </td>
+          </tr>
+          ${
+            r.balanceDue
+              ? `<tr>
+            <td style="padding: 6px 0 0; font-family: Arial, Helvetica, sans-serif; font-size: 12px; color: ${MUTED};">Balance due at studio</td>
+            <td align="right" style="padding: 6px 0 0; font-family: Arial, Helvetica, sans-serif; font-size: 12px; color: ${MUTED};">${esc(r.balanceDue)}</td>
+          </tr>`
+              : ""
+          }
+        </table>
+        <p style="margin: 14px 0 0; font-family: Arial, Helvetica, sans-serif; font-size: 11px; color: ${MUTED}; line-height: 1.5;">
+          Keep this receipt for your records. Quote the reference above if you need to ask about this payment.
+        </p>
+      </td>
+    </tr>
+  </table>`;
+
 // A prominent appointment summary card (used by every booking-related email).
 export const appointmentCard = (args: {
   serviceName: string;

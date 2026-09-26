@@ -1,6 +1,15 @@
 import { Connection } from "../db/dbConnection";
 import { ApiError } from "../middleware/apiError";
 import { HttpCode } from "../models/status_codes";
+import { NotificationService } from "../notifications/notificationService";
+import { NotificationTemplate } from "../notifications/registry";
+import {
+  featureRequestSubmitted,
+  featureRequestStatusChanged,
+} from "../notifications/templates/featureRequest";
+import { EmailBrand } from "../notifications/types";
+import { env } from "../config/env.config";
+import { runAsSuperAdmin } from "../tenant/context";
 
 export const FEATURE_REQUEST_STATUSES = [
   "NEW",
@@ -18,6 +27,55 @@ type FeatureRequestStatus = (typeof FEATURE_REQUEST_STATUSES)[number];
  * studioId explicitly; the super-admin side sees them all.
  */
 export class FeatureRequestService extends Connection {
+  private notifications = new NotificationService();
+
+  // Platform identity — feature-request mail is platform business, not studio
+  // storefront business, so both directions are Zuri-branded.
+  private zuriBrand(): EmailBrand {
+    return {
+      kind: "zuri",
+      zuri: {
+        name: "Zuri Studios",
+        websiteUrl: env.clientUrl,
+        supportEmail: env.senderEmail,
+      },
+    };
+  }
+
+  /**
+   * Every super admin's email. User is a tenant-scoped model, so this must run
+   * in the super-admin context: from a studio request the ambient scope would
+   * filter to that studio and find nobody.
+   */
+  private async superAdminEmails(): Promise<string[]> {
+    return runAsSuperAdmin(async () => {
+      const admins = await this.user.findMany({
+        where: { role: "SUPER_ADMIN" },
+        select: { email: true },
+      });
+      const emails = admins.map((a) => a.email).filter(Boolean);
+      // Fall back to the configured sender so a request is never silently
+      // unreported if no SUPER_ADMIN row exists yet.
+      return emails.length ? emails : [env.senderEmail];
+    });
+  }
+
+  /** Where to reach the studio that raised a request (owner account email). */
+  private async studioNotifyEmail(studioId: string): Promise<string | null> {
+    return runAsSuperAdmin(async () => {
+      const studio = await this.studio.findUnique({
+        where: { id: studioId },
+        select: { ownerUserId: true },
+      });
+      if (!studio?.ownerUserId) return null;
+      const owner = await this.user.findUnique({
+        where: { id: studio.ownerUserId },
+        select: { email: true },
+      });
+      return owner?.email ?? null;
+    });
+  }
+
   private requireStudioId(studioId: string | null | undefined): string {
     if (!studioId) {
       throw new ApiError("Studio context missing", HttpCode.NOT_FOUND);
@@ -54,7 +112,57 @@ export class FeatureRequestService extends Connection {
         description,
       },
     });
+    await this.notifySuperAdmins(created.id, id, title, description, userId);
     return { message: "Feature request submitted", data: created };
+  }
+
+  // Best-effort: a mail failure must never fail the request the studio just made.
+  private async notifySuperAdmins(
+    requestId: string,
+    studioId: string,
+    title: string,
+    description: string,
+    userId: string | undefined,
+  ) {
+    try {
+      const studio = await runAsSuperAdmin(() =>
+        this.studio.findUnique({
+          where: { id: studioId },
+          select: { name: true, slug: true },
+        }),
+      );
+      const requestedBy = userId
+        ? await runAsSuperAdmin(() =>
+            this.user.findUnique({
+              where: { id: userId },
+              select: { email: true },
+            }),
+          )
+        : null;
+
+      const { subject, html } = featureRequestSubmitted(this.zuriBrand(), {
+        studioName: studio?.name ?? "A studio",
+        studioSlug: studio?.slug ?? studioId,
+        title,
+        description,
+        requestedByEmail: requestedBy?.email ?? null,
+        reviewUrl: `${env.clientUrl}/platform/feature-requests`,
+      });
+
+      for (const to of await this.superAdminEmails()) {
+        await this.notifications.send({
+          template: NotificationTemplate.FEATURE_REQUEST_SUBMITTED_PLATFORM,
+          to,
+          subject,
+          html,
+          studioId,
+          entityType: "FeatureRequest",
+          entityId: requestId,
+        });
+      }
+    } catch (error) {
+      console.error("Feature request notification failed:", error);
+    }
   }
 
   public async listForStudio(studioId: string | null | undefined) {
@@ -81,6 +189,42 @@ export class FeatureRequestService extends Connection {
     return { message: "Feature requests", data: requests };
   }
 
+  /**
+   * Tell the studio where their request stands. Best-effort.
+   *
+   * The notification log dedupes on (template, entityId, recipient), so the
+   * entity key carries the status — otherwise only the FIRST status change
+   * would ever reach the studio and every later one would be swallowed as a
+   * duplicate.
+   */
+  private async notifyStudioOfStatus(
+    requestId: string,
+    studioId: string,
+    title: string,
+    status: string,
+  ) {
+    try {
+      const to = await this.studioNotifyEmail(studioId);
+      if (!to) return;
+      const { subject, html } = featureRequestStatusChanged(this.zuriBrand(), {
+        title,
+        status,
+        dashboardUrl: `${env.clientUrl}/admin/feature-requests`,
+      });
+      await this.notifications.send({
+        template: NotificationTemplate.FEATURE_REQUEST_STATUS_STUDIO,
+        to,
+        subject,
+        html,
+        studioId,
+        entityType: "FeatureRequest",
+        entityId: `${requestId}:${status}`,
+      });
+    } catch (error) {
+      console.error("Feature request status notification failed:", error);
+    }
+  }
+
   public async updateStatus(id: string, status: string) {
     if (!FEATURE_REQUEST_STATUSES.includes(status as FeatureRequestStatus)) {
       throw new ApiError("Invalid status", HttpCode.BAD_REQUEST);
@@ -94,6 +238,18 @@ export class FeatureRequestService extends Connection {
       data: { status: status as FeatureRequestStatus },
       include: { studio: { select: { id: true, name: true, slug: true } } },
     });
+
+    // Only mail on an actual transition — re-saving the same status shouldn't
+    // email the studio again.
+    if (existing.status !== updated.status) {
+      await this.notifyStudioOfStatus(
+        updated.id,
+        updated.studioId,
+        updated.title,
+        updated.status,
+      );
+    }
+
     return { message: "Feature request updated", data: updated };
   }
 }

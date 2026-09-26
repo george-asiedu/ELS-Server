@@ -14,7 +14,13 @@ const FALLBACK_MESSAGE =
 // falls through to FALLBACK_MESSAGE rather than exposing the raw error.
 const friendlyFor = (err: Error): ApiError | null => {
   const name = (err as { name?: string }).name ?? "";
-  const code = (err as { code?: string }).code ?? "";
+  // Prisma is inconsistent: query errors expose `code` (P2002, P2025) while
+  // PrismaClientInitializationError exposes `errorCode` (P1001 — server
+  // unreachable, which is exactly the case we most want to phrase kindly).
+  const code =
+    (err as { code?: string }).code ??
+    (err as { errorCode?: string }).errorCode ??
+    "";
 
   if (name === "JsonWebTokenError") {
     return new ApiError(
@@ -56,6 +62,16 @@ const friendlyFor = (err: Error): ApiError | null => {
   }
   // Database unreachable / connection pool exhausted.
   if (code === "P1001" || code === "P1002" || code === "P2024") {
+    return new ApiError(
+      "We're having trouble reaching our servers right now. " +
+        "Please try again in a few moments.",
+      HttpCode.BAD_GATEWAY,
+    );
+  }
+
+  // Serverless Postgres (Neon) cold starts surface as an initialization error,
+  // sometimes with no code attached at all.
+  if (name === "PrismaClientInitializationError") {
     return new ApiError(
       "We're having trouble reaching our servers right now. " +
         "Please try again in a few moments.",

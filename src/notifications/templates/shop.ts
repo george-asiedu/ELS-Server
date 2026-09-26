@@ -1,4 +1,7 @@
-import { renderShell, button, esc, statusBadge, moneyTable, itemsTable, brandColor } from "../design/shell";
+import { renderShell, button, esc, statusBadge, moneyTable, itemsTable, brandColor,
+  receiptBlock,
+  ReceiptDetails,
+} from "../design/shell";
 import { EmailBrand, MoneyLine } from "../types";
 
 export const orderConfirmed = (
@@ -8,6 +11,8 @@ export const orderConfirmed = (
     items: { name: string; quantity: number; total: string }[];
     lines: MoneyLine[]; // Subtotal / Discount? / Delivery? / Total
     fulfillment: "PICKUP" | "DELIVERY";
+    // Orders are only confirmed after payment, so they always carry a receipt.
+    receipt: ReceiptDetails;
     viewUrl?: string;
   },
 ) => {
@@ -25,6 +30,7 @@ export const orderConfirmed = (
         </p>
         ${itemsTable(data.items)}
         ${moneyTable(data.lines)}
+        ${receiptBlock(data.receipt, color)}
         ${data.viewUrl ? button("View Order", data.viewUrl, color) : ""}`,
     }),
   };

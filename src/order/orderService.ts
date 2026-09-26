@@ -11,7 +11,7 @@ import { NotificationService } from "../notifications/notificationService";
 import { NotificationTemplate } from "../notifications/registry";
 import { orderConfirmed, orderPaymentFailed, orderFulfilled } from "../notifications/templates/shop";
 import { EmailBrand, MoneyLine } from "../notifications/types";
-import { ghs } from "../notifications/format";
+import { ghs, receiptDate, receiptNumber } from "../notifications/format";
 
 type FulfillmentType = "PICKUP" | "DELIVERY";
 
@@ -946,6 +946,10 @@ export class OrderService extends Connection {
           ...(paid.deliveryFee > 0 ? [{ label: "Delivery", value: ghs(paid.deliveryFee) }] : []),
           { label: "Total", value: ghs(paid.total), emphasis: true },
         ];
+        const paidTo =
+          brand.kind === "studio" ? brand.studio.name : brand.zuri.name;
+        const paidToEmail =
+          brand.kind === "studio" ? brand.studio.email : brand.zuri.supportEmail;
         const { subject, html } = orderConfirmed(brand, {
           orderNumber: paid.orderNumber,
           items: paid.items.map((i) => ({
@@ -954,6 +958,17 @@ export class OrderService extends Connection {
             total: ghs(i.unitPrice * i.quantity),
           })),
           lines,
+          receipt: {
+            receiptNumber: receiptNumber("RCP", paid.id),
+            paidOn: receiptDate(paid.paidAt ?? null),
+            method: paid.channel ?? null,
+            reference: paid.reference ?? paid.orderNumber,
+            transactionId: paid.transactionId ?? null,
+            paidTo,
+            paidToEmail: paidToEmail ?? null,
+            amountPaid: ghs(paid.total),
+            balanceDue: null,
+          },
           fulfillment: paid.fulfillment as "PICKUP" | "DELIVERY",
           ...(brand.kind === "studio" && brand.studio.websiteUrl ? { viewUrl: brand.studio.websiteUrl } : {}),
         });

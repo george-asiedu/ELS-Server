@@ -45,14 +45,9 @@ router.get("/reviews", PlatformReviewController.listAll);
 router.patch("/reviews/:id", PlatformReviewController.setApproved);
 router.delete("/reviews/:id", PlatformReviewController.remove);
 
-// Per-studio transaction ledger (pass ?studioId=, omit it for platform-wide).
+// Transaction ledger: pass ?studioId= for one studio, omit it for platform-wide.
 router.get("/transactions", LedgerController.platformList);
 router.get("/transactions/summary", LedgerController.platformSummary);
-router.get("/studios/:studioId/transactions", LedgerController.platformList);
-router.get(
-  "/studios/:studioId/transactions/summary",
-  LedgerController.platformSummary,
-);
 
 // Audit trail of platform actions.
 router.get("/audit-logs", PlatformController.listAudit);

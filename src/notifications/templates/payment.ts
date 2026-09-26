@@ -1,4 +1,13 @@
-import { renderShell, button, esc, statusBadge, moneyTable, brandColor } from "../design/shell";
+import {
+  renderShell,
+  button,
+  esc,
+  statusBadge,
+  moneyTable,
+  brandColor,
+  receiptBlock,
+  ReceiptDetails,
+} from "../design/shell";
 import { EmailBrand, MoneyLine } from "../types";
 
 export const paymentSuccess = (
@@ -9,6 +18,8 @@ export const paymentSuccess = (
     reference: string;
     isPartial: boolean;
     lines: MoneyLine[]; // pre-built: Total / Amount paid / Remaining (if any)
+    // Every successful payment carries a receipt the customer can keep.
+    receipt: ReceiptDetails;
     viewUrl?: string;
   },
 ) => {
@@ -25,7 +36,7 @@ export const paymentSuccess = (
           Your payment for <strong>${esc(data.serviceName)}</strong> was successful.
         </p>
         ${moneyTable(data.lines)}
-        <p style="margin: 0; font-family: Arial, sans-serif; font-size: 12px; color: #7A6A6E; text-align: center;">Reference: ${esc(data.reference)}</p>
+        ${receiptBlock(data.receipt, color)}
         ${data.viewUrl ? button("View Booking", data.viewUrl, color) : ""}`,
     }),
   };

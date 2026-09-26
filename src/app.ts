@@ -205,6 +205,18 @@ app.get("/health", (_req: Request, res: Response) => {
 app.use("/api", resolveTenant);
 app.use("/api", routes);
 
+// An unmatched /api path would otherwise hit Express's default handler and get
+// an HTML error page, which every client here parses as JSON. Hand it to the
+// error handler so the shape matches every other API response.
+app.use("/api", (req: Request, _res: Response, next: NextFunction) => {
+  next(
+    new ApiError(
+      `No API endpoint matches ${req.method} ${req.path}`,
+      HttpCode.NOT_FOUND,
+    ),
+  );
+});
+
 app.use((err: Error, req: Request, res: Response, next: NextFunction) =>
   globalErrorHandler(err, req, res, next),
 );

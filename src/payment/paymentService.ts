@@ -14,7 +14,7 @@ import { NotificationService } from "../notifications/notificationService";
 import { NotificationTemplate } from "../notifications/registry";
 import { paymentSuccess, paymentFailed } from "../notifications/templates/payment";
 import { EmailBrand, MoneyLine } from "../notifications/types";
-import { ghs } from "../notifications/format";
+import { ghs, receiptDate, receiptNumber } from "../notifications/format";
 
 type PaymentType = "FULL" | "PARTIAL";
 
@@ -31,6 +31,9 @@ interface PaymentWithAppointment {
   type: string;
   reference: string | null;
   studioId: string | null;
+  channel?: string | null;
+  transactionId?: string | null;
+  paidAt?: Date | null;
   appointment: {
     email: string | null;
     fullName: string;
@@ -678,12 +681,27 @@ export class PaymentService extends Connection {
         ...(balance > 0 ? [{ label: "Balance due at studio", value: ghs(balance), muted: true }] : []),
       ];
       const brand = await this.brandForNotification(payment.studioId);
+      const paidTo =
+        brand.kind === "studio" ? brand.studio.name : brand.zuri.name;
+      const paidToEmail =
+        brand.kind === "studio" ? brand.studio.email : brand.zuri.supportEmail;
       const { subject, html } = paymentSuccess(brand, {
         customerFirstName: appt.fullName.split(" ")[0] || appt.fullName,
         serviceName: appt.service?.name ?? "your service",
         reference: payment.reference ?? payment.id,
         isPartial,
         lines,
+        receipt: {
+          receiptNumber: receiptNumber("RCP", payment.id),
+          paidOn: receiptDate(payment.paidAt ?? null),
+          method: payment.channel ?? null,
+          reference: payment.reference ?? payment.id,
+          transactionId: payment.transactionId ?? null,
+          paidTo,
+          paidToEmail: paidToEmail ?? null,
+          amountPaid: ghs(payment.amount),
+          balanceDue: balance > 0 ? ghs(balance) : null,
+        },
         ...(brand.kind === "studio" && brand.studio.bookingUrl ? { viewUrl: brand.studio.bookingUrl } : {}),
       });
       await this.notifications.send({

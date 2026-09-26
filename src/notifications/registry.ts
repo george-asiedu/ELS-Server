@@ -40,6 +40,11 @@ export const NotificationTemplate = {
 
   SUBSCRIPTION_EXPIRING_SOON: "SUBSCRIPTION_EXPIRING_SOON",
   SUBSCRIPTION_EXPIRED: "SUBSCRIPTION_EXPIRED",
+
+  // A studio asked the platform for a feature; and the studio being told how
+  // that request is progressing.
+  FEATURE_REQUEST_SUBMITTED_PLATFORM: "FEATURE_REQUEST_SUBMITTED_PLATFORM",
+  FEATURE_REQUEST_STATUS_STUDIO: "FEATURE_REQUEST_STATUS_STUDIO",
 } as const;
 
 export type NotificationTemplateKey =
