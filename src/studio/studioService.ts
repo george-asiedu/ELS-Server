@@ -29,7 +29,6 @@ import {
 } from "../notifications/templates/subscription";
 import { platformBrand } from "../notifications/brand";
 
-
 const DOMAIN_RE = /^(?!-)[a-z0-9-]{1,63}(\.[a-z0-9-]{1,63})+$/;
 const normalizeDomain = (raw: string) =>
   String(raw ?? "")
@@ -51,7 +50,10 @@ const normalizeColor = (
   if (value === null || value === "") return null;
   const s = String(value).trim();
   if (!HEX_RE.test(s)) {
-    throw new ApiError(`${field} must be a hex color like #4F46E5`, HttpCode.BAD_REQUEST);
+    throw new ApiError(
+      `${field} must be a hex color like #4F46E5`,
+      HttpCode.BAD_REQUEST,
+    );
   }
   return s;
 };
@@ -70,10 +72,16 @@ const sanitizeFeatureCards = (value: unknown): FeatureCard[] | undefined => {
     const title = String(c.title ?? "").trim();
     const description = String(c.description ?? "").trim();
     if (!title) {
-      throw new ApiError("Each feature card needs a title", HttpCode.BAD_REQUEST);
+      throw new ApiError(
+        "Each feature card needs a title",
+        HttpCode.BAD_REQUEST,
+      );
     }
     return {
-      icon: String(c.icon ?? "sparkles").trim().toLowerCase().slice(0, 24),
+      icon: String(c.icon ?? "sparkles")
+        .trim()
+        .toLowerCase()
+        .slice(0, 24),
       title: title.slice(0, 60),
       description: description.slice(0, 160),
     };
@@ -183,16 +191,18 @@ export class StudioService extends Connection {
     if (accent !== undefined) data.accentColor = accent;
 
     if (input.fontFamily !== undefined) {
-      const font = String(input.fontFamily ?? "").trim().slice(0, 60);
+      const font = String(input.fontFamily ?? "")
+        .trim()
+        .slice(0, 60);
       data.fontFamily = font || null;
     }
 
     if (input.logoUrl) {
-      data.logoUrl = this.s3.assertOwnedMediaUrl(String(input.logoUrl), "studio");
-    } else if (
-      input.removeLogo === true ||
-      input.removeLogo === "true"
-    ) {
+      data.logoUrl = this.s3.assertOwnedMediaUrl(
+        String(input.logoUrl),
+        "studio",
+      );
+    } else if (input.removeLogo === true || input.removeLogo === "true") {
       data.logoUrl = null;
     }
 
@@ -218,7 +228,10 @@ export class StudioService extends Connection {
       verified: studio.customDomainVerified,
       // The DNS record the studio must add to prove ownership.
       txt: token
-        ? { name: `_zuri-verify.${studio.customDomain}`, value: `zuri-verify=${token}` }
+        ? {
+            name: `_zuri-verify.${studio.customDomain}`,
+            value: `zuri-verify=${token}`,
+          }
         : null,
     };
   }
@@ -244,7 +257,10 @@ export class StudioService extends Connection {
     const id = this.requireStudioId(studioId);
     const domain = normalizeDomain(rawDomain);
     if (!DOMAIN_RE.test(domain)) {
-      throw new ApiError("Enter a valid domain (e.g. book.mystudio.com)", HttpCode.BAD_REQUEST);
+      throw new ApiError(
+        "Enter a valid domain (e.g. book.mystudio.com)",
+        HttpCode.BAD_REQUEST,
+      );
     }
     const taken = await this.studio.findFirst({
       where: { customDomain: domain, id: { not: id } },
@@ -267,7 +283,10 @@ export class StudioService extends Connection {
       },
     });
     forgetStudioDomain(domain);
-    return { message: "Domain saved — add the DNS record, then verify", data: this.domainPayload(updated) };
+    return {
+      message: "Domain saved — add the DNS record, then verify",
+      data: this.domainPayload(updated),
+    };
   }
 
   public async verifyDomain(studioId: string | null | undefined) {
@@ -282,7 +301,9 @@ export class StudioService extends Connection {
     const expected = `zuri-verify=${studio.customDomainVerifyToken}`;
     let found = false;
     try {
-      const records = await dns.resolveTxt(`_zuri-verify.${studio.customDomain}`);
+      const records = await dns.resolveTxt(
+        `_zuri-verify.${studio.customDomain}`,
+      );
       found = records.some((chunks) => chunks.join("").includes(expected));
     } catch {
       found = false;
@@ -309,7 +330,8 @@ export class StudioService extends Connection {
   // Public: map a host to a studio slug (for a SPA served from a custom domain).
   public async resolveByDomain(host: string) {
     const studio = await resolveStudioByDomain(host);
-    if (!studio) throw new ApiError("No studio for this domain", HttpCode.NOT_FOUND);
+    if (!studio)
+      throw new ApiError("No studio for this domain", HttpCode.NOT_FOUND);
     return { message: "Resolved", data: { slug: studio.slug } };
   }
 
@@ -405,7 +427,10 @@ export class StudioService extends Connection {
     const email = await this.ownerEmail(id);
     const amountPesewas = pricePesewas(plan as Plan, cadence as Cadence);
     if (!amountPesewas) {
-      throw new ApiError("Billing is not configured for that plan", HttpCode.BAD_GATEWAY);
+      throw new ApiError(
+        "Billing is not configured for that plan",
+        HttpCode.BAD_GATEWAY,
+      );
     }
     const reference = `ZURI-BILLING-${shortId()}`;
     const init = await paystack.initialize({
@@ -520,7 +545,10 @@ export class StudioService extends Connection {
       studio.billingCadence as Cadence,
     );
     if (!amountPesewas) {
-      throw new ApiError("Billing is not configured for that plan", HttpCode.BAD_GATEWAY);
+      throw new ApiError(
+        "Billing is not configured for that plan",
+        HttpCode.BAD_GATEWAY,
+      );
     }
     const reference = `ZURI-RENEW-${shortId()}`;
     const init = await paystack.initialize({
@@ -595,7 +623,8 @@ export class StudioService extends Connection {
     } catch {
       paid = false;
     }
-    if (!paid) throw new ApiError("Payment not confirmed", HttpCode.BAD_REQUEST);
+    if (!paid)
+      throw new ApiError("Payment not confirmed", HttpCode.BAD_REQUEST);
   }
 
   // ---- Admin: loyalty cap ----------------------------------------------
@@ -713,7 +742,10 @@ export class StudioService extends Connection {
         accountNumber: number,
         bankCode,
       });
-      return { message: "Account resolved", data: { accountName: res.account_name } };
+      return {
+        message: "Account resolved",
+        data: { accountName: res.account_name },
+      };
     } catch (error) {
       throw new ApiError(
         error instanceof ApiError
@@ -734,7 +766,8 @@ export class StudioService extends Connection {
     },
   ) {
     const id = this.requireStudioId(studioId);
-    const type = String(input.type ?? "momo").trim() === "bank" ? "bank" : "momo";
+    const type =
+      String(input.type ?? "momo").trim() === "bank" ? "bank" : "momo";
     const provider = String(input.provider ?? "").trim(); // Paystack settlement code
     const accountNumber = String(input.accountNumber ?? "").trim();
     const accountName = String(input.accountName ?? "").trim();
@@ -950,7 +983,10 @@ export class StudioService extends Connection {
             expiringSoon++;
           }
         } catch (error) {
-          console.error(`Failed to send billing reminder for studio ${studio.id}:`, error);
+          console.error(
+            `Failed to send billing reminder for studio ${studio.id}:`,
+            error,
+          );
         }
       }
 

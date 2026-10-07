@@ -15,11 +15,12 @@ export const getLoginDeviceMetadata = (req: Request): LoginDeviceMetadata => {
   // it, use a conservative UA/IP fingerprint; it can produce false new-device
   // alerts if their network address changes.
   const fallback = [userAgent ?? "", ipAddress ?? ""].join("|");
-  const deviceId = rawDeviceId && /^[a-f0-9-]{36}$/i.test(rawDeviceId)
-    ? rawDeviceId
-    : fallback !== "|"
-      ? `api:${createHash("sha256").update(fallback).digest("hex")}`
-      : undefined;
+  const deviceId =
+    rawDeviceId && /^[a-f0-9-]{36}$/i.test(rawDeviceId)
+      ? rawDeviceId
+      : fallback !== "|"
+        ? `api:${createHash("sha256").update(fallback).digest("hex")}`
+        : undefined;
 
   return {
     ...(deviceId ? { deviceId } : {}),

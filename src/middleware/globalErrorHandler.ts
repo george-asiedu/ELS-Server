@@ -110,7 +110,9 @@ export const globalErrorHandler = (
   // A 5xx is our fault and is never explained to the user in detail. Tag it so
   // the log line and the user's message share one id they can quote to support.
   const isServerFault = statusCode >= 500;
-  const reference = isServerFault ? randomUUID().slice(0, 8).toUpperCase() : null;
+  const reference = isServerFault
+    ? randomUUID().slice(0, 8).toUpperCase()
+    : null;
 
   if (isServerFault) {
     console.error(

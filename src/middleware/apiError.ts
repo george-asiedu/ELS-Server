@@ -8,7 +8,11 @@ export class ApiError extends Error {
   // client alongside the message (see utils/validation.ts).
   public readonly errors: readonly unknown[] | undefined;
 
-  constructor(message: string, statusCode: HttpCode, errors?: readonly unknown[]) {
+  constructor(
+    message: string,
+    statusCode: HttpCode,
+    errors?: readonly unknown[],
+  ) {
     super(message);
     Object.setPrototypeOf(this, ApiError.prototype);
 

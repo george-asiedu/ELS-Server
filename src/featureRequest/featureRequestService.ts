@@ -165,7 +165,8 @@ export class FeatureRequestService extends Connection {
 
   public async listAll(status?: string) {
     const where =
-      status && FEATURE_REQUEST_STATUSES.includes(status as FeatureRequestStatus)
+      status &&
+      FEATURE_REQUEST_STATUSES.includes(status as FeatureRequestStatus)
         ? { status: status as FeatureRequestStatus }
         : {};
     const requests = await this.featureRequest.findMany({

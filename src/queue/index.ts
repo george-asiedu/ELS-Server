@@ -90,9 +90,16 @@ export const bootstrapQueues = async (): Promise<void> => {
 export const shutdownQueues = async (): Promise<void> => {
   await Promise.allSettled(workers.map((w) => w.close()));
   await Promise.allSettled(
-    [emailQueue, reconcilePaymentsQueue, billingRemindersQueue, bookingRemindersQueue]
+    [
+      emailQueue,
+      reconcilePaymentsQueue,
+      billingRemindersQueue,
+      bookingRemindersQueue,
+    ]
       .filter((q) => q !== null)
       .map((q) => q.close()),
   );
-  await getRedisConnection()?.quit().catch(() => undefined);
+  await getRedisConnection()
+    ?.quit()
+    .catch(() => undefined);
 };

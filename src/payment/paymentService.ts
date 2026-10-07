@@ -4,7 +4,10 @@ import { ApiError } from "../middleware/apiError";
 import { env } from "../config/env.config";
 import { paystack, PaystackVerifyData } from "./paystackClient";
 import { OrderService } from "../order/orderService";
-import { OnboardingService, isSignupReference } from "../onboarding/onboardingService";
+import {
+  OnboardingService,
+  isSignupReference,
+} from "../onboarding/onboardingService";
 import { forgetStudioSlug } from "../tenant/studioResolver";
 import { AuditService } from "../audit/auditService";
 import { LedgerService } from "../ledger/ledgerService";
@@ -13,7 +16,10 @@ import { safeClientOrigin } from "../utils/helper";
 import { runAsSuperAdmin } from "../tenant/context";
 import { NotificationService } from "../notifications/notificationService";
 import { NotificationTemplate } from "../notifications/registry";
-import { paymentSuccess, paymentFailed } from "../notifications/templates/payment";
+import {
+  paymentSuccess,
+  paymentFailed,
+} from "../notifications/templates/payment";
 import { MoneyLine } from "../notifications/types";
 import {
   ghs,
@@ -107,7 +113,8 @@ export class PaymentService extends Connection {
 
     const amountDue =
       (appointment.totalPrice ?? 0) - (appointment.discountAmount ?? 0);
-    if (amountDue <= 0) throw new ApiError("Nothing to pay for this booking", 400);
+    if (amountDue <= 0)
+      throw new ApiError("Nothing to pay for this booking", 400);
 
     const charge =
       type === "PARTIAL"
@@ -292,7 +299,9 @@ export class PaymentService extends Connection {
     const status =
       paystackStatus === "success"
         ? "success"
-        : ["failed", "abandoned", "reversed", "timeout"].includes(paystackStatus)
+        : ["failed", "abandoned", "reversed", "timeout"].includes(
+              paystackStatus,
+            )
           ? "failed"
           : "pending";
 
@@ -372,24 +381,32 @@ export class PaymentService extends Connection {
 
       // Anything past the dead cutoff gets marked FAILED without calling
       // Paystack — the transaction window has closed on their side too.
-      const [expiredPayments, expiredOrders, expiredAttempts] = await Promise.all([
-        this.payment.updateMany({
-          where: { status: "PENDING", reference: { not: null }, createdAt: { lte: deadCutoff } },
-          data: { status: "FAILED" },
-        }),
-        this.order.updateMany({
-          where: {
-            status: "PENDING_PAYMENT",
-            reference: { not: null },
-            createdAt: { lte: deadCutoff },
-          },
-          data: { status: "CANCELLED" },
-        }),
-        this.paymentAttempt.updateMany({
-          where: { status: "PENDING", createdAt: { lte: deadCutoff } },
-          data: { status: "ABANDONED", failureReason: "Transaction window closed" },
-        }),
-      ]);
+      const [expiredPayments, expiredOrders, expiredAttempts] =
+        await Promise.all([
+          this.payment.updateMany({
+            where: {
+              status: "PENDING",
+              reference: { not: null },
+              createdAt: { lte: deadCutoff },
+            },
+            data: { status: "FAILED" },
+          }),
+          this.order.updateMany({
+            where: {
+              status: "PENDING_PAYMENT",
+              reference: { not: null },
+              createdAt: { lte: deadCutoff },
+            },
+            data: { status: "CANCELLED" },
+          }),
+          this.paymentAttempt.updateMany({
+            where: { status: "PENDING", createdAt: { lte: deadCutoff } },
+            data: {
+              status: "ABANDONED",
+              failureReason: "Transaction window closed",
+            },
+          }),
+        ]);
 
       const result = {
         checked: references.size,
@@ -459,7 +476,10 @@ export class PaymentService extends Connection {
           failureReason: check.reason,
         });
         await this.audit.record({
-          actor: { email: payment.appointment?.email ?? "system", role: "system" },
+          actor: {
+            email: payment.appointment?.email ?? "system",
+            role: "system",
+          },
           action: "payment.booking.amount_mismatch",
           targetType: "Payment",
           targetId: payment.id,
@@ -506,7 +526,10 @@ export class PaymentService extends Connection {
       ) {
         await this.ledger.settleAttempt(reference, data, { status: "SUCCESS" });
         await this.audit.record({
-          actor: { email: payment.appointment?.email ?? "system", role: "system" },
+          actor: {
+            email: payment.appointment?.email ?? "system",
+            role: "system",
+          },
           action: "payment.booking.duplicate_charge",
           targetType: "Payment",
           targetId: payment.id,
@@ -695,9 +718,7 @@ export class PaymentService extends Connection {
     });
   }
 
-  private async sendReceipt(
-    payment: PaymentWithAppointment & { id: string },
-  ) {
+  private async sendReceipt(payment: PaymentWithAppointment & { id: string }) {
     const appt = payment.appointment;
     if (!appt?.email) return;
     try {
@@ -705,8 +726,19 @@ export class PaymentService extends Connection {
       const isPartial = payment.type === "PARTIAL";
       const lines: MoneyLine[] = [
         { label: "Total", value: ghs(payment.totalAmount) },
-        { label: isPartial ? "Deposit paid" : "Amount paid", value: ghs(payment.amount) },
-        ...(balance > 0 ? [{ label: "Balance due at studio", value: ghs(balance), muted: true }] : []),
+        {
+          label: isPartial ? "Deposit paid" : "Amount paid",
+          value: ghs(payment.amount),
+        },
+        ...(balance > 0
+          ? [
+              {
+                label: "Balance due at studio",
+                value: ghs(balance),
+                muted: true,
+              },
+            ]
+          : []),
       ];
       const brand = await this.studioEmailBrand(payment.studioId);
       const paidTo =
@@ -730,7 +762,9 @@ export class PaymentService extends Connection {
           amountPaid: ghs(payment.amount),
           balanceDue: balance > 0 ? ghs(balance) : null,
         },
-        ...(brand.kind === "studio" && brand.studio.bookingUrl ? { viewUrl: brand.studio.bookingUrl } : {}),
+        ...(brand.kind === "studio" && brand.studio.bookingUrl
+          ? { viewUrl: brand.studio.bookingUrl }
+          : {}),
       });
       // The receipt travels as a PDF attachment; the email body only points at
       // it. Generated per-send rather than stored, so it always reflects the
@@ -798,7 +832,9 @@ export class PaymentService extends Connection {
         serviceName: appt.service?.name ?? "your service",
         amountAttempted: ghs(payment.amount),
         reference: payment.reference ?? payment.id,
-        ...(brand.kind === "studio" && brand.studio.bookingUrl ? { retryUrl: brand.studio.bookingUrl } : {}),
+        ...(brand.kind === "studio" && brand.studio.bookingUrl
+          ? { retryUrl: brand.studio.bookingUrl }
+          : {}),
       });
       await this.notifications.send({
         template: NotificationTemplate.PAYMENT_FAILED,
@@ -887,7 +923,10 @@ export class PaymentService extends Connection {
             );
           }
         }
-      } else if (type.startsWith("subscription.") || type.startsWith("invoice.")) {
+      } else if (
+        type.startsWith("subscription.") ||
+        type.startsWith("invoice.")
+      ) {
         await this.handleBillingEvent(type, data);
       }
     } catch (error) {
@@ -921,7 +960,8 @@ export class PaymentService extends Connection {
       return;
     }
 
-    const subCode = data?.subscription_code ?? data?.subscription?.subscription_code;
+    const subCode =
+      data?.subscription_code ?? data?.subscription?.subscription_code;
     const studio = subCode
       ? await this.studio.findFirst({ where: { subscriptionCode: subCode } })
       : null;

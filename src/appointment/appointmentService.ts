@@ -1,5 +1,9 @@
 import { Connection, TenantTx } from "../db/dbConnection";
-import { CursorPage, cursorPageArgs, cursorPageResult } from "../utils/cursorPagination";
+import {
+  CursorPage,
+  cursorPageArgs,
+  cursorPageResult,
+} from "../utils/cursorPagination";
 import { getTenantContext, runAsSuperAdmin } from "../tenant/context";
 import { ApiError } from "../middleware/apiError";
 import { parseDurationMinutes } from "./duration";
@@ -39,7 +43,12 @@ const shortRef = (prefix: string, id: string) =>
   `${prefix}-${id.slice(-8).toUpperCase()}`;
 
 const formatDate = (d: Date) =>
-  d.toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "long", year: "numeric" });
+  d.toLocaleDateString("en-GB", {
+    weekday: "short",
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+  });
 
 /**
  * Where a booking stands on money, derived from the payment row rather than
@@ -48,7 +57,10 @@ const formatDate = (d: Date) =>
  * paid in full.
  */
 const paymentView = (
-  payment: { amount: number; totalAmount: number; status: string } | null | undefined,
+  payment:
+    | { amount: number; totalAmount: number; status: string }
+    | null
+    | undefined,
   amountDue: number,
 ): {
   label: "UNPAID" | "PARTIALLY PAID" | "PAID IN FULL";
@@ -121,8 +133,6 @@ export interface SlotCheck {
   durationMinutes?: number | null;
 }
 
-
-
 const serviceInclude = {
   service: {
     select: {
@@ -161,10 +171,7 @@ export class AppointmentService extends Connection {
   // from the studio's settings (loyaltyCapRatio()).
   private static readonly POINTS_PER_GHS = 10; // 10 points = GHS 1 off
 
-  public async create(
-    data: CreateAppointmentInput,
-    userId?: string,
-  ) {
+  public async create(data: CreateAppointmentInput, userId?: string) {
     const service = await this.service.findUnique({
       where: { id: data.serviceId },
     });
@@ -175,7 +182,11 @@ export class AppointmentService extends Connection {
     const appointmentDate = new Date(`${data.appointmentDate}T00:00:00.000Z`);
 
     let designImageUrl: string | undefined;
-    if (data.designImageUrl) designImageUrl = this.s3.assertOwnedMediaUrl(data.designImageUrl, "appointments");
+    if (data.designImageUrl)
+      designImageUrl = this.s3.assertOwnedMediaUrl(
+        data.designImageUrl,
+        "appointments",
+      );
 
     // A service on promo bills at its promo price.
     const onPromo =
@@ -187,7 +198,9 @@ export class AppointmentService extends Connection {
     let discountAmount = 0;
     let pointsRedeemed = 0;
     if (userId && data.applyPoints === "true" && !onPromo) {
-      const balance = await this.loyaltyPoints.findUnique({ where: { userId } });
+      const balance = await this.loyaltyPoints.findUnique({
+        where: { userId },
+      });
       const available = balance?.points ?? 0;
       if (available > 0) {
         const capRatio = await this.loyaltyCapRatio();
@@ -274,7 +287,8 @@ export class AppointmentService extends Connection {
     try {
       const studio = await this.currentStudioBranding();
       const brand = brandFromStudio(studio, storefrontFallbackBrand);
-      const paymentRequired = (await this.paymentSettings.findFirst())?.enabled ?? false;
+      const paymentRequired =
+        (await this.paymentSettings.findFirst())?.enabled ?? false;
       const core = {
         serviceName: appointment.service?.name ?? "your service",
         date: formatDate(appointment.appointmentDate),
@@ -310,7 +324,9 @@ export class AppointmentService extends Connection {
           customerPhone: appointment.phone,
           ...(appointment.email ? { customerEmail: appointment.email } : {}),
           ...(appointment.notes ? { notes: appointment.notes } : {}),
-          ...(appointment.designImageUrl ? { designImageUrl: appointment.designImageUrl } : {}),
+          ...(appointment.designImageUrl
+            ? { designImageUrl: appointment.designImageUrl }
+            : {}),
         });
         await this.notifications.send({
           template: NotificationTemplate.BOOKING_REQUEST_STUDIO,
@@ -398,8 +414,7 @@ export class AppointmentService extends Connection {
             where: { appointmentId: appt.id },
             select: { amount: true, totalAmount: true, status: true },
           });
-          const amountDue =
-            (appt.totalPrice ?? 0) - (appt.discountAmount ?? 0);
+          const amountDue = (appt.totalPrice ?? 0) - (appt.discountAmount ?? 0);
           const view = paymentView(payment, amountDue);
 
           const { subject, html } = bookingReminder(brand, {
@@ -473,7 +488,10 @@ export class AppointmentService extends Connection {
               minutes: parseDurationMinutes(a.service?.duration) ?? 0,
             };
       })
-      .filter((b): b is { start: string; label: string; minutes: number } => b !== null);
+      .filter(
+        (b): b is { start: string; label: string; minutes: number } =>
+          b !== null,
+      );
     return {
       message: "Availability retrieved successfully",
       data: taken,
@@ -488,8 +506,13 @@ export class AppointmentService extends Connection {
       include: serviceInclude,
       ...cursorPageArgs(page),
     });
-    appointments.forEach((item) => { item.designImageUrl = this.s3.deliveryUrl(item.designImageUrl); });
-    return { message: "Appointments retrieved successfully", ...cursorPageResult(appointments, page) };
+    appointments.forEach((item) => {
+      item.designImageUrl = this.s3.deliveryUrl(item.designImageUrl);
+    });
+    return {
+      message: "Appointments retrieved successfully",
+      ...cursorPageResult(appointments, page),
+    };
   }
 
   public async listAll(page: CursorPage) {
@@ -498,8 +521,13 @@ export class AppointmentService extends Connection {
       include: serviceInclude,
       ...cursorPageArgs(page),
     });
-    appointments.forEach((item) => { item.designImageUrl = this.s3.deliveryUrl(item.designImageUrl); });
-    return { message: "Appointments retrieved successfully", ...cursorPageResult(appointments, page) };
+    appointments.forEach((item) => {
+      item.designImageUrl = this.s3.deliveryUrl(item.designImageUrl);
+    });
+    return {
+      message: "Appointments retrieved successfully",
+      ...cursorPageResult(appointments, page),
+    };
   }
 
   /**
@@ -513,7 +541,10 @@ export class AppointmentService extends Connection {
     fn: (tx: TenantTx) => Promise<T>,
   ): Promise<T> {
     const day = date.toISOString().slice(0, 10);
-    return this.withAdvisoryLock(`appointment-slot:${studioId ?? "-"}:${day}`, fn);
+    return this.withAdvisoryLock(
+      `appointment-slot:${studioId ?? "-"}:${day}`,
+      fn,
+    );
   }
 
   /**
@@ -525,7 +556,8 @@ export class AppointmentService extends Connection {
    */
   public async assertSlotBookable(
     check: SlotCheck,
-    db: Pick<TenantTx, "appointment" | "blockedDate" | "businessHours"> = this.db,
+    db: Pick<TenantTx, "appointment" | "blockedDate" | "businessHours"> = this
+      .db,
   ): Promise<Date> {
     const mins = parseTimeMinutes(check.time);
     if (mins === null) {
@@ -722,34 +754,38 @@ export class AppointmentService extends Connection {
     }
 
     const minNoticeHours = byCustomer ? await this.rescheduleNoticeHours() : 0;
-    const appointment = await this.withSlotLock(existing.studioId, date, async (tx) => {
-      await this.assertSlotBookable(
-        {
-          date,
-          time,
-          ignoreAppointmentId: id,
-          enforceOpeningHours: byCustomer,
-          minNoticeHours,
-          durationMinutes: parseDurationMinutes(existing.service?.duration),
-        },
-        tx,
-      );
+    const appointment = await this.withSlotLock(
+      existing.studioId,
+      date,
+      async (tx) => {
+        await this.assertSlotBookable(
+          {
+            date,
+            time,
+            ignoreAppointmentId: id,
+            enforceOpeningHours: byCustomer,
+            minNoticeHours,
+            durationMinutes: parseDurationMinutes(existing.service?.duration),
+          },
+          tx,
+        );
 
-      return tx.appointment.update({
-        where: { id },
-        data: {
-          appointmentDate: date,
-          appointmentTime: time,
-          rescheduledFromDate: existing.appointmentDate,
-          rescheduledFromTime: existing.appointmentTime,
-          rescheduledAt: new Date(),
-          // A customer-initiated move holds the new slot but needs the studio
-          // to agree to it. An admin move is the studio agreeing, so it stands.
-          ...(byCustomer ? { status: "PENDING_RESCHEDULE" as const } : {}),
-        },
-        include: serviceInclude,
-      });
-    });
+        return tx.appointment.update({
+          where: { id },
+          data: {
+            appointmentDate: date,
+            appointmentTime: time,
+            rescheduledFromDate: existing.appointmentDate,
+            rescheduledFromTime: existing.appointmentTime,
+            rescheduledAt: new Date(),
+            // A customer-initiated move holds the new slot but needs the studio
+            // to agree to it. An admin move is the studio agreeing, so it stands.
+            ...(byCustomer ? { status: "PENDING_RESCHEDULE" as const } : {}),
+          },
+          include: serviceInclude,
+        });
+      },
+    );
 
     const studio = await this.currentStudioBranding();
     const brand = brandFromStudio(studio, storefrontFallbackBrand);
@@ -793,8 +829,7 @@ export class AppointmentService extends Connection {
       try {
         const { subject, html } = bookingRescheduled(brand, {
           ...core,
-          customerFirstName:
-            firstName(appointment.fullName),
+          customerFirstName: firstName(appointment.fullName),
           previousDate: formatDate(existing.appointmentDate),
           previousTime: existing.appointmentTime,
           reason,
@@ -964,7 +999,11 @@ export class AppointmentService extends Connection {
       targetId: id,
       studioId: existing.studioId ?? undefined,
       metadata: {
-        from: { id: existing.serviceId, name: existing.service?.name ?? null, price: existing.totalPrice },
+        from: {
+          id: existing.serviceId,
+          name: existing.service?.name ?? null,
+          price: existing.totalPrice,
+        },
         to: { id: next.id, name: next.name, price: newPrice },
         netPaid,
         newDue,
@@ -1005,17 +1044,31 @@ export class AppointmentService extends Connection {
           duration: next.duration,
           studioName: studio?.name ?? "the studio",
           bookingRef: shortRef("APT", appointment.id),
-          customerFirstName:
-            firstName(appointment.fullName),
-          previousServiceName: existing.service?.name ?? "your previous service",
+          customerFirstName: firstName(appointment.fullName),
+          previousServiceName:
+            existing.service?.name ?? "your previous service",
           lines: [
             { label: "New total", value: ghs(newDue) },
-            ...(netPaid > 0 ? [{ label: "Already paid", value: ghs(netPaid) }] : []),
+            ...(netPaid > 0
+              ? [{ label: "Already paid", value: ghs(netPaid) }]
+              : []),
             ...(refunded > 0
-              ? [{ label: "Refunded to you", value: ghs(refunded), emphasis: true }]
+              ? [
+                  {
+                    label: "Refunded to you",
+                    value: ghs(refunded),
+                    emphasis: true,
+                  },
+                ]
               : []),
             ...(balanceDue > 0
-              ? [{ label: "Balance due", value: ghs(balanceDue), emphasis: true }]
+              ? [
+                  {
+                    label: "Balance due",
+                    value: ghs(balanceDue),
+                    emphasis: true,
+                  },
+                ]
               : []),
           ],
           refunded: refunded > 0 ? ghs(refunded) : null,
@@ -1128,7 +1181,10 @@ export class AppointmentService extends Connection {
         };
         const customerFirstName = firstName(appointment.fullName);
 
-        if (status === "CONFIRMED" && existing.status === "PENDING_RESCHEDULE") {
+        if (
+          status === "CONFIRMED" &&
+          existing.status === "PENDING_RESCHEDULE"
+        ) {
           // Approving a customer's reschedule. The right email is the one that
           // shows what moved, not a generic "you're confirmed" — the customer
           // already knew they were confirmed; what they're waiting on is
@@ -1301,7 +1357,11 @@ export class AppointmentService extends Connection {
         points: { increment: bonus },
         lifetimePoints: { increment: bonus },
       },
-      create: { userId: referral.referrerId, points: bonus, lifetimePoints: bonus },
+      create: {
+        userId: referral.referrerId,
+        points: bonus,
+        lifetimePoints: bonus,
+      },
     });
   }
 

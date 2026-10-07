@@ -28,33 +28,31 @@ export class PlatformController {
     return res.status(200).json({ message: "Logged out successfully" });
   };
 
-  public static login = async (
-    req: Request,
-    res: Response,
-  ) => {
+  public static login = async (req: Request, res: Response) => {
     const email = String(req.body?.email ?? "").trim();
     const password = String(req.body?.password ?? "");
     if (!email || !password) {
-      throw new ApiError("Email and password are required", HttpCode.BAD_REQUEST);
+      throw new ApiError(
+        "Email and password are required",
+        HttpCode.BAD_REQUEST,
+      );
     }
-    const result = await platformAuthService.login(email, password, getLoginDeviceMetadata(req));
+    const result = await platformAuthService.login(
+      email,
+      password,
+      getLoginDeviceMetadata(req),
+    );
     return res.status(200).json(result);
   };
 
-  public static forgotPassword = async (
-    req: Request,
-    res: Response,
-  ) => {
+  public static forgotPassword = async (req: Request, res: Response) => {
     const email = String(req.body?.email ?? "").trim();
     if (!email) throw new ApiError("Email is required", HttpCode.BAD_REQUEST);
     const result = await platformAuthService.forgotPassword(email);
     return res.status(200).json(result);
   };
 
-  public static resetPassword = async (
-    req: Request,
-    res: Response,
-  ) => {
+  public static resetPassword = async (req: Request, res: Response) => {
     const token = String(req.body?.token ?? "");
     const password = String(req.body?.password ?? "");
     const result = await platformAuthService.resetPassword(token, password);
@@ -71,52 +69,34 @@ export class PlatformController {
 
   // ---- Studios ----------------------------------------------------------
 
-  public static analytics = async (
-    _req: Request,
-    res: Response,
-  ) => {
+  public static analytics = async (_req: Request, res: Response) => {
     const result = await platformService.getAnalytics();
     return res.status(200).json(result);
   };
 
-  public static getBillingConfig = async (
-    _req: Request,
-    res: Response,
-  ) => {
+  public static getBillingConfig = async (_req: Request, res: Response) => {
     const data = await platformService.getBillingConfig();
     return res.status(200).json({ message: "Billing config", data });
   };
 
-  public static updateBillingConfig = async (
-    req: Request,
-    res: Response,
-  ) => {
+  public static updateBillingConfig = async (req: Request, res: Response) => {
     const result = await platformService.updateBillingConfig(req.body ?? {});
     return res.status(200).json(result);
   };
 
-  public static listStudios = async (
-    _req: Request,
-    res: Response,
-  ) => {
+  public static listStudios = async (_req: Request, res: Response) => {
     const result = await platformService.listStudios();
     return res.status(200).json(result);
   };
 
-  public static getStudio = async (
-    req: Request,
-    res: Response,
-  ) => {
+  public static getStudio = async (req: Request, res: Response) => {
     const { id } = req.params;
     if (!id) throw new ApiError("Studio id is required", HttpCode.BAD_REQUEST);
     const result = await platformService.getStudio(id);
     return res.status(200).json(result);
   };
 
-  public static createStudio = async (
-    req: Request,
-    res: Response,
-  ) => {
+  public static createStudio = async (req: Request, res: Response) => {
     const result = await platformService.provisionStudio(req.body ?? {});
     await audit.record({
       actor: actor(req),
@@ -129,10 +109,7 @@ export class PlatformController {
     return res.status(201).json(result);
   };
 
-  public static updateStudio = async (
-    req: Request,
-    res: Response,
-  ) => {
+  public static updateStudio = async (req: Request, res: Response) => {
     const { id } = req.params;
     if (!id) throw new ApiError("Studio id is required", HttpCode.BAD_REQUEST);
     const result = await platformService.updateStudio(id, req.body ?? {});
@@ -147,10 +124,7 @@ export class PlatformController {
     return res.status(200).json(result);
   };
 
-  public static deleteStudio = async (
-    req: Request,
-    res: Response,
-  ) => {
+  public static deleteStudio = async (req: Request, res: Response) => {
     const { id } = req.params;
     if (!id) throw new ApiError("Studio id is required", HttpCode.BAD_REQUEST);
     const result = await platformService.deleteStudio(id);
@@ -165,10 +139,7 @@ export class PlatformController {
     return res.status(200).json(result);
   };
 
-  public static setStatus = async (
-    req: Request,
-    res: Response,
-  ) => {
+  public static setStatus = async (req: Request, res: Response) => {
     const { id } = req.params;
     if (!id) throw new ApiError("Studio id is required", HttpCode.BAD_REQUEST);
     const status = String(req.body?.status ?? "");
@@ -184,10 +155,7 @@ export class PlatformController {
     return res.status(200).json(result);
   };
 
-  public static updateSettings = async (
-    req: Request,
-    res: Response,
-  ) => {
+  public static updateSettings = async (req: Request, res: Response) => {
     const { id } = req.params;
     if (!id) throw new ApiError("Studio id is required", HttpCode.BAD_REQUEST);
     const result = await platformService.updateSettings(id, req.body ?? {});
@@ -202,10 +170,7 @@ export class PlatformController {
     return res.status(200).json(result);
   };
 
-  public static listAudit = async (
-    req: Request,
-    res: Response,
-  ) => {
+  public static listAudit = async (req: Request, res: Response) => {
     const studioId =
       typeof req.query.studioId === "string" ? req.query.studioId : undefined;
     const action =
@@ -242,10 +207,7 @@ export class PlatformController {
     return res.status(200).json(result);
   };
 
-  public static impersonate = async (
-    req: Request,
-    res: Response,
-  ) => {
+  public static impersonate = async (req: Request, res: Response) => {
     const { id } = req.params;
     if (!id) throw new ApiError("Studio id is required", HttpCode.BAD_REQUEST);
     const result = await platformService.impersonate(id);

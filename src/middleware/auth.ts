@@ -32,7 +32,10 @@ export const authenticate = async (
   try {
     const token = extractToken(req);
     if (!token) {
-      throw new ApiError("Authentication required", HttpCode.UNAUTHORIZED_ACCESS);
+      throw new ApiError(
+        "Authentication required",
+        HttpCode.UNAUTHORIZED_ACCESS,
+      );
     }
 
     const decoded = jwt.verify(token, env.JWT_SECRET) as AccessTokenPayload;
@@ -40,8 +43,14 @@ export const authenticate = async (
     if (decoded.token !== AuthToken.ACCESS_TOKEN) {
       throw new ApiError("Invalid token type", HttpCode.UNAUTHORIZED_ACCESS);
     }
-    if (!decoded.jti || !(await isActiveLoginSession(decoded.jti, decoded.sub))) {
-      throw new ApiError("Session expired or revoked. Please sign in again.", HttpCode.UNAUTHORIZED_ACCESS);
+    if (
+      !decoded.jti ||
+      !(await isActiveLoginSession(decoded.jti, decoded.sub))
+    ) {
+      throw new ApiError(
+        "Session expired or revoked. Please sign in again.",
+        HttpCode.UNAUTHORIZED_ACCESS,
+      );
     }
 
     // Reject a token minted for one studio being used against another.
@@ -51,7 +60,10 @@ export const authenticate = async (
       req.studioId &&
       decoded.studioId !== req.studioId
     ) {
-      throw new ApiError("Token does not belong to this studio", HttpCode.UNAUTHORIZED_ACCESS);
+      throw new ApiError(
+        "Token does not belong to this studio",
+        HttpCode.UNAUTHORIZED_ACCESS,
+      );
     }
 
     req.user = {
@@ -82,9 +94,7 @@ export const requireAdmin = (
     );
   }
   if (req.user.role !== "ADMIN") {
-    return next(
-      new ApiError("Admin access required", HttpCode.FORBIDDEN),
-    );
+    return next(new ApiError("Admin access required", HttpCode.FORBIDDEN));
   }
   return next();
 };
@@ -101,7 +111,9 @@ export const requireSuperAdmin = (
     );
   }
   if (req.user.role !== "SUPER_ADMIN") {
-    return next(new ApiError("Super admin access required", HttpCode.FORBIDDEN));
+    return next(
+      new ApiError("Super admin access required", HttpCode.FORBIDDEN),
+    );
   }
   return next();
 };
@@ -114,12 +126,18 @@ export const requireCustomer = (
 ) => {
   if (!req.user) {
     return next(
-      new ApiError("Please log in to book an appointment", HttpCode.UNAUTHORIZED_ACCESS),
+      new ApiError(
+        "Please log in to book an appointment",
+        HttpCode.UNAUTHORIZED_ACCESS,
+      ),
     );
   }
   if (req.user.role !== "CUSTOMER") {
     return next(
-      new ApiError("Only customer accounts can book appointments", HttpCode.FORBIDDEN),
+      new ApiError(
+        "Only customer accounts can book appointments",
+        HttpCode.FORBIDDEN,
+      ),
     );
   }
   return next();
@@ -139,7 +157,11 @@ export const optionalAuth = async (
     }
     const decoded = jwt.verify(token, env.JWT_SECRET) as AccessTokenPayload;
     if (decoded.token === AuthToken.ACCESS_TOKEN) {
-      if (!decoded.jti || !(await isActiveLoginSession(decoded.jti, decoded.sub))) return next();
+      if (
+        !decoded.jti ||
+        !(await isActiveLoginSession(decoded.jti, decoded.sub))
+      )
+        return next();
       req.user = {
         id: decoded.sub,
         email: decoded.email,

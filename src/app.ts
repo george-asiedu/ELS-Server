@@ -23,9 +23,11 @@ if (env.trustProxyHops > 0) app.set("trust proxy", env.trustProxyHops);
 
 // Do not log query strings: payment references and password-reset links may
 // appear in URLs. Keep enough request metadata for operational diagnosis.
-app.use(morgan(':method :status :response-time ms', {
-  skip: (_req, res) => res.statusCode < 400,
-}));
+app.use(
+  morgan(":method :status :response-time ms", {
+    skip: (_req, res) => res.statusCode < 400,
+  }),
+);
 app.disable("x-powered-by");
 app.use(
   helmet({
@@ -60,20 +62,36 @@ const isAllowedOrigin = (origin: string): boolean => {
     host = parsed.hostname.toLowerCase();
     protocol = parsed.protocol;
     port = parsed.port;
-    if (parsed.username || parsed.password || parsed.pathname !== "/" || parsed.search || parsed.hash) {
+    if (
+      parsed.username ||
+      parsed.password ||
+      parsed.pathname !== "/" ||
+      parsed.search ||
+      parsed.hash
+    ) {
       return false;
     }
   } catch {
     return false;
   }
-  if (protocol !== "https:" && !(env.nodeEnv !== "production" && protocol === "http:")) {
+  if (
+    protocol !== "https:" &&
+    !(env.nodeEnv !== "production" && protocol === "http:")
+  ) {
     return false;
   }
-  if (env.nodeEnv !== "production" && (host === "localhost" || host.startsWith("127.") || host.endsWith(".local"))) {
+  if (
+    env.nodeEnv !== "production" &&
+    (host === "localhost" || host.startsWith("127.") || host.endsWith(".local"))
+  ) {
     return true;
   }
   const root = env.rootDomain?.toLowerCase();
-  if (!port && root && (host === root || host === `www.${root}` || host.endsWith(`.${root}`))) {
+  if (
+    !port &&
+    root &&
+    (host === root || host === `www.${root}` || host.endsWith(`.${root}`))
+  ) {
     return true;
   }
   return extraOrigins.includes(origin.toLowerCase().replace(/\/$/, ""));
@@ -87,7 +105,13 @@ const withRateLimitStore = (namespace: string) => {
 app.use(
   cors({
     methods: ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allowedHeaders: ["Authorization", "Content-Type", "X-Studio-Slug", "X-Device-Id", "Idempotency-Key"],
+    allowedHeaders: [
+      "Authorization",
+      "Content-Type",
+      "X-Studio-Slug",
+      "X-Device-Id",
+      "Idempotency-Key",
+    ],
     maxAge: 600,
     origin: (origin, cb) => {
       // No Origin header = same-origin, curl, or server-to-server (e.g. the
@@ -126,9 +150,16 @@ const loginAccountLimiter = rateLimit({
   standardHeaders: "draft-8",
   legacyHeaders: false,
   validate: { keyGeneratorIpFallback: false },
-  keyGenerator: (req) => createHash("sha256")
-    .update(`${String(req.headers["x-studio-slug"] ?? req.hostname)}:${String(req.body?.email ?? "").trim().toLowerCase()}`)
-    .digest("hex"),
+  keyGenerator: (req) =>
+    createHash("sha256")
+      .update(
+        `${String(req.headers["x-studio-slug"] ?? req.hostname)}:${String(
+          req.body?.email ?? "",
+        )
+          .trim()
+          .toLowerCase()}`,
+      )
+      .digest("hex"),
   message: "Too many sign-in attempts for this account. Try again later.",
 });
 const sensitiveActionLimiter = rateLimit({
@@ -183,7 +214,9 @@ app.use(
     },
   }),
 );
-app.use(express.urlencoded({ extended: false, limit: "64kb", parameterLimit: 100 }));
+app.use(
+  express.urlencoded({ extended: false, limit: "64kb", parameterLimit: 100 }),
+);
 app.use("/api/auth/login", loginAccountLimiter);
 app.use("/api/platform/auth/login", loginAccountLimiter);
 app.use(xss());
@@ -257,7 +290,9 @@ const shutdown = (signal: string) => {
     await shutdownQueues().catch((error) =>
       console.error("Error closing queues:", error),
     );
-    await createTenantClient().raw.$disconnect().catch(() => undefined);
+    await createTenantClient()
+      .raw.$disconnect()
+      .catch(() => undefined);
     process.exit(0);
   });
   // Idle keep-alive sockets would otherwise hold server.close() open.

@@ -56,7 +56,10 @@ export const resolveTenant = async (
       throw new ApiError("Studio not found", HttpCode.NOT_FOUND);
     }
     if (studio.status === "SUSPENDED") {
-      throw new ApiError("This studio is currently unavailable", HttpCode.FORBIDDEN);
+      throw new ApiError(
+        "This studio is currently unavailable",
+        HttpCode.FORBIDDEN,
+      );
     }
 
     // Expose for downstream handlers that want the id without reading ALS.
@@ -88,7 +91,9 @@ export const reenterTenant = (
   _res: Response,
   next: NextFunction,
 ) => {
-  const ctx =
-    req.tenantContext ?? { studioId: req.studioId ?? null, superAdmin: false };
+  const ctx = req.tenantContext ?? {
+    studioId: req.studioId ?? null,
+    superAdmin: false,
+  };
   return runWithTenant(ctx, () => next());
 };

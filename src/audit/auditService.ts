@@ -33,9 +33,7 @@ export class AuditService extends Connection {
           ...(entry.targetType ? { targetType: entry.targetType } : {}),
           ...(entry.targetId ? { targetId: entry.targetId } : {}),
           ...(entry.studioId ? { studioId: entry.studioId } : {}),
-          ...(entry.metadata
-            ? { metadata: entry.metadata as object }
-            : {}),
+          ...(entry.metadata ? { metadata: entry.metadata as object } : {}),
         },
       });
     } catch (error) {
@@ -57,7 +55,8 @@ export class AuditService extends Connection {
     } = {};
     if (opts.studioId) where.studioId = opts.studioId;
     if (opts.action) where.action = opts.action;
-    else if (opts.actionPrefix) where.action = { startsWith: opts.actionPrefix };
+    else if (opts.actionPrefix)
+      where.action = { startsWith: opts.actionPrefix };
 
     const logs = await this.auditLog.findMany({
       where,

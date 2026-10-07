@@ -1,4 +1,11 @@
-import { renderShell, button, esc, statusBadge, moneyTable, itemsTable, brandColor,
+import {
+  renderShell,
+  button,
+  esc,
+  statusBadge,
+  moneyTable,
+  itemsTable,
+  brandColor,
   receiptAttachedNotice,
   ReceiptDetails,
 } from "../design/shell";
@@ -62,12 +69,18 @@ export const orderPaymentFailed = (
 
 export const orderFulfilled = (
   brand: EmailBrand,
-  data: { orderNumber: string; fulfillment: "PICKUP" | "DELIVERY"; viewUrl?: string },
+  data: {
+    orderNumber: string;
+    fulfillment: "PICKUP" | "DELIVERY";
+    viewUrl?: string;
+  },
 ) => {
   const color = brandColor(brand);
   const isPickup = data.fulfillment === "PICKUP";
   return {
-    subject: isPickup ? "Your order is ready for pickup" : "Your order is on the way",
+    subject: isPickup
+      ? "Your order is ready for pickup"
+      : "Your order is on the way",
     html: renderShell({
       brand,
       previewText: isPickup ? "Ready for pickup." : "On its way to you.",

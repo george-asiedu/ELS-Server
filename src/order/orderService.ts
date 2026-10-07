@@ -1,6 +1,10 @@
 import { randomUUID } from "crypto";
 import { Connection } from "../db/dbConnection";
-import { CursorPage, cursorPageArgs, cursorPageResult } from "../utils/cursorPagination";
+import {
+  CursorPage,
+  cursorPageArgs,
+  cursorPageResult,
+} from "../utils/cursorPagination";
 import { ApiError } from "../middleware/apiError";
 import { env } from "../config/env.config";
 import { paystack, PaystackVerifyData } from "../payment/paystackClient";
@@ -9,7 +13,11 @@ import { LedgerService } from "../ledger/ledgerService";
 import { safeClientOrigin } from "../utils/helper";
 import { NotificationService } from "../notifications/notificationService";
 import { NotificationTemplate } from "../notifications/registry";
-import { orderConfirmed, orderPaymentFailed, orderFulfilled } from "../notifications/templates/shop";
+import {
+  orderConfirmed,
+  orderPaymentFailed,
+  orderFulfilled,
+} from "../notifications/templates/shop";
 import { MoneyLine } from "../notifications/types";
 import { ghs, receiptDate, receiptNumber } from "../notifications/format";
 import { buildReceiptPdf } from "../notifications/receiptPdf";
@@ -98,7 +106,9 @@ export class OrderService extends Connection {
     const items: LineItem[] = [];
     for (const spec of specs) {
       const qty = Math.max(1, Math.floor(spec.quantity || 1));
-      const p = await this.product.findUnique({ where: { id: spec.productId } });
+      const p = await this.product.findUnique({
+        where: { id: spec.productId },
+      });
       if (!p || !p.active) {
         throw new ApiError("A selected product is no longer available", 400);
       }
@@ -179,7 +189,8 @@ export class OrderService extends Connection {
     const deliveryFee = fulfillment === "DELIVERY" ? settings.deliveryFee : 0;
     const total =
       Math.round((subtotal - discountAmount + deliveryFee) * 100) / 100;
-    if (total <= 0) throw new ApiError("Order total must be greater than 0", 400);
+    if (total <= 0)
+      throw new ApiError("Order total must be greater than 0", 400);
 
     const reference = await this.makeReference("ORD");
     const orderNumber = await this.genOrderNumber();
@@ -203,7 +214,9 @@ export class OrderService extends Connection {
         deliveryPhone:
           fulfillment === "DELIVERY" ? params.deliveryPhone!.trim() : null,
         referralCode: params.referralCode?.trim() || null,
-        ...(params.appointmentId ? { appointmentId: params.appointmentId } : {}),
+        ...(params.appointmentId
+          ? { appointmentId: params.appointmentId }
+          : {}),
         reference,
         items: {
           create: params.lineItems.map((li) => ({
@@ -287,7 +300,11 @@ export class OrderService extends Connection {
 
     return this.createAndInitialize({
       userId,
-      contact: { name: profile?.fullName ?? null, email, phone: profile?.phone ?? null },
+      contact: {
+        name: profile?.fullName ?? null,
+        email,
+        phone: profile?.phone ?? null,
+      },
       lineItems,
       fulfillment: input.fulfillment,
       deliveryAddress: input.deliveryAddress,
@@ -497,7 +514,10 @@ export class OrderService extends Connection {
       include: orderInclude,
       ...cursorPageArgs(page),
     });
-    return { message: "Orders retrieved successfully", ...cursorPageResult(orders, page) };
+    return {
+      message: "Orders retrieved successfully",
+      ...cursorPageResult(orders, page),
+    };
   }
 
   public async listAll(page: CursorPage) {
@@ -511,7 +531,10 @@ export class OrderService extends Connection {
         },
       },
     });
-    return { message: "Orders retrieved successfully", ...cursorPageResult(orders, page) };
+    return {
+      message: "Orders retrieved successfully",
+      ...cursorPageResult(orders, page),
+    };
   }
 
   public async updateStatus(id: string, status: string) {
@@ -564,7 +587,9 @@ export class OrderService extends Connection {
         const { subject, html } = orderFulfilled(brand, {
           orderNumber: order.orderNumber,
           fulfillment: order.fulfillment as "PICKUP" | "DELIVERY",
-          ...(brand.kind === "studio" && brand.studio.websiteUrl ? { viewUrl: brand.studio.websiteUrl } : {}),
+          ...(brand.kind === "studio" && brand.studio.websiteUrl
+            ? { viewUrl: brand.studio.websiteUrl }
+            : {}),
         });
         await this.notifications.send({
           template: NotificationTemplate.SHOP_ORDER_FULFILLED,
@@ -611,7 +636,11 @@ export class OrderService extends Connection {
       amountPesewas: Math.round(order.total * 100),
       reference,
       callbackUrl: `${safeClientOrigin(origin)}/order/callback`,
-      metadata: { orderId: order.id, orderNumber: order.orderNumber, kind: "order" },
+      metadata: {
+        orderId: order.id,
+        orderNumber: order.orderNumber,
+        kind: "order",
+      },
       subaccount,
     });
     await this.order.update({
@@ -807,7 +836,9 @@ export class OrderService extends Connection {
             const { subject, html } = orderPaymentFailed(brand, {
               orderNumber: order.orderNumber,
               amountAttempted: ghs(order.total),
-              ...(brand.kind === "studio" && brand.studio.websiteUrl ? { retryUrl: brand.studio.websiteUrl } : {}),
+              ...(brand.kind === "studio" && brand.studio.websiteUrl
+                ? { retryUrl: brand.studio.websiteUrl }
+                : {}),
             });
             await this.notifications.send({
               template: NotificationTemplate.SHOP_ORDER_PAYMENT_FAILED,
@@ -899,12 +930,20 @@ export class OrderService extends Connection {
     for (const item of paid.items) {
       if (!item.productId) continue;
       const decremented = await this.product.updateMany({
-        where: { id: item.productId, trackStock: true, stock: { gte: item.quantity } },
+        where: {
+          id: item.productId,
+          trackStock: true,
+          stock: { gte: item.quantity },
+        },
         data: { stock: { decrement: item.quantity } },
       });
       if (decremented.count === 0) {
         await this.product.updateMany({
-          where: { id: item.productId, trackStock: true, stock: { lt: item.quantity } },
+          where: {
+            id: item.productId,
+            trackStock: true,
+            stock: { lt: item.quantity },
+          },
           data: { stock: 0 },
         });
       }
@@ -941,7 +980,11 @@ export class OrderService extends Connection {
     }
 
     // Referral reward — 50 pts to the code owner, once per buyer (by email).
-    await this.awardReferralReward(paid.referralCode, paid.customerEmail, order.userId);
+    await this.awardReferralReward(
+      paid.referralCode,
+      paid.customerEmail,
+      order.userId,
+    );
 
     // Receipt email (best-effort).
     if (paid.customerEmail) {
@@ -949,14 +992,26 @@ export class OrderService extends Connection {
         const brand = await this.studioEmailBrand(paid.studioId);
         const lines: MoneyLine[] = [
           { label: "Subtotal", value: ghs(paid.subtotal) },
-          ...(paid.discountAmount > 0 ? [{ label: "Discount", value: `-${ghs(paid.discountAmount)}`, muted: true }] : []),
-          ...(paid.deliveryFee > 0 ? [{ label: "Delivery", value: ghs(paid.deliveryFee) }] : []),
+          ...(paid.discountAmount > 0
+            ? [
+                {
+                  label: "Discount",
+                  value: `-${ghs(paid.discountAmount)}`,
+                  muted: true,
+                },
+              ]
+            : []),
+          ...(paid.deliveryFee > 0
+            ? [{ label: "Delivery", value: ghs(paid.deliveryFee) }]
+            : []),
           { label: "Total", value: ghs(paid.total), emphasis: true },
         ];
         const paidTo =
           brand.kind === "studio" ? brand.studio.name : brand.zuri.name;
         const paidToEmail =
-          brand.kind === "studio" ? brand.studio.email : brand.zuri.supportEmail;
+          brand.kind === "studio"
+            ? brand.studio.email
+            : brand.zuri.supportEmail;
         const { subject, html } = orderConfirmed(brand, {
           orderNumber: paid.orderNumber,
           items: paid.items.map((i) => ({
@@ -977,7 +1032,9 @@ export class OrderService extends Connection {
             balanceDue: null,
           },
           fulfillment: paid.fulfillment as "PICKUP" | "DELIVERY",
-          ...(brand.kind === "studio" && brand.studio.websiteUrl ? { viewUrl: brand.studio.websiteUrl } : {}),
+          ...(brand.kind === "studio" && brand.studio.websiteUrl
+            ? { viewUrl: brand.studio.websiteUrl }
+            : {}),
         });
         // PDF receipt, itemised, attached to the confirmation.
         const pdf = buildReceiptPdf({
@@ -1006,7 +1063,10 @@ export class OrderService extends Connection {
             { label: "Total", value: ghs(paid.total), strong: true },
             {
               label: "Fulfilment",
-              value: paid.fulfillment === "DELIVERY" ? "Delivery" : "Pickup at studio",
+              value:
+                paid.fulfillment === "DELIVERY"
+                  ? "Delivery"
+                  : "Pickup at studio",
             },
           ],
           amountPaid: ghs(paid.total),
@@ -1064,7 +1124,10 @@ export class OrderService extends Connection {
     // Dedup: once per (code, buyer email).
     try {
       await this.referralOrderReward.create({
-        data: { referralCodeId: referral.id, buyerEmail: buyerEmail.toLowerCase() },
+        data: {
+          referralCodeId: referral.id,
+          buyerEmail: buyerEmail.toLowerCase(),
+        },
       });
     } catch {
       return; // already rewarded for this buyer + code

@@ -43,12 +43,22 @@ export class ContactService extends Connection {
         ...(data.facebook !== undefined ? { facebook: data.facebook } : {}),
         ...(data.address !== undefined ? { address: data.address } : {}),
         ...(data.showPhone !== undefined ? { showPhone: data.showPhone } : {}),
-        ...(data.showWhatsapp !== undefined ? { showWhatsapp: data.showWhatsapp } : {}),
+        ...(data.showWhatsapp !== undefined
+          ? { showWhatsapp: data.showWhatsapp }
+          : {}),
         ...(data.showEmail !== undefined ? { showEmail: data.showEmail } : {}),
-        ...(data.showInstagram !== undefined ? { showInstagram: data.showInstagram } : {}),
-        ...(data.showTiktok !== undefined ? { showTiktok: data.showTiktok } : {}),
-        ...(data.showFacebook !== undefined ? { showFacebook: data.showFacebook } : {}),
-        ...(data.showAddress !== undefined ? { showAddress: data.showAddress } : {}),
+        ...(data.showInstagram !== undefined
+          ? { showInstagram: data.showInstagram }
+          : {}),
+        ...(data.showTiktok !== undefined
+          ? { showTiktok: data.showTiktok }
+          : {}),
+        ...(data.showFacebook !== undefined
+          ? { showFacebook: data.showFacebook }
+          : {}),
+        ...(data.showAddress !== undefined
+          ? { showAddress: data.showAddress }
+          : {}),
       },
     });
     return { message: "Contact info updated successfully", data: updated };

@@ -3,7 +3,7 @@ import { UserRepository } from "./userRepository";
 import {
   verifyPassword,
   getPasswordHash,
-  generateReferralCode
+  generateReferralCode,
 } from "../utils/helper";
 import { ApiError } from "../middleware/apiError";
 import { env } from "../config/env.config";
@@ -11,7 +11,12 @@ import { randomBytes, createHash } from "crypto";
 import { getTenantContext } from "../tenant/context";
 import { NotificationService } from "../notifications/notificationService";
 import { NotificationTemplate } from "../notifications/registry";
-import { passwordResetRequested, passwordChanged, customerWelcome, loginAlert } from "../notifications/templates/auth";
+import {
+  passwordResetRequested,
+  passwordChanged,
+  customerWelcome,
+  loginAlert,
+} from "../notifications/templates/auth";
 import { brandFromStudio, platformBrand } from "../notifications/brand";
 import { createLoginSession, revokeLoginSessions } from "./sessionService";
 import { LoginDeviceMetadata } from "./loginDevice";
@@ -123,7 +128,10 @@ export class AuthService extends UserRepository {
       role: user.role,
       studioId: user.studioId,
     };
-    const { token, isNewDevice, deviceKey } = await createLoginSession(payload, device);
+    const { token, isNewDevice, deviceKey } = await createLoginSession(
+      payload,
+      device,
+    );
 
     if (isNewDevice) {
       try {
@@ -161,7 +169,7 @@ export class AuthService extends UserRepository {
       },
     };
   }
-  
+
   public async forgotPassword(email: string) {
     const user = await this.getByEmail(email);
 
@@ -209,52 +217,58 @@ export class AuthService extends UserRepository {
 
     return genericResponse;
   }
-  
+
   public async resetPassword(token: string, newPassword: string) {
-      if (!token || !newPassword) {
-        throw new ApiError("Token and new password are required", 400);
-      }
-  
-      // hash incoming token to compare with stored hashed value
-      const hashedToken = createHash("sha256").update(token).digest("hex");
-  
-      // find user by hashed token
-      const user = await this.findUserByResetToken(hashedToken);
-      if (!user) {
-        throw new ApiError("Invalid or expired token", 400);
-      }
-  
-      // check expiry
-      if (!user.resetTokenExpiry || new Date(user.resetTokenExpiry) < new Date()) {
-        throw new ApiError("Invalid or expired token", 400);
-      }
-  
-      // hash new password and update user; clear reset token fields
-      const newHashedPassword = await getPasswordHash(newPassword);
-      await this.resetPasswordByUserId(user.id, newHashedPassword);
-      await revokeLoginSessions(user.id);
-
-      // Best-effort security notification — never blocks the (already
-      // successful) password reset if it fails.
-      try {
-        const brand = await this.studioEmailBrand(null, platformBrand);
-        const { subject, html } = passwordChanged(brand, {
-          email: user.email,
-          changedAt: new Date().toLocaleString("en-GB", { dateStyle: "medium", timeStyle: "short" }),
-        });
-        await notifications.send({
-          template: NotificationTemplate.AUTH_PASSWORD_CHANGED,
-          to: user.email,
-          subject,
-          html,
-          studioId: getTenantContext()?.studioId ?? null,
-          entityType: "User",
-          entityId: `${user.id}:${hashedToken}`,
-        });
-      } catch (error) {
-        console.error("Failed to send password-changed notification:", error);
-      }
-
-      return { message: "Password has been reset successfully" };
+    if (!token || !newPassword) {
+      throw new ApiError("Token and new password are required", 400);
     }
+
+    // hash incoming token to compare with stored hashed value
+    const hashedToken = createHash("sha256").update(token).digest("hex");
+
+    // find user by hashed token
+    const user = await this.findUserByResetToken(hashedToken);
+    if (!user) {
+      throw new ApiError("Invalid or expired token", 400);
+    }
+
+    // check expiry
+    if (
+      !user.resetTokenExpiry ||
+      new Date(user.resetTokenExpiry) < new Date()
+    ) {
+      throw new ApiError("Invalid or expired token", 400);
+    }
+
+    // hash new password and update user; clear reset token fields
+    const newHashedPassword = await getPasswordHash(newPassword);
+    await this.resetPasswordByUserId(user.id, newHashedPassword);
+    await revokeLoginSessions(user.id);
+
+    // Best-effort security notification — never blocks the (already
+    // successful) password reset if it fails.
+    try {
+      const brand = await this.studioEmailBrand(null, platformBrand);
+      const { subject, html } = passwordChanged(brand, {
+        email: user.email,
+        changedAt: new Date().toLocaleString("en-GB", {
+          dateStyle: "medium",
+          timeStyle: "short",
+        }),
+      });
+      await notifications.send({
+        template: NotificationTemplate.AUTH_PASSWORD_CHANGED,
+        to: user.email,
+        subject,
+        html,
+        studioId: getTenantContext()?.studioId ?? null,
+        entityType: "User",
+        entityId: `${user.id}:${hashedToken}`,
+      });
+    } catch (error) {
+      console.error("Failed to send password-changed notification:", error);
+    }
+
+    return { message: "Password has been reset successfully" };
+  }
 }

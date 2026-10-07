@@ -5,7 +5,10 @@ import { AuditService } from "../audit/auditService";
 import { LedgerService } from "../ledger/ledgerService";
 import { NotificationService } from "../notifications/notificationService";
 import { NotificationTemplate } from "../notifications/registry";
-import { refundProcessed, refundFailed } from "../notifications/templates/refund";
+import {
+  refundProcessed,
+  refundFailed,
+} from "../notifications/templates/refund";
 import { buildReceiptPdf } from "../notifications/receiptPdf";
 import { ghs, receiptDate, receiptNumber } from "../notifications/format";
 import { platformBrand } from "../notifications/brand";
@@ -28,7 +31,8 @@ const round2 = (n: number) => Math.round(n * 100) / 100;
 type RefundSource =
   | { kind: "payment"; id: string }
   | { kind: "order"; id: string };
-const sourceLockKey = (source: RefundSource) => `refund-source:${source.kind}:${source.id}`;
+const sourceLockKey = (source: RefundSource) =>
+  `refund-source:${source.kind}:${source.id}`;
 
 export class RefundService extends Connection {
   private audit = new AuditService();
@@ -86,7 +90,9 @@ export class RefundService extends Connection {
             status: "PENDING",
             paymentId: payment.id,
             appointmentId: payment.appointmentId,
-            ...(payment.transactionId ? { transactionId: payment.transactionId } : {}),
+            ...(payment.transactionId
+              ? { transactionId: payment.transactionId }
+              : {}),
             ...(input.reason ? { reason: input.reason.trim() } : {}),
             ...(appt?.fullName ? { customerName: appt.fullName } : {}),
             ...(appt?.email ? { customerEmail: appt.email } : {}),
@@ -187,10 +193,14 @@ export class RefundService extends Connection {
             currency: "GHS",
             status: "PENDING",
             orderId: order.id,
-            ...(order.transactionId ? { transactionId: order.transactionId } : {}),
+            ...(order.transactionId
+              ? { transactionId: order.transactionId }
+              : {}),
             ...(input.reason ? { reason: input.reason.trim() } : {}),
             ...(order.customerName ? { customerName: order.customerName } : {}),
-            ...(order.customerEmail ? { customerEmail: order.customerEmail } : {}),
+            ...(order.customerEmail
+              ? { customerEmail: order.customerEmail }
+              : {}),
             ...(actor.email ? { initiatedByEmail: actor.email } : {}),
             ...(actor.role ? { initiatedByRole: actor.role } : {}),
           },
@@ -265,13 +275,28 @@ export class RefundService extends Connection {
       const totals =
         source.kind === "payment"
           ? await tx.payment
-              .findFirst({ where: { id: source.id }, select: { amount: true, refundedAmount: true } })
-              .then((p) => p && { collected: p.amount, refunded: p.refundedAmount ?? 0 })
+              .findFirst({
+                where: { id: source.id },
+                select: { amount: true, refundedAmount: true },
+              })
+              .then(
+                (p) =>
+                  p && { collected: p.amount, refunded: p.refundedAmount ?? 0 },
+              )
           : await tx.order
-              .findFirst({ where: { id: source.id }, select: { total: true, refundedAmount: true } })
-              .then((o) => o && { collected: o.total, refunded: o.refundedAmount ?? 0 });
+              .findFirst({
+                where: { id: source.id },
+                select: { total: true, refundedAmount: true },
+              })
+              .then(
+                (o) =>
+                  o && { collected: o.total, refunded: o.refundedAmount ?? 0 },
+              );
       if (!totals) {
-        throw new ApiError(source.kind === "payment" ? "Payment not found" : "Order not found", 404);
+        throw new ApiError(
+          source.kind === "payment" ? "Payment not found" : "Order not found",
+          404,
+        );
       }
       const inFlight = await tx.refund.aggregate({
         where:
@@ -283,7 +308,10 @@ export class RefundService extends Connection {
       const pending = inFlight._sum.amount ?? 0;
 
       if (toPesewas(totals.collected - totals.refunded) <= 0) {
-        throw new ApiError(`This ${source.kind} has already been fully refunded`, 400);
+        throw new ApiError(
+          `This ${source.kind} has already been fully refunded`,
+          400,
+        );
       }
       const refundable = round2(totals.collected - totals.refunded - pending);
       if (refundable <= 0) {
@@ -329,7 +357,9 @@ export class RefundService extends Connection {
     // one of them through; the running total moves in the same locked step,
     // so reserveRefund never sees the refund in neither "pending" nor
     // "refunded".
-    const apply = async (db: Pick<TenantTx, "refund" | "payment" | "order">) => {
+    const apply = async (
+      db: Pick<TenantTx, "refund" | "payment" | "order">,
+    ) => {
       const claimed = await db.refund.updateMany({
         where: { id: refund.id, status: "PENDING" },
         data: {
@@ -369,7 +399,11 @@ export class RefundService extends Connection {
         if (order) {
           await db.order.update({
             where: { id: order.id },
-            data: { refundedAmount: round2((order.refundedAmount ?? 0) + refund.amount) },
+            data: {
+              refundedAmount: round2(
+                (order.refundedAmount ?? 0) + refund.amount,
+              ),
+            },
           });
         }
       }
@@ -385,7 +419,9 @@ export class RefundService extends Connection {
       : await apply(this.db);
     if (!applied) return this.refund.findUnique({ where: { id: refund.id } });
 
-    const updated = await this.refund.findUniqueOrThrow({ where: { id: refund.id } });
+    const updated = await this.refund.findUniqueOrThrow({
+      where: { id: refund.id },
+    });
 
     if (outcome === "FAILED") {
       await this.audit.record({
@@ -394,7 +430,11 @@ export class RefundService extends Connection {
         targetType: "Refund",
         targetId: refund.id,
         studioId: refund.studioId ?? undefined,
-        metadata: { reference, amount: refund.amount, reason: failureReason ?? null },
+        metadata: {
+          reference,
+          amount: refund.amount,
+          reason: failureReason ?? null,
+        },
       });
       await this.notifyFailed(updated);
       return updated;
@@ -455,7 +495,8 @@ export class RefundService extends Connection {
     if (!refund.customerEmail) return;
     try {
       const brand = await this.studioEmailBrand(refund.studioId, platformBrand);
-      const paidTo = brand.kind === "studio" ? brand.studio.name : brand.zuri.name;
+      const paidTo =
+        brand.kind === "studio" ? brand.studio.name : brand.zuri.name;
       const paidToEmail =
         brand.kind === "studio" ? brand.studio.email : brand.zuri.supportEmail;
 
@@ -467,7 +508,9 @@ export class RefundService extends Connection {
       if (refund.paymentId) {
         const p = await this.payment.findUnique({
           where: { id: refund.paymentId },
-          include: { appointment: { include: { service: { select: { name: true } } } } },
+          include: {
+            appointment: { include: { service: { select: { name: true } } } },
+          },
         });
         if (p) {
           originalPaid = p.amount;
@@ -476,14 +519,19 @@ export class RefundService extends Connection {
           what = svc ? `your ${svc} appointment` : "your appointment";
         }
       } else if (refund.orderId) {
-        const o = await this.order.findUnique({ where: { id: refund.orderId } });
+        const o = await this.order.findUnique({
+          where: { id: refund.orderId },
+        });
         if (o) {
           originalPaid = o.total;
           totalRefunded = o.refundedAmount ?? refund.amount;
           what = `order ${o.orderNumber}`;
         }
       }
-      const stillPaid = Math.max(0, Math.round((originalPaid - totalRefunded) * 100) / 100);
+      const stillPaid = Math.max(
+        0,
+        Math.round((originalPaid - totalRefunded) * 100) / 100,
+      );
       const isPartial = toPesewas(totalRefunded) < toPesewas(originalPaid);
 
       const lines: MoneyLine[] = [
@@ -496,7 +544,8 @@ export class RefundService extends Connection {
 
       const pdf = buildReceiptPdf({
         studioName: paidTo,
-        primaryColor: brand.kind === "studio" ? brand.studio.primaryColor : null,
+        primaryColor:
+          brand.kind === "studio" ? brand.studio.primaryColor : null,
         title: isPartial ? "Partial refund receipt" : "Refund receipt",
         receiptNumber: receiptNumber("RF", refund.id),
         issuedAt: refund.processedAt ?? new Date(),
@@ -507,7 +556,9 @@ export class RefundService extends Connection {
             : []),
           { label: "Originally paid", value: ghs(originalPaid) },
           { label: "Refunded", value: ghs(refund.amount), strong: true },
-          ...(isPartial ? [{ label: "Still paid", value: ghs(stillPaid) }] : []),
+          ...(isPartial
+            ? [{ label: "Still paid", value: ghs(stillPaid) }]
+            : []),
           ...(refund.reason ? [{ label: "Reason", value: refund.reason }] : []),
         ],
         amountPaid: ghs(refund.amount),
@@ -533,7 +584,10 @@ export class RefundService extends Connection {
 
       const { subject, html } = refundProcessed(brand, {
         ...(refund.customerName
-          ? { customerFirstName: refund.customerName.split(" ")[0] ?? refund.customerName }
+          ? {
+              customerFirstName:
+                refund.customerName.split(" ")[0] ?? refund.customerName,
+            }
           : {}),
         subject: what,
         isPartial,
@@ -583,7 +637,10 @@ export class RefundService extends Connection {
         brand.kind === "studio" ? brand.studio.email : brand.zuri.supportEmail;
       const { subject, html } = refundFailed(brand, {
         ...(refund.customerName
-          ? { customerFirstName: refund.customerName.split(" ")[0] ?? refund.customerName }
+          ? {
+              customerFirstName:
+                refund.customerName.split(" ")[0] ?? refund.customerName,
+            }
           : {}),
         subject: "your recent payment",
         refundAmount: ghs(refund.amount),

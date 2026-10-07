@@ -7,7 +7,9 @@
  * through this parser rather than assume a format. Returns minutes since
  * midnight, or null when the text isn't a time at all.
  */
-export const parseTimeMinutes = (raw: string | null | undefined): number | null => {
+export const parseTimeMinutes = (
+  raw: string | null | undefined,
+): number | null => {
   if (!raw) return null;
   const text = raw.trim().toLowerCase();
 

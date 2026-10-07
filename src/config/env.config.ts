@@ -20,14 +20,16 @@ const requiredVars = [
   "SENDER_EMAIL",
   "CLIENT_URL",
   "PAYSTACK_SECRET_KEY",
-  "PAYSTACK_PUBLIC_KEY"
+  "PAYSTACK_PUBLIC_KEY",
 ];
 const missing = requiredVars.filter((v) => !process.env[v]);
 
 const configuredTrustProxyHops = Number(process.env.TRUST_PROXY_HOPS ?? 0);
-const trustProxyHops = Number.isSafeInteger(configuredTrustProxyHops) && configuredTrustProxyHops >= 0
-  ? configuredTrustProxyHops
-  : 0;
+const trustProxyHops =
+  Number.isSafeInteger(configuredTrustProxyHops) &&
+  configuredTrustProxyHops >= 0
+    ? configuredTrustProxyHops
+    : 0;
 
 if (missing.length > 0) {
   throw new Error(
@@ -49,7 +51,10 @@ export const env = {
     accessKeyId: process.env.AWS_ACCESS_KEY_ID as string,
     secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY as string,
     region: process.env.AWS_REGION as string,
-    cloudFrontUrl: (process.env.AWS_CLOUDFRONT_URL as string || "").replace(/\/$/, ""),
+    cloudFrontUrl: ((process.env.AWS_CLOUDFRONT_URL as string) || "").replace(
+      /\/$/,
+      "",
+    ),
   },
   senderEmail: process.env.SENDER_EMAIL as string,
   // Plunk transactional email (replaces SendGrid). apiUrl is overridable in case
@@ -87,10 +92,14 @@ export const env = {
     // to a card, and Ghana studios pay by Mobile Money, which cannot auto-recur.
     // Billing is therefore a one-time charge per period + manual renewal.
     plans: {
-      STANDARD_MONTHLY: (process.env.PAYSTACK_PLAN_STANDARD_MONTHLY as string) || "",
-      STANDARD_YEARLY: (process.env.PAYSTACK_PLAN_STANDARD_YEARLY as string) || "",
-      PREMIUM_MONTHLY: (process.env.PAYSTACK_PLAN_PREMIUM_MONTHLY as string) || "",
-      PREMIUM_YEARLY: (process.env.PAYSTACK_PLAN_PREMIUM_YEARLY as string) || "",
+      STANDARD_MONTHLY:
+        (process.env.PAYSTACK_PLAN_STANDARD_MONTHLY as string) || "",
+      STANDARD_YEARLY:
+        (process.env.PAYSTACK_PLAN_STANDARD_YEARLY as string) || "",
+      PREMIUM_MONTHLY:
+        (process.env.PAYSTACK_PLAN_PREMIUM_MONTHLY as string) || "",
+      PREMIUM_YEARLY:
+        (process.env.PAYSTACK_PLAN_PREMIUM_YEARLY as string) || "",
     },
     // Plan prices in GHS per period. Charged as a one-time Mobile Money payment
     // at signup/renewal; keep in sync with the frontend PLANS display prices.

@@ -32,10 +32,7 @@ const parseReason = (raw: unknown): string | undefined => {
 };
 
 export class RefundController {
-  public static refundPayment = async (
-    req: Request,
-    res: Response,
-  ) => {
+  public static refundPayment = async (req: Request, res: Response) => {
     const { paymentId } = req.params;
     if (!paymentId) throw new ApiError("A payment id is required", 400);
     const result = await refunds.refundPayment(paymentId, actor(req), {
@@ -49,10 +46,7 @@ export class RefundController {
     return res.status(200).json(result);
   };
 
-  public static refundOrder = async (
-    req: Request,
-    res: Response,
-  ) => {
+  public static refundOrder = async (req: Request, res: Response) => {
     const { orderId } = req.params;
     if (!orderId) throw new ApiError("An order id is required", 400);
     const result = await refunds.refundOrder(orderId, actor(req), {
@@ -66,10 +60,7 @@ export class RefundController {
     return res.status(200).json(result);
   };
 
-  public static list = async (
-    req: Request,
-    res: Response,
-  ) => {
+  public static list = async (req: Request, res: Response) => {
     const status =
       typeof req.query.status === "string" ? req.query.status : undefined;
     const limit =

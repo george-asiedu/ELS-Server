@@ -77,7 +77,9 @@ export const featureRequestSubmitted = (
         <h1 style="margin: 0 0 4px; font-family: Georgia, serif; font-size: 22px; color: #2A1B1F; text-align: center;">${esc(data.title)}</h1>
         <p class="muted" style="margin: 0 0 20px; font-family: Arial, sans-serif; font-size: 13px; color: #7A6A6E; text-align: center;">
           from <strong>${esc(data.studioName)}</strong> (${esc(data.studioSlug)})${
-            data.requestedByEmail ? ` &middot; ${esc(data.requestedByEmail)}` : ""
+            data.requestedByEmail
+              ? ` &middot; ${esc(data.requestedByEmail)}`
+              : ""
           }
         </p>
         <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin: 0 0 8px; border: 1px solid #EADFE1; border-radius: 12px;">

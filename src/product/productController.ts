@@ -34,40 +34,32 @@ const parseBody = (body: Record<string, unknown>): UpdateProductInput => {
   if (active !== undefined) out.active = active;
   const popular = toBool(body.popular);
   if (popular !== undefined) out.popular = popular;
-  if (body.imageUrl !== undefined) out.imageUrl = body.imageUrl === null || body.imageUrl === "" ? null : String(body.imageUrl);
+  if (body.imageUrl !== undefined)
+    out.imageUrl =
+      body.imageUrl === null || body.imageUrl === ""
+        ? null
+        : String(body.imageUrl);
   return out;
 };
 
 export class ProductController {
-  public static list = async (
-    req: Request,
-    res: Response,
-  ) => {
+  public static list = async (req: Request, res: Response) => {
     const page = parseCursorPage(req.query.cursor, req.query.limit);
     return res.status(200).json(await productService.listActive(page));
   };
 
-  public static listAll = async (
-    req: Request,
-    res: Response,
-  ) => {
+  public static listAll = async (req: Request, res: Response) => {
     const page = parseCursorPage(req.query.cursor, req.query.limit);
     return res.status(200).json(await productService.listAll(page));
   };
 
-  public static getOne = async (
-    req: Request,
-    res: Response,
-  ) => {
+  public static getOne = async (req: Request, res: Response) => {
     const { id } = req.params;
     if (!id) throw new ApiError("Product ID is required", 400);
     return res.status(200).json(await productService.getById(id));
   };
 
-  public static create = async (
-    req: Request,
-    res: Response,
-  ) => {
+  public static create = async (req: Request, res: Response) => {
     const parsed = parseBody(req.body ?? {});
     if (!parsed.name) throw new ApiError("Product name is required", 400);
     if (parsed.price === undefined)
@@ -78,10 +70,7 @@ export class ProductController {
     return res.status(201).json(result);
   };
 
-  public static update = async (
-    req: Request,
-    res: Response,
-  ) => {
+  public static update = async (req: Request, res: Response) => {
     const { id } = req.params;
     if (!id) throw new ApiError("Product ID is required", 400);
     const parsed = parseBody(req.body ?? {});
@@ -89,10 +78,7 @@ export class ProductController {
     return res.status(200).json(result);
   };
 
-  public static remove = async (
-    req: Request,
-    res: Response,
-  ) => {
+  public static remove = async (req: Request, res: Response) => {
     const { id } = req.params;
     if (!id) throw new ApiError("Product ID is required", 400);
     return res.status(200).json(await productService.remove(id));

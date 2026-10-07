@@ -3,7 +3,10 @@ import { getTenantContext } from "../tenant/context";
 import { shortId, studioCode } from "../utils/shortId";
 import { env } from "../config/env.config";
 import { EmailBrand, StudioBrandingInfo } from "../notifications/types";
-import { brandFromStudio, storefrontFallbackBrand } from "../notifications/brand";
+import {
+  brandFromStudio,
+  storefrontFallbackBrand,
+} from "../notifications/brand";
 import { S3BucketService } from "../bucket/s3BucketService";
 
 const s3 = new S3BucketService();
@@ -44,35 +47,93 @@ export class Connection {
   }
 
   // ---- Tenant-owned model delegates (scoped by the tenant extension) ----
-  get user() { return this.db.user; }
-  get profile() { return this.db.profile; }
-  get appointment() { return this.db.appointment; }
-  get service() { return this.db.service; }
-  get serviceAddOn() { return this.db.serviceAddOn; }
-  get payment() { return this.db.payment; }
-  get paymentSettings() { return this.db.paymentSettings; }
-  get review() { return this.db.review; }
-  get gallery() { return this.db.gallery; }
-  get category() { return this.db.category; }
-  get businessHours() { return this.db.businessHours; }
-  get blockedDate() { return this.db.blockedDate; }
-  get contactInfo() { return this.db.contactInfo; }
-  get loyaltyPoints() { return this.db.loyaltyPoints; }
-  get loyaltyTransaction() { return this.db.loyaltyTransaction; }
-  get referralCode() { return this.db.referralCode; }
-  get referral() { return this.db.referral; }
-  get product() { return this.db.product; }
-  get productCategory() { return this.db.productCategory; }
-  get cart() { return this.db.cart; }
-  get cartItem() { return this.db.cartItem; }
-  get order() { return this.db.order; }
-  get orderItem() { return this.db.orderItem; }
-  get referralOrderReward() { return this.db.referralOrderReward; }
-  get commerceSettings() { return this.db.commerceSettings; }
-  get promoBanner() { return this.db.promoBanner; }
-  get paymentAttempt() { return this.db.paymentAttempt; }
-  get ledgerEntry() { return this.db.ledgerEntry; }
-  get refund() { return this.db.refund; }
+  get user() {
+    return this.db.user;
+  }
+  get profile() {
+    return this.db.profile;
+  }
+  get appointment() {
+    return this.db.appointment;
+  }
+  get service() {
+    return this.db.service;
+  }
+  get serviceAddOn() {
+    return this.db.serviceAddOn;
+  }
+  get payment() {
+    return this.db.payment;
+  }
+  get paymentSettings() {
+    return this.db.paymentSettings;
+  }
+  get review() {
+    return this.db.review;
+  }
+  get gallery() {
+    return this.db.gallery;
+  }
+  get category() {
+    return this.db.category;
+  }
+  get businessHours() {
+    return this.db.businessHours;
+  }
+  get blockedDate() {
+    return this.db.blockedDate;
+  }
+  get contactInfo() {
+    return this.db.contactInfo;
+  }
+  get loyaltyPoints() {
+    return this.db.loyaltyPoints;
+  }
+  get loyaltyTransaction() {
+    return this.db.loyaltyTransaction;
+  }
+  get referralCode() {
+    return this.db.referralCode;
+  }
+  get referral() {
+    return this.db.referral;
+  }
+  get product() {
+    return this.db.product;
+  }
+  get productCategory() {
+    return this.db.productCategory;
+  }
+  get cart() {
+    return this.db.cart;
+  }
+  get cartItem() {
+    return this.db.cartItem;
+  }
+  get order() {
+    return this.db.order;
+  }
+  get orderItem() {
+    return this.db.orderItem;
+  }
+  get referralOrderReward() {
+    return this.db.referralOrderReward;
+  }
+  get commerceSettings() {
+    return this.db.commerceSettings;
+  }
+  get promoBanner() {
+    return this.db.promoBanner;
+  }
+  get paymentAttempt() {
+    return this.db.paymentAttempt;
+  }
+  get ledgerEntry() {
+    return this.db.ledgerEntry;
+  }
+  get refund() {
+    return this.db.refund;
+  }
 
   /**
    * Run `fn` in a transaction holding a Postgres advisory lock on `key`.
@@ -161,9 +222,18 @@ export class Connection {
     const studioId = studioIdOverride ?? getTenantContext()?.studioId;
     if (!studioId) return null;
     const [studio, branding, contact] = await Promise.all([
-      this.studio.findUnique({ where: { id: studioId }, select: { name: true, slug: true } }),
-      this.studioBranding.findUnique({ where: { studioId }, select: { logoUrl: true, primaryColor: true } }),
-      this.contactInfo.findFirst({ where: { studioId }, select: { email: true, phone: true, address: true } }),
+      this.studio.findUnique({
+        where: { id: studioId },
+        select: { name: true, slug: true },
+      }),
+      this.studioBranding.findUnique({
+        where: { studioId },
+        select: { logoUrl: true, primaryColor: true },
+      }),
+      this.contactInfo.findFirst({
+        where: { studioId },
+        select: { email: true, phone: true, address: true },
+      }),
     ]);
     if (!studio) return null;
     const websiteUrl = env.rootDomain
@@ -190,14 +260,18 @@ export class Connection {
     studioIdOverride?: string | null,
     fallback: EmailBrand = storefrontFallbackBrand,
   ): Promise<EmailBrand> {
-    const studio = await this.currentStudioBranding(studioIdOverride ?? undefined);
+    const studio = await this.currentStudioBranding(
+      studioIdOverride ?? undefined,
+    );
     return brandFromStudio(studio, fallback);
   }
 
   // Where to send a studio-owner notification (new booking request, etc): the
   // studio's published contact email if set and shown, else the account
   // owner's login email. Null when neither is available.
-  protected async currentStudioNotifyEmail(studioIdOverride?: string): Promise<string | null> {
+  protected async currentStudioNotifyEmail(
+    studioIdOverride?: string,
+  ): Promise<string | null> {
     const studioId = studioIdOverride ?? getTenantContext()?.studioId;
     if (!studioId) return null;
     const contact = await this.contactInfo.findFirst({
@@ -231,15 +305,37 @@ export class Connection {
   }
 
   // ---- Platform models (not auto-scoped; used by super-admin/onboarding) ----
-  get studio() { return this.db.studio; }
-  get studioBranding() { return this.db.studioBranding; }
-  get studioContent() { return this.db.studioContent; }
-  get studioSettings() { return this.db.studioSettings; }
-  get featureRequest() { return this.db.featureRequest; }
-  get auditLog() { return this.db.auditLog; }
-  get platformActivityLog() { return this.db.platformActivityLog; }
-  get notificationLog() { return this.db.notificationLog; }
-  get studioSignup() { return this.db.studioSignup; }
-  get platformReview() { return this.db.platformReview; }
-  get platformConfig() { return this.db.platformConfig; }
+  get studio() {
+    return this.db.studio;
+  }
+  get studioBranding() {
+    return this.db.studioBranding;
+  }
+  get studioContent() {
+    return this.db.studioContent;
+  }
+  get studioSettings() {
+    return this.db.studioSettings;
+  }
+  get featureRequest() {
+    return this.db.featureRequest;
+  }
+  get auditLog() {
+    return this.db.auditLog;
+  }
+  get platformActivityLog() {
+    return this.db.platformActivityLog;
+  }
+  get notificationLog() {
+    return this.db.notificationLog;
+  }
+  get studioSignup() {
+    return this.db.studioSignup;
+  }
+  get platformReview() {
+    return this.db.platformReview;
+  }
+  get platformConfig() {
+    return this.db.platformConfig;
+  }
 }

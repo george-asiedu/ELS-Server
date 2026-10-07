@@ -37,7 +37,10 @@ export const resolveStudioBySlug = async (
 export const forgetStudioSlug = (slug: string) => cache.delete(slug);
 
 // ---- Custom domain resolution (verified domains only) ----
-const domainCache = new Map<string, { value: ResolvedStudio | null; at: number }>();
+const domainCache = new Map<
+  string,
+  { value: ResolvedStudio | null; at: number }
+>();
 
 export const resolveStudioByDomain = async (
   host: string,

@@ -56,7 +56,10 @@ export class PromoService extends Connection {
     if (input.message !== undefined || requireMessage) {
       const message = String(input.message ?? "").trim();
       if (message.length < 1 || message.length > 140) {
-        throw new ApiError("Message must be 1-140 characters", HttpCode.BAD_REQUEST);
+        throw new ApiError(
+          "Message must be 1-140 characters",
+          HttpCode.BAD_REQUEST,
+        );
       }
       data.message = message;
     }

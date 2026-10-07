@@ -22,7 +22,8 @@ export const recordPlatformActivity = (
   res.setHeader("X-Request-Id", requestId);
 
   res.once("finish", () => {
-    const routePath = typeof req.route?.path === "string" ? req.route.path : req.path;
+    const routePath =
+      typeof req.route?.path === "string" ? req.route.path : req.path;
     const route = `${req.baseUrl}${routePath}`.slice(0, 300);
     const userAgent = req.get("user-agent")?.slice(0, 300) ?? null;
 

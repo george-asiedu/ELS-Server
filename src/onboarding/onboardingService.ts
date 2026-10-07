@@ -26,7 +26,6 @@ import { NotificationTemplate } from "../notifications/registry";
 import { studioCreated } from "../notifications/templates/studio";
 import { platformBrand } from "../notifications/brand";
 
-
 type BillingMode = "SUBSCRIPTION" | "REVENUE_SHARE";
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -100,10 +99,15 @@ export class OnboardingService extends Connection {
   }) {
     const name = String(input.name ?? "").trim();
     if (name.length < 2 || name.length > 60) {
-      throw new ApiError("Studio name must be 2-60 characters", HttpCode.BAD_REQUEST);
+      throw new ApiError(
+        "Studio name must be 2-60 characters",
+        HttpCode.BAD_REQUEST,
+      );
     }
     const slug = validateStudioSlug(String(input.slug ?? ""));
-    const ownerEmail = String(input.ownerEmail ?? "").trim().toLowerCase();
+    const ownerEmail = String(input.ownerEmail ?? "")
+      .trim()
+      .toLowerCase();
     if (!EMAIL_RE.test(ownerEmail)) {
       throw new ApiError("A valid email is required", HttpCode.BAD_REQUEST);
     }
@@ -253,7 +257,9 @@ export class OnboardingService extends Connection {
         slug: signup.slug,
         ownerEmail: signup.ownerEmail,
         ownerPasswordHash: signup.ownerPasswordHash,
-        ...(signup.ownerFullName ? { ownerFullName: signup.ownerFullName } : {}),
+        ...(signup.ownerFullName
+          ? { ownerFullName: signup.ownerFullName }
+          : {}),
         plan,
         cadence,
         billingMode,
@@ -262,7 +268,10 @@ export class OnboardingService extends Connection {
         platformFeePercent: revenueShare ? commissionFor(plan, cfg) : 0,
         subscription: revenueShare
           ? { status: "revenue_share", currentPeriodEnd: null }
-          : { status: "active", currentPeriodEnd: addPeriod(new Date(), cadence) },
+          : {
+              status: "active",
+              currentPeriodEnd: addPeriod(new Date(), cadence),
+            },
       }),
     );
 
@@ -298,7 +307,7 @@ export class OnboardingService extends Connection {
         ? `https://${studio.slug}.${env.rootDomain}`
         : `${env.clientUrl}/s/${studio.slug}`;
       const { subject, html } = studioCreated(platformBrand, {
-        ownerFirstName: (signup.ownerFullName?.split(" ")[0]) || "there",
+        ownerFirstName: signup.ownerFullName?.split(" ")[0] || "there",
         studioName: studio.name,
         planName: plan === "PREMIUM" ? "Premium" : "Standard",
         dashboardUrl: `${env.clientUrl}/admin/login`,
@@ -312,7 +321,9 @@ export class OnboardingService extends Connection {
         amount > 0
           ? buildReceiptPdf({
               studioName: "Zuri Studios",
-              title: revenueShare ? "Setup fee receipt" : "Subscription receipt",
+              title: revenueShare
+                ? "Setup fee receipt"
+                : "Subscription receipt",
               receiptNumber: receiptNumber("RCP", studio.id),
               issuedAt: new Date(),
               heading: `${plan === "PREMIUM" ? "Premium" : "Standard"} plan — ${studio.name}`,

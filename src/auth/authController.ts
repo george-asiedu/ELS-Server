@@ -18,38 +18,32 @@ export class AuthController {
     return res.status(200).json({ message: "Logged out successfully" });
   };
 
-  public static signup = async (
-    req: Request,
-    res: Response,
-  ) => {
+  public static signup = async (req: Request, res: Response) => {
     assertValid(validateSignup, req.body);
-    const result = await authService.signup(req.body, getLoginDeviceMetadata(req));
+    const result = await authService.signup(
+      req.body,
+      getLoginDeviceMetadata(req),
+    );
     return res.status(201).json(result);
   };
 
-  public static login = async (
-    req: Request,
-    res: Response,
-  ) => {
+  public static login = async (req: Request, res: Response) => {
     assertValid(validateLogin, req.body);
-    const result = await authService.login(req.body, getLoginDeviceMetadata(req));
+    const result = await authService.login(
+      req.body,
+      getLoginDeviceMetadata(req),
+    );
     return res.status(200).json(result);
   };
-  
-  public static forgotPassword = async (
-     req: Request,
-     res: Response,
-  ) => {
+
+  public static forgotPassword = async (req: Request, res: Response) => {
     assertValid(validateEmail, req.body);
-    
+
     const result = await authService.forgotPassword(req.body.email);
     return res.status(200).json(result);
   };
-  
-  public static resetPassword = async (
-    req: Request,
-    res: Response,
-  ) => {
+
+  public static resetPassword = async (req: Request, res: Response) => {
     assertValid(validatePassword, req.body);
 
     const { token } = req.params;

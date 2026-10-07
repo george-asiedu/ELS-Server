@@ -7,13 +7,19 @@ import { EmailBrand } from "../types";
 
 export const studioCreated = (
   brand: EmailBrand,
-  data: { ownerFirstName: string; studioName: string; planName: string; dashboardUrl: string; storefrontUrl: string },
+  data: {
+    ownerFirstName: string;
+    studioName: string;
+    planName: string;
+    dashboardUrl: string;
+    storefrontUrl: string;
+  },
 ) => ({
   subject: "Your studio is now on Zuri Studios 🎉",
   html: renderShell({
     brand,
     previewText: `${data.studioName} is live.`,
-      documentType: "Studio activated",
+    documentType: "Studio activated",
     bodyHtml: `
       ${statusBadge("success", "STUDIO LIVE")}
       <h1 style="margin: 0 0 12px; font-family: Georgia, serif; font-size: 22px; color: #2A1B1F; text-align: center;">Welcome, ${esc(data.ownerFirstName)}!</h1>

@@ -2,7 +2,10 @@ import { Connection } from "../db/dbConnection";
 import { ApiError } from "../middleware/apiError";
 import { HttpCode } from "../models/status_codes";
 import { getPasswordHash } from "../utils/helper";
-import { createLoginSession, revokeStudioLoginSessions } from "../auth/sessionService";
+import {
+  createLoginSession,
+  revokeStudioLoginSessions,
+} from "../auth/sessionService";
 import { forgetStudioSlug } from "../tenant/studioResolver";
 import { paystack } from "../payment/paystackClient";
 import { NotificationService } from "../notifications/notificationService";
@@ -13,7 +16,6 @@ import { env } from "../config/env.config";
 import { randomBytes, createHash } from "crypto";
 import { passwordResetRequested } from "../notifications/templates/auth";
 import { AuditService } from "../audit/auditService";
-
 
 // Slugs that can never belong to a studio: they collide with platform routes,
 // reserved subdomains, or the super-admin surface.
@@ -36,7 +38,9 @@ export const RESERVED_SLUGS = new Set([
 export const SLUG_RE = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/;
 
 export const normalizeSlug = (raw: string) =>
-  String(raw ?? "").trim().toLowerCase();
+  String(raw ?? "")
+    .trim()
+    .toLowerCase();
 
 // Validate a studio slug, returning the normalized value or throwing 400.
 export const validateStudioSlug = (raw: string): string => {
@@ -76,7 +80,9 @@ export interface BillingConfig {
 
 // Commission % the platform takes per transaction for a plan (REVENUE_SHARE).
 export const commissionFor = (plan: Plan, cfg: BillingConfig): number =>
-  plan === "PREMIUM" ? cfg.commissionPremiumPercent : cfg.commissionStandardPercent;
+  plan === "PREMIUM"
+    ? cfg.commissionPremiumPercent
+    : cfg.commissionStandardPercent;
 
 // One-time setup fee (GHS) charged at signup for a plan (REVENUE_SHARE).
 export const setupFeeFor = (plan: Plan, cfg: BillingConfig): number =>
@@ -154,7 +160,8 @@ export class PlatformService extends Connection {
 
   public async updateBillingConfig(input: Partial<BillingConfig>) {
     const existing = await this.platformConfig.findFirst();
-    const id = existing?.id ?? (await this.platformConfig.create({ data: {} })).id;
+    const id =
+      existing?.id ?? (await this.platformConfig.create({ data: {} })).id;
     const clampPct = (n: unknown, fallback: number) => {
       const v = Number(n);
       return Number.isFinite(v) ? Math.min(100, Math.max(0, v)) : fallback;
@@ -179,7 +186,10 @@ export class PlatformService extends Connection {
           input.commissionPremiumPercent,
           current.commissionPremiumPercent,
         ),
-        setupFeeStandard: nonNeg(input.setupFeeStandard, current.setupFeeStandard),
+        setupFeeStandard: nonNeg(
+          input.setupFeeStandard,
+          current.setupFeeStandard,
+        ),
         setupFeePremium: nonNeg(input.setupFeePremium, current.setupFeePremium),
       },
     });
@@ -248,7 +258,7 @@ export class PlatformService extends Connection {
       currentPeriodEnd: s.currentPeriodEnd,
       customDomain: s.customDomain,
       ownerEmail: s.ownerUserId
-        ? ownerEmailById.get(s.ownerUserId) ?? null
+        ? (ownerEmailById.get(s.ownerUserId) ?? null)
         : null,
       userCount: usersByStudio.get(s.id) ?? 0,
       appointmentCount: apptsByStudio.get(s.id) ?? 0,
@@ -274,10 +284,12 @@ export class PlatformService extends Connection {
     ]);
     const m = new Map<string, number>();
     for (const p of payments) {
-      if (p.studioId) m.set(p.studioId, (m.get(p.studioId) ?? 0) + (p._sum.amount ?? 0));
+      if (p.studioId)
+        m.set(p.studioId, (m.get(p.studioId) ?? 0) + (p._sum.amount ?? 0));
     }
     for (const o of orders) {
-      if (o.studioId) m.set(o.studioId, (m.get(o.studioId) ?? 0) + (o._sum.total ?? 0));
+      if (o.studioId)
+        m.set(o.studioId, (m.get(o.studioId) ?? 0) + (o._sum.total ?? 0));
     }
     for (const [k, v] of m) m.set(k, Math.round(v * 100) / 100);
     return m;
@@ -348,12 +360,20 @@ export class PlatformService extends Connection {
   public async provisionStudio(input: ProvisionStudioInput) {
     const name = String(input.name ?? "").trim();
     if (name.length < 2 || name.length > 60) {
-      throw new ApiError("Studio name must be 2-60 characters", HttpCode.BAD_REQUEST);
+      throw new ApiError(
+        "Studio name must be 2-60 characters",
+        HttpCode.BAD_REQUEST,
+      );
     }
     const slug = validateStudioSlug(input.slug);
-    const ownerEmail = String(input.ownerEmail ?? "").trim().toLowerCase();
+    const ownerEmail = String(input.ownerEmail ?? "")
+      .trim()
+      .toLowerCase();
     if (!EMAIL_RE.test(ownerEmail)) {
-      throw new ApiError("A valid owner email is required", HttpCode.BAD_REQUEST);
+      throw new ApiError(
+        "A valid owner email is required",
+        HttpCode.BAD_REQUEST,
+      );
     }
     const ownerPassword = String(input.ownerPassword ?? "");
     if (ownerPassword.length < 8) {
@@ -384,16 +404,26 @@ export class PlatformService extends Connection {
    */
   public async provisionStudioCore(input: ProvisionCoreInput) {
     // Slug uniqueness (globally unique in the schema).
-    const slugTaken = await this.studio.findUnique({ where: { slug: input.slug } });
+    const slugTaken = await this.studio.findUnique({
+      where: { slug: input.slug },
+    });
     if (slugTaken) {
-      throw new ApiError("A studio with that slug already exists", HttpCode.CONFLICT);
+      throw new ApiError(
+        "A studio with that slug already exists",
+        HttpCode.CONFLICT,
+      );
     }
 
     const customDomain = input.customDomain?.trim().toLowerCase() || undefined;
     if (customDomain) {
-      const domainTaken = await this.studio.findFirst({ where: { customDomain } });
+      const domainTaken = await this.studio.findFirst({
+        where: { customDomain },
+      });
       if (domainTaken) {
-        throw new ApiError("That custom domain is already in use", HttpCode.CONFLICT);
+        throw new ApiError(
+          "That custom domain is already in use",
+          HttpCode.CONFLICT,
+        );
       }
     }
 
@@ -409,10 +439,16 @@ export class PlatformService extends Connection {
         ...(input.platformFeePercent !== undefined
           ? { platformFeePercent: input.platformFeePercent }
           : {}),
-        ...(sub?.customerCode ? { paystackCustomerCode: sub.customerCode } : {}),
-        ...(sub?.subscriptionCode ? { subscriptionCode: sub.subscriptionCode } : {}),
+        ...(sub?.customerCode
+          ? { paystackCustomerCode: sub.customerCode }
+          : {}),
+        ...(sub?.subscriptionCode
+          ? { subscriptionCode: sub.subscriptionCode }
+          : {}),
         ...(sub?.status ? { subscriptionStatus: sub.status } : {}),
-        ...(sub?.currentPeriodEnd ? { currentPeriodEnd: sub.currentPeriodEnd } : {}),
+        ...(sub?.currentPeriodEnd
+          ? { currentPeriodEnd: sub.currentPeriodEnd }
+          : {}),
         ...(customDomain ? { customDomain } : {}),
       },
     });
@@ -442,13 +478,20 @@ export class PlatformService extends Connection {
     });
 
     // Feature flags from the plan, with any explicit override on top.
-    const flags = { ...planFlags(input.plan), ...(input.settingsOverride ?? {}) };
+    const flags = {
+      ...planFlags(input.plan),
+      ...(input.settingsOverride ?? {}),
+    };
     await this.studioSettings.create({
       data: { studioId: studio.id, ...flags },
     });
     await this.studioBranding.create({ data: { studioId: studio.id } });
     await this.studioContent.create({
-      data: { studioId: studio.id, heroHeadline: input.name, showTestimonials: true },
+      data: {
+        studioId: studio.id,
+        heroHeadline: input.name,
+        showTestimonials: true,
+      },
     });
 
     return this.getStudio(studio.id);
@@ -476,7 +519,10 @@ export class PlatformService extends Connection {
     if (data.platformFeePercent !== undefined) {
       const pct = Number(data.platformFeePercent);
       if (!Number.isFinite(pct) || pct < 0 || pct > 100) {
-        throw new ApiError("Fee must be between 0 and 100", HttpCode.BAD_REQUEST);
+        throw new ApiError(
+          "Fee must be between 0 and 100",
+          HttpCode.BAD_REQUEST,
+        );
       }
       patch.platformFeePercent = pct;
       // Keep Paystack in sync when the studio already has a subaccount.
@@ -499,7 +545,10 @@ export class PlatformService extends Connection {
     if (data.name !== undefined) {
       const name = String(data.name).trim();
       if (name.length < 2 || name.length > 60) {
-        throw new ApiError("Studio name must be 2-60 characters", HttpCode.BAD_REQUEST);
+        throw new ApiError(
+          "Studio name must be 2-60 characters",
+          HttpCode.BAD_REQUEST,
+        );
       }
       patch.name = name;
     }
@@ -513,7 +562,10 @@ export class PlatformService extends Connection {
           where: { customDomain: domain, id: { not: id } },
         });
         if (taken) {
-          throw new ApiError("That custom domain is already in use", HttpCode.CONFLICT);
+          throw new ApiError(
+            "That custom domain is already in use",
+            HttpCode.CONFLICT,
+          );
         }
       }
       patch.customDomain = domain;
@@ -535,7 +587,11 @@ export class PlatformService extends Connection {
     // Bust the resolver cache so the new status takes effect immediately.
     forgetStudioSlug(studio.slug);
 
-    if (status === "SUSPENDED" && studio.status !== "SUSPENDED" && studio.ownerUserId) {
+    if (
+      status === "SUSPENDED" &&
+      studio.status !== "SUSPENDED" &&
+      studio.ownerUserId
+    ) {
       try {
         const owner = await this.user.findUnique({
           where: { id: studio.ownerUserId },
@@ -767,7 +823,10 @@ export class PlatformService extends Connection {
     const studio = await this.studio.findUnique({ where: { id } });
     if (!studio) throw new ApiError("Studio not found", HttpCode.NOT_FOUND);
     if (!studio.ownerUserId) {
-      throw new ApiError("This studio has no owner to impersonate", HttpCode.BAD_REQUEST);
+      throw new ApiError(
+        "This studio has no owner to impersonate",
+        HttpCode.BAD_REQUEST,
+      );
     }
 
     const owner = await this.user.findUnique({

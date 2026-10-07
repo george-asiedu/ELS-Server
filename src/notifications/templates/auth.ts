@@ -51,9 +51,15 @@ export const passwordChanged = (
 
 export const loginAlert = (
   brand: EmailBrand,
-  data: { device: string; ipAddress: string; signedInAt: string; recoveryUrl: string },
+  data: {
+    device: string;
+    ipAddress: string;
+    signedInAt: string;
+    recoveryUrl: string;
+  },
 ) => {
-  const brandName = brand.kind === "studio" ? brand.studio.name : brand.zuri.name;
+  const brandName =
+    brand.kind === "studio" ? brand.studio.name : brand.zuri.name;
   const safeBrandName = brandName.replace(/[\r\n]+/g, " ").slice(0, 100);
   return {
     subject: `New sign-in to your ${safeBrandName} account`,

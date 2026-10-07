@@ -54,13 +54,25 @@ router.get("/audit-logs", PlatformController.listAudit);
 
 router.get("/activity-logs", async (req, res, next) => {
   try {
-    const cursor = typeof req.query.cursor === "string" ? req.query.cursor : undefined;
-    const limitValue = typeof req.query.limit === "string" ? req.query.limit : undefined;
-    const studioId = typeof req.query.studioId === "string" ? req.query.studioId : undefined;
-    const method = typeof req.query.method === "string" ? req.query.method : undefined;
-    const statusCode = typeof req.query.statusCode === "string" ? Number(req.query.statusCode) : undefined;
-    if (statusCode !== undefined && (![200, 300, 400, 500].includes(statusCode))) {
-      return res.status(400).json({ message: "statusCode must be one of 200, 300, 400, or 500" });
+    const cursor =
+      typeof req.query.cursor === "string" ? req.query.cursor : undefined;
+    const limitValue =
+      typeof req.query.limit === "string" ? req.query.limit : undefined;
+    const studioId =
+      typeof req.query.studioId === "string" ? req.query.studioId : undefined;
+    const method =
+      typeof req.query.method === "string" ? req.query.method : undefined;
+    const statusCode =
+      typeof req.query.statusCode === "string"
+        ? Number(req.query.statusCode)
+        : undefined;
+    if (
+      statusCode !== undefined &&
+      ![200, 300, 400, 500].includes(statusCode)
+    ) {
+      return res
+        .status(400)
+        .json({ message: "statusCode must be one of 200, 300, 400, or 500" });
     }
     const result = await activityLogs.list({
       ...(cursor ? { cursor } : {}),
