@@ -8,8 +8,8 @@ import { NotificationTemplate } from "../notifications/registry";
 import { refundProcessed, refundFailed } from "../notifications/templates/refund";
 import { buildReceiptPdf } from "../notifications/receiptPdf";
 import { ghs, receiptDate, receiptNumber } from "../notifications/format";
-import { EmailBrand, MoneyLine } from "../notifications/types";
-import { env } from "../config/env.config";
+import { platformBrand } from "../notifications/brand";
+import { MoneyLine } from "../notifications/types";
 
 export interface RefundActor {
   id?: string | null;
@@ -25,20 +25,6 @@ export class RefundService extends Connection {
   private audit = new AuditService();
   private ledger = new LedgerService();
   private notifications = new NotificationService();
-
-  private async brandFor(studioId?: string | null): Promise<EmailBrand> {
-    const studio = await this.currentStudioBranding(studioId ?? undefined);
-    return studio
-      ? { kind: "studio", studio }
-      : {
-          kind: "zuri",
-          zuri: {
-            name: "Zuri Studios",
-            websiteUrl: env.clientUrl,
-            supportEmail: env.senderEmail,
-          },
-        };
-  }
 
   /**
    * Issue a refund against a booking payment.
@@ -401,7 +387,7 @@ export class RefundService extends Connection {
   }) {
     if (!refund.customerEmail) return;
     try {
-      const brand = await this.brandFor(refund.studioId);
+      const brand = await this.studioEmailBrand(refund.studioId, platformBrand);
       const paidTo = brand.kind === "studio" ? brand.studio.name : brand.zuri.name;
       const paidToEmail =
         brand.kind === "studio" ? brand.studio.email : brand.zuri.supportEmail;
@@ -525,7 +511,7 @@ export class RefundService extends Connection {
   }) {
     if (!refund.customerEmail) return;
     try {
-      const brand = await this.brandFor(refund.studioId);
+      const brand = await this.studioEmailBrand(refund.studioId, platformBrand);
       const support =
         brand.kind === "studio" ? brand.studio.email : brand.zuri.supportEmail;
       const { subject, html } = refundFailed(brand, {

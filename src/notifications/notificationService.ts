@@ -49,16 +49,26 @@ export class NotificationService extends Connection {
     if (existing) return; // already notified for this exact event — no-op
 
     const queued = Boolean(emailQueue);
-    const log = await this.notificationLog.create({
-      data: {
-        studioId: args.studioId ?? null,
-        template: args.template,
-        recipient: args.to,
-        entityType: args.entityType ?? null,
-        entityId: args.entityId,
-        status: "QUEUED",
-      },
-    });
+    let log: { id: string };
+    try {
+      log = await this.notificationLog.create({
+        data: {
+          studioId: args.studioId ?? null,
+          template: args.template,
+          recipient: args.to,
+          entityType: args.entityType ?? null,
+          entityId: args.entityId,
+          status: "QUEUED",
+        },
+        select: { id: true },
+      });
+    } catch (error) {
+      // A concurrent send for the same event won the unique constraint
+      // between the lookup above and this insert — it's sending, so this is
+      // the same no-op as finding it already logged.
+      if ((error as { code?: string }).code === "P2002") return;
+      throw error;
+    }
 
     try {
       if (emailQueue) {

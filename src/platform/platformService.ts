@@ -8,16 +8,12 @@ import { paystack } from "../payment/paystackClient";
 import { NotificationService } from "../notifications/notificationService";
 import { NotificationTemplate } from "../notifications/registry";
 import { studioAccountSuspended } from "../notifications/templates/studio";
-import { EmailBrand } from "../notifications/types";
+import { platformBrand } from "../notifications/brand";
 import { env } from "../config/env.config";
 import { randomBytes, createHash } from "crypto";
 import { passwordResetRequested } from "../notifications/templates/auth";
 import { AuditService } from "../audit/auditService";
 
-const zuriBrand: EmailBrand = {
-  kind: "zuri",
-  zuri: { name: "Zuri Studios", websiteUrl: env.clientUrl, supportEmail: env.senderEmail },
-};
 
 // Slugs that can never belong to a studio: they collide with platform routes,
 // reserved subdomains, or the super-admin surface.
@@ -546,7 +542,7 @@ export class PlatformService extends Connection {
           select: { email: true },
         });
         if (owner?.email) {
-          const { subject, html } = studioAccountSuspended(zuriBrand, {
+          const { subject, html } = studioAccountSuspended(platformBrand, {
             studioName: studio.name,
             supportEmail: env.senderEmail,
           });
@@ -722,17 +718,7 @@ export class PlatformService extends Connection {
 
     const resetUrl = `${env.clientUrl}/reset-password/${resetToken}`;
     try {
-      const branding = await this.currentStudioBranding(studioId);
-      const brand: EmailBrand = branding
-        ? { kind: "studio", studio: branding }
-        : {
-            kind: "zuri",
-            zuri: {
-              name: "Zuri Studios",
-              websiteUrl: env.clientUrl,
-              supportEmail: env.senderEmail,
-            },
-          };
+      const brand = await this.studioEmailBrand(studioId, platformBrand);
       const { subject, html } = passwordResetRequested(brand, {
         resetUrl,
         expiresInMinutes: 60,

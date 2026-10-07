@@ -9,13 +9,9 @@ import { env } from "../config/env.config";
 import { NotificationService } from "../notifications/notificationService";
 import { NotificationTemplate } from "../notifications/registry";
 import { loginAlert, passwordResetRequested } from "../notifications/templates/auth";
-import { EmailBrand } from "../notifications/types";
+import { platformBrand } from "../notifications/brand";
 
 const notifications = new NotificationService();
-const zuriBrand: EmailBrand = {
-  kind: "zuri",
-  zuri: { name: "Zuri Studios", websiteUrl: env.clientUrl, supportEmail: env.senderEmail },
-};
 
 /**
  * Authentication for the platform super admin. Super admins have no studio
@@ -48,7 +44,7 @@ export class PlatformAuthService extends Connection {
 
     if (isNewDevice) {
       try {
-        const { subject, html } = loginAlert(zuriBrand, {
+        const { subject, html } = loginAlert(platformBrand, {
           device: device?.userAgent || "Unknown browser or device",
           ipAddress: device?.ipAddress || "Unavailable",
           signedInAt: new Date().toISOString(),
@@ -100,7 +96,7 @@ export class PlatformAuthService extends Connection {
 
     const resetUrl = `${env.clientUrl}/platform/reset-password/${resetToken}`;
     try {
-      const { subject, html } = passwordResetRequested(zuriBrand, {
+      const { subject, html } = passwordResetRequested(platformBrand, {
         resetUrl,
         expiresInMinutes: 60,
       });

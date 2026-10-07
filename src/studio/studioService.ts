@@ -27,12 +27,8 @@ import {
   subscriptionExpiringSoon,
   subscriptionExpired,
 } from "../notifications/templates/subscription";
-import { EmailBrand } from "../notifications/types";
+import { platformBrand } from "../notifications/brand";
 
-const zuriBillingBrand: EmailBrand = {
-  kind: "zuri",
-  zuri: { name: "Zuri Studios", websiteUrl: env.clientUrl, supportEmail: env.senderEmail },
-};
 
 const DOMAIN_RE = /^(?!-)[a-z0-9-]{1,63}(\.[a-z0-9-]{1,63})+$/;
 const normalizeDomain = (raw: string) =>
@@ -911,7 +907,7 @@ export class StudioService extends Connection {
 
         try {
           if (lapsed) {
-            const { subject, html } = subscriptionExpired(zuriBillingBrand, {
+            const { subject, html } = subscriptionExpired(platformBrand, {
               planName,
               expiredOn: studio.currentPeriodEnd.toLocaleDateString("en-GB", {
                 day: "numeric",
@@ -932,7 +928,7 @@ export class StudioService extends Connection {
             expired++;
           } else {
             const amountDue = `GHS ${pricePesewas(studio.plan as Plan, studio.billingCadence as Cadence) / 100}`;
-            const { subject, html } = subscriptionExpiringSoon(zuriBillingBrand, {
+            const { subject, html } = subscriptionExpiringSoon(platformBrand, {
               planName,
               renewsOn: studio.currentPeriodEnd.toLocaleDateString("en-GB", {
                 day: "numeric",

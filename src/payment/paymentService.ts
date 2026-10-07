@@ -14,7 +14,7 @@ import { runAsSuperAdmin } from "../tenant/context";
 import { NotificationService } from "../notifications/notificationService";
 import { NotificationTemplate } from "../notifications/registry";
 import { paymentSuccess, paymentFailed } from "../notifications/templates/payment";
-import { EmailBrand, MoneyLine } from "../notifications/types";
+import { MoneyLine } from "../notifications/types";
 import {
   ghs,
   receiptDate,
@@ -25,6 +25,11 @@ import { buildReceiptPdf } from "../notifications/receiptPdf";
 import { receiptMethodLabel } from "../notifications/design/shell";
 
 type PaymentType = "FULL" | "PARTIAL";
+
+// Statuses a payment reaches only after money was collected. A refund moves a
+// payment between these, never back to PAID, and nothing here may move out of
+// them on the strength of a replayed verify or webhook.
+const COLLECTED_STATUSES = ["PAID", "REFUNDED", "PARTIALLY_REFUNDED"];
 
 const appointmentInclude = {
   appointment: {
@@ -495,7 +500,10 @@ export class PaymentService extends Connection {
       // The booking is already settled by a DIFFERENT reference: this is a
       // genuine second charge, not a replay. Record it as money received that
       // needs refunding rather than silently discarding it.
-      if (payment.status === "PAID" && payment.reference !== reference) {
+      if (
+        COLLECTED_STATUSES.includes(payment.status) &&
+        payment.reference !== reference
+      ) {
         await this.ledger.settleAttempt(reference, data, { status: "SUCCESS" });
         await this.audit.record({
           actor: { email: payment.appointment?.email ?? "system", role: "system" },
@@ -534,15 +542,28 @@ export class PaymentService extends Connection {
       }
     }
 
-    if (succeeded && payment.status !== "PAID") {
-      const updated = await this.payment.update({
-        where: { id: payment.id },
+    if (succeeded && !COLLECTED_STATUSES.includes(payment.status)) {
+      // The webhook, the reconcile sweep and the customer's own verify can all
+      // arrive at once. Claim the PENDING/FAILED → PAID transition with a
+      // conditional update so exactly one of them finalizes; the others fall
+      // through and return the row as it now stands.
+      const claimed = await this.payment.updateMany({
+        where: { id: payment.id, status: { in: ["PENDING", "FAILED"] } },
         data: {
           status: "PAID",
           transactionId: String(data.id),
           channel: data.channel ?? null,
           paidAt: data.paid_at ? new Date(data.paid_at) : new Date(),
         },
+      });
+      if (claimed.count === 0) {
+        return this.payment.findUnique({
+          where: { id: payment.id },
+          include: appointmentInclude,
+        });
+      }
+      const updated = await this.payment.findUniqueOrThrow({
+        where: { id: payment.id },
         include: appointmentInclude,
       });
       await this.ledger.settleAttempt(reference, data, { status: "SUCCESS" });
@@ -575,9 +596,20 @@ export class PaymentService extends Connection {
     }
 
     if (!succeeded && payment.status === "PENDING") {
-      const failed = await this.payment.update({
-        where: { id: payment.id },
+      // Same race as above: only one caller may record the failure (and send
+      // the failure email), and never over a success that landed meanwhile.
+      const claimed = await this.payment.updateMany({
+        where: { id: payment.id, status: "PENDING" },
         data: { status: "FAILED" },
+      });
+      if (claimed.count === 0) {
+        return this.payment.findUnique({
+          where: { id: payment.id },
+          include: appointmentInclude,
+        });
+      }
+      const failed = await this.payment.findUniqueOrThrow({
+        where: { id: payment.id },
         include: appointmentInclude,
       });
       await this.ledger.settleAttempt(reference, data, {
@@ -663,23 +695,6 @@ export class PaymentService extends Connection {
     });
   }
 
-  // `studioIdOverride` is required when called from outside the studio's own
-  // request context (e.g. the reconciliation cron, which runs in the
-  // super-admin context — see currentStudioBranding's doc comment).
-  private async brandForNotification(studioIdOverride?: string | null): Promise<EmailBrand> {
-    const studio = await this.currentStudioBranding(studioIdOverride ?? undefined);
-    return studio ?
-				{ kind: 'studio', studio }
-			:	{
-					kind: 'zuri',
-					zuri: {
-						name: 'Zuri Studios',
-						websiteUrl: 'https://zuristudios.com',
-						supportEmail: 'customersupport@zuristudios.com',
-					},
-				};
-  }
-
   private async sendReceipt(
     payment: PaymentWithAppointment & { id: string },
   ) {
@@ -693,7 +708,7 @@ export class PaymentService extends Connection {
         { label: isPartial ? "Deposit paid" : "Amount paid", value: ghs(payment.amount) },
         ...(balance > 0 ? [{ label: "Balance due at studio", value: ghs(balance), muted: true }] : []),
       ];
-      const brand = await this.brandForNotification(payment.studioId);
+      const brand = await this.studioEmailBrand(payment.studioId);
       const paidTo =
         brand.kind === "studio" ? brand.studio.name : brand.zuri.name;
       const paidToEmail =
@@ -777,7 +792,7 @@ export class PaymentService extends Connection {
     const appt = payment.appointment;
     if (!appt?.email) return;
     try {
-      const brand = await this.brandForNotification(payment.studioId);
+      const brand = await this.studioEmailBrand(payment.studioId);
       const { subject, html } = paymentFailed(brand, {
         customerFirstName: appt.fullName.split(" ")[0] || appt.fullName,
         serviceName: appt.service?.name ?? "your service",
@@ -810,11 +825,24 @@ export class PaymentService extends Connection {
       .createHmac("sha512", env.paystack.secretKey)
       .update(rawBody)
       .digest("hex");
-    if (!signature || hash !== signature) {
+    // Constant-time compare, so the signature can't be recovered byte by byte
+    // from response timing.
+    const expected = Buffer.from(hash, "utf8");
+    const received = Buffer.from(signature ?? "", "utf8");
+    if (
+      expected.length !== received.length ||
+      !crypto.timingSafeEqual(expected, received)
+    ) {
       throw new ApiError("Invalid webhook signature", 401);
     }
 
-    const event = JSON.parse(rawBody.toString("utf8"));
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let event: any;
+    try {
+      event = JSON.parse(rawBody.toString("utf8"));
+    } catch {
+      throw new ApiError("Invalid webhook payload", 400);
+    }
     const type: string = event?.event ?? "";
     const data = event?.data ?? {};
 

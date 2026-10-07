@@ -24,12 +24,8 @@ import { buildReceiptPdf } from "../notifications/receiptPdf";
 import { ghs, receiptNumber } from "../notifications/format";
 import { NotificationTemplate } from "../notifications/registry";
 import { studioCreated } from "../notifications/templates/studio";
-import { EmailBrand } from "../notifications/types";
+import { platformBrand } from "../notifications/brand";
 
-const zuriBrand: EmailBrand = {
-  kind: "zuri",
-  zuri: { name: "Zuri Studios", websiteUrl: env.clientUrl, supportEmail: env.senderEmail },
-};
 
 type BillingMode = "SUBSCRIPTION" | "REVENUE_SHARE";
 
@@ -301,7 +297,7 @@ export class OnboardingService extends Connection {
       const websiteUrl = env.rootDomain
         ? `https://${studio.slug}.${env.rootDomain}`
         : `${env.clientUrl}/s/${studio.slug}`;
-      const { subject, html } = studioCreated(zuriBrand, {
+      const { subject, html } = studioCreated(platformBrand, {
         ownerFirstName: (signup.ownerFullName?.split(" ")[0]) || "there",
         studioName: studio.name,
         planName: plan === "PREMIUM" ? "Premium" : "Standard",

@@ -12,7 +12,7 @@ import { getTenantContext } from "../tenant/context";
 import { NotificationService } from "../notifications/notificationService";
 import { NotificationTemplate } from "../notifications/registry";
 import { passwordResetRequested, passwordChanged, customerWelcome, loginAlert } from "../notifications/templates/auth";
-import { EmailBrand } from "../notifications/types";
+import { brandFromStudio, platformBrand } from "../notifications/brand";
 import { createLoginSession, revokeLoginSessions } from "./sessionService";
 import { LoginDeviceMetadata } from "./loginDevice";
 
@@ -63,9 +63,7 @@ export class AuthService extends UserRepository {
     // Best-effort welcome email — never blocks account creation if it fails.
     try {
       const studio = await this.currentStudioBranding();
-      const brand: EmailBrand = studio
-        ? { kind: "studio", studio }
-        : { kind: "zuri", zuri: { name: "Zuri Studios", websiteUrl: env.clientUrl, supportEmail: env.senderEmail } };
+      const brand = brandFromStudio(studio, platformBrand);
       const { subject, html } = customerWelcome(brand, {
         firstName: data.fullName?.split(" ")[0] || "there",
         ...(studio?.name ? { studioName: studio.name } : {}),
@@ -129,10 +127,7 @@ export class AuthService extends UserRepository {
 
     if (isNewDevice) {
       try {
-        const studio = await this.currentStudioBranding();
-        const brand: EmailBrand = studio
-          ? { kind: "studio", studio }
-          : { kind: "zuri", zuri: { name: "Zuri Studios", websiteUrl: env.clientUrl, supportEmail: env.senderEmail } };
+        const brand = await this.studioEmailBrand(null, platformBrand);
         const { subject, html } = loginAlert(brand, {
           device: device?.userAgent || "Unknown browser or device",
           ipAddress: device?.ipAddress || "Unavailable",
@@ -187,10 +182,7 @@ export class AuthService extends UserRepository {
     const resetUrl = `${env.clientUrl}/reset-password/${resetToken}`;
 
     try {
-      const studio = await this.currentStudioBranding();
-      const brand: EmailBrand = studio
-        ? { kind: "studio", studio }
-        : { kind: "zuri", zuri: { name: "Zuri Studios", websiteUrl: env.clientUrl, supportEmail: env.senderEmail } };
+      const brand = await this.studioEmailBrand(null, platformBrand);
       const { subject, html } = passwordResetRequested(brand, {
         resetUrl,
         expiresInMinutes: 60,
@@ -245,10 +237,7 @@ export class AuthService extends UserRepository {
       // Best-effort security notification — never blocks the (already
       // successful) password reset if it fails.
       try {
-        const studio = await this.currentStudioBranding();
-        const brand: EmailBrand = studio
-          ? { kind: "studio", studio }
-          : { kind: "zuri", zuri: { name: "Zuri Studios", websiteUrl: env.clientUrl, supportEmail: env.senderEmail } };
+        const brand = await this.studioEmailBrand(null, platformBrand);
         const { subject, html } = passwordChanged(brand, {
           email: user.email,
           changedAt: new Date().toLocaleString("en-GB", { dateStyle: "medium", timeStyle: "short" }),

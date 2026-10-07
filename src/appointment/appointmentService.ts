@@ -1,4 +1,4 @@
-import { Connection } from "../db/dbConnection";
+import { Connection, TenantTx } from "../db/dbConnection";
 import { CursorPage, cursorPageArgs, cursorPageResult } from "../utils/cursorPagination";
 import { getTenantContext, runAsSuperAdmin } from "../tenant/context";
 import { ApiError } from "../middleware/apiError";
@@ -25,8 +25,13 @@ import {
   bookingRescheduleRequested,
   bookingServiceChanged,
 } from "../notifications/templates/booking";
-import { EmailBrand, MoneyLine } from "../notifications/types";
+import { MoneyLine } from "../notifications/types";
 import { ghs } from "../notifications/format";
+import {
+  brandFromStudio,
+  firstName,
+  storefrontFallbackBrand,
+} from "../notifications/brand";
 
 // A short, human-friendly reference derived from the real record id (not a
 // separately-tracked field) — e.g. "APT-4F9C2A1B".
@@ -167,18 +172,7 @@ export class AppointmentService extends Connection {
       throw new ApiError("Selected service not found", 404);
     }
 
-    // Same gate a reschedule passes through. Until this existed the server
-    // accepted any well-formatted date/time, including one in the past, on a
-    // closed day, or already taken by someone else.
-    await this.assertSlotBookable({
-      date: new Date(`${data.appointmentDate}T00:00:00.000Z`),
-      time: data.appointmentTime,
-      enforceOpeningHours: true,
-      // Booking for "in a few minutes" is legitimate (a walk-in the studio
-      // enters), so creation has no notice floor beyond not being in the past.
-      minNoticeHours: 0,
-      durationMinutes: parseDurationMinutes(service.duration),
-    });
+    const appointmentDate = new Date(`${data.appointmentDate}T00:00:00.000Z`);
 
     let designImageUrl: string | undefined;
     if (data.designImageUrl) designImageUrl = this.s3.assertOwnedMediaUrl(data.designImageUrl, "appointments");
@@ -205,56 +199,81 @@ export class AppointmentService extends Connection {
       }
     }
 
-    const appointment = await this.appointment.create({
-      data: {
-        fullName: data.fullName,
-        phone: data.phone,
-        email: data.email ?? null,
-        appointmentDate: new Date(`${data.appointmentDate}T00:00:00.000Z`),
-        appointmentTime: data.appointmentTime,
-        notes: data.notes ?? null,
-        totalPrice: effectivePrice,
-        discountAmount,
-        pointsRedeemed,
-        serviceId: data.serviceId,
-        ...(designImageUrl ? { designImageUrl } : {}),
-        ...(userId ? { userId } : {}),
-      },
-      include: serviceInclude,
-    });
+    // The slot check and the insert that takes the slot run under one lock, so
+    // two customers racing for the same time can't both pass the check.
+    const appointment = await this.withSlotLock(
+      getTenantContext()?.studioId ?? null,
+      appointmentDate,
+      async (tx) => {
+        // Same gate a reschedule passes through. Until this existed the server
+        // accepted any well-formatted date/time, including one in the past, on
+        // a closed day, or already taken by someone else.
+        await this.assertSlotBookable(
+          {
+            date: appointmentDate,
+            time: data.appointmentTime,
+            enforceOpeningHours: true,
+            // Booking for "in a few minutes" is legitimate (a walk-in the
+            // studio enters), so creation has no notice floor beyond not
+            // being in the past.
+            minNoticeHours: 0,
+            durationMinutes: parseDurationMinutes(service.duration),
+          },
+          tx,
+        );
 
-    // Deduct the redeemed points now that we have the appointment id.
-    if (userId && pointsRedeemed > 0) {
-      await this.loyaltyPoints.update({
-        where: { userId },
-        data: { points: { decrement: pointsRedeemed } },
-      });
-      await this.loyaltyTransaction.create({
-        data: {
-          userId,
-          points: -pointsRedeemed,
-          type: "REDEEMED",
-          description: `Discount on ${service.name} booking`,
-          appointmentId: appointment.id,
-        },
-      });
-    }
+        const created = await tx.appointment.create({
+          data: {
+            fullName: data.fullName,
+            phone: data.phone,
+            email: data.email ?? null,
+            appointmentDate,
+            appointmentTime: data.appointmentTime,
+            notes: data.notes ?? null,
+            totalPrice: effectivePrice,
+            discountAmount,
+            pointsRedeemed,
+            serviceId: data.serviceId,
+            ...(designImageUrl ? { designImageUrl } : {}),
+            ...(userId ? { userId } : {}),
+          },
+          include: serviceInclude,
+        });
+
+        // Deduct the redeemed points now that we have the appointment id. The
+        // balance guard makes the debit atomic: a concurrent redemption that
+        // already spent the points fails here and rolls the booking back,
+        // rather than driving the balance negative.
+        if (userId && pointsRedeemed > 0) {
+          const debited = await tx.loyaltyPoints.updateMany({
+            where: { userId, points: { gte: pointsRedeemed } },
+            data: { points: { decrement: pointsRedeemed } },
+          });
+          if (debited.count === 0) {
+            throw new ApiError(
+              "Your points balance changed while you were booking. Please try again.",
+              409,
+            );
+          }
+          await tx.loyaltyTransaction.create({
+            data: {
+              userId,
+              points: -pointsRedeemed,
+              type: "REDEEMED",
+              description: `Discount on ${service.name} booking`,
+              appointmentId: created.id,
+            },
+          });
+        }
+        return created;
+      },
+    );
 
     // Booking-request notifications (best-effort — never block the booking):
     // the customer's confirmation, and a heads-up to the studio owner.
     try {
       const studio = await this.currentStudioBranding();
-      const brand: EmailBrand =
-				studio ?
-					{ kind: 'studio', studio }
-				:	{
-						kind: 'zuri',
-						zuri: {
-							name: 'Zuri Studios',
-							websiteUrl: 'https://zuristudios.com',
-							supportEmail: 'customersupport@zuristudios.com',
-						},
-					};
+      const brand = brandFromStudio(studio, storefrontFallbackBrand);
       const paymentRequired = (await this.paymentSettings.findFirst())?.enabled ?? false;
       const core = {
         serviceName: appointment.service?.name ?? "your service",
@@ -268,7 +287,7 @@ export class AppointmentService extends Connection {
       if (appointment.email) {
         const { subject, html } = bookingRequestCustomer(brand, {
           ...core,
-          customerFirstName: appointment.fullName.split(" ")[0] || appointment.fullName,
+          customerFirstName: firstName(appointment.fullName),
           paymentRequired,
           ...(studio?.bookingUrl ? { bookingUrl: studio.bookingUrl } : {}),
         });
@@ -373,9 +392,7 @@ export class AppointmentService extends Connection {
           const studio = await this.currentStudioBranding(
             appt.studioId ?? undefined,
           );
-          const brand: EmailBrand = studio
-            ? { kind: "studio", studio }
-            : { kind: "zuri", zuri: { name: "Zuri Studios", websiteUrl: "https://zuristudios.com", supportEmail: "customersupport@zuristudios.com" } };
+          const brand = brandFromStudio(studio, storefrontFallbackBrand);
 
           const payment = await this.payment.findUnique({
             where: { appointmentId: appt.id },
@@ -392,7 +409,7 @@ export class AppointmentService extends Connection {
             duration: appt.service?.duration ?? null,
             studioName: studio?.name ?? "the studio",
             bookingRef: shortRef("APT", appt.id),
-            customerFirstName: appt.fullName.split(" ")[0] || appt.fullName,
+            customerFirstName: firstName(appt.fullName),
             window,
             ...(view.balanceDue ? { balanceDue: view.balanceDue } : {}),
             ...(studio?.bookingUrl ? { bookingUrl: studio.bookingUrl } : {}),
@@ -486,10 +503,30 @@ export class AppointmentService extends Connection {
   }
 
   /**
+   * Run `fn` holding the lock for one studio's day. Every write that takes or
+   * moves a slot does its assertSlotBookable check and its write inside `fn`,
+   * so the check can't go stale before the write lands.
+   */
+  private withSlotLock<T>(
+    studioId: string | null,
+    date: Date,
+    fn: (tx: TenantTx) => Promise<T>,
+  ): Promise<T> {
+    const day = date.toISOString().slice(0, 10);
+    return this.withAdvisoryLock(`appointment-slot:${studioId ?? "-"}:${day}`, fn);
+  }
+
+  /**
    * The single gate every booking and every move passes through. Throws an
    * ApiError describing the first rule broken; returns the resolved instant.
+   *
+   * Pass the transaction from withSlotLock as `db` when the caller is about to
+   * write the slot, so the clash check reads inside the lock.
    */
-  public async assertSlotBookable(check: SlotCheck): Promise<Date> {
+  public async assertSlotBookable(
+    check: SlotCheck,
+    db: Pick<TenantTx, "appointment" | "blockedDate" | "businessHours"> = this.db,
+  ): Promise<Date> {
     const mins = parseTimeMinutes(check.time);
     if (mins === null) {
       throw new ApiError("Pick a valid time", 400);
@@ -524,7 +561,7 @@ export class AppointmentService extends Connection {
       dayStart.setUTCHours(0, 0, 0, 0);
       const dayEnd = new Date(at);
       dayEnd.setUTCHours(23, 59, 59, 999);
-      const blocked = await this.blockedDate.findFirst({
+      const blocked = await db.blockedDate.findFirst({
         where: { date: { gte: dayStart, lte: dayEnd } },
         select: { reason: true },
       });
@@ -539,7 +576,7 @@ export class AppointmentService extends Connection {
 
       // Opening hours for that weekday. No row configured means no restriction
       // — a studio that has never set its hours should still take bookings.
-      const hours = await this.businessHours.findFirst({
+      const hours = await db.businessHours.findFirst({
         where: { dayOfWeek: at.getUTCDay() },
         select: { isClosed: true, openTime: true, closeTime: true },
       });
@@ -573,7 +610,7 @@ export class AppointmentService extends Connection {
     // Every booking that day is loaded rather than just the matching time,
     // because a 4-hour service starting at 10:00 collides with an 11:00 slot
     // that no exact-match query would ever find.
-    const sameDay = await this.appointment.findMany({
+    const sameDay = await db.appointment.findMany({
       where: {
         appointmentDate: check.date,
         status: { not: "CANCELLED" },
@@ -684,42 +721,38 @@ export class AppointmentService extends Connection {
       throw new ApiError("That's already the appointment's slot", 400);
     }
 
-    await this.assertSlotBookable({
-      date,
-      time,
-      ignoreAppointmentId: id,
-      enforceOpeningHours: byCustomer,
-      minNoticeHours: byCustomer ? await this.rescheduleNoticeHours() : 0,
-      durationMinutes: parseDurationMinutes(existing.service?.duration),
-    });
+    const minNoticeHours = byCustomer ? await this.rescheduleNoticeHours() : 0;
+    const appointment = await this.withSlotLock(existing.studioId, date, async (tx) => {
+      await this.assertSlotBookable(
+        {
+          date,
+          time,
+          ignoreAppointmentId: id,
+          enforceOpeningHours: byCustomer,
+          minNoticeHours,
+          durationMinutes: parseDurationMinutes(existing.service?.duration),
+        },
+        tx,
+      );
 
-    const appointment = await this.appointment.update({
-      where: { id },
-      data: {
-        appointmentDate: date,
-        appointmentTime: time,
-        rescheduledFromDate: existing.appointmentDate,
-        rescheduledFromTime: existing.appointmentTime,
-        rescheduledAt: new Date(),
-        // A customer-initiated move holds the new slot but needs the studio to
-        // agree to it. An admin move is the studio agreeing, so it stands.
-        ...(byCustomer ? { status: "PENDING_RESCHEDULE" as const } : {}),
-      },
-      include: serviceInclude,
+      return tx.appointment.update({
+        where: { id },
+        data: {
+          appointmentDate: date,
+          appointmentTime: time,
+          rescheduledFromDate: existing.appointmentDate,
+          rescheduledFromTime: existing.appointmentTime,
+          rescheduledAt: new Date(),
+          // A customer-initiated move holds the new slot but needs the studio
+          // to agree to it. An admin move is the studio agreeing, so it stands.
+          ...(byCustomer ? { status: "PENDING_RESCHEDULE" as const } : {}),
+        },
+        include: serviceInclude,
+      });
     });
 
     const studio = await this.currentStudioBranding();
-    const brand: EmailBrand =
-			studio ?
-				{ kind: 'studio', studio }
-			:	{
-					kind: 'zuri',
-					zuri: {
-						name: 'Zuri Studios',
-						websiteUrl: 'https://zuristudios.com',
-						supportEmail: 'customersupport@zuristudios.com',
-					},
-				};
+    const brand = brandFromStudio(studio, storefrontFallbackBrand);
     const core = {
       serviceName: appointment.service?.name ?? "your service",
       date: formatDate(appointment.appointmentDate),
@@ -761,7 +794,7 @@ export class AppointmentService extends Connection {
         const { subject, html } = bookingRescheduled(brand, {
           ...core,
           customerFirstName:
-            appointment.fullName.split(" ")[0] || appointment.fullName,
+            firstName(appointment.fullName),
           previousDate: formatDate(existing.appointmentDate),
           previousTime: existing.appointmentTime,
           reason,
@@ -830,18 +863,6 @@ export class AppointmentService extends Connection {
       throw new ApiError("That service isn't currently offered", 400);
     }
 
-    // The new service may run longer, so the slot has to be re-checked against
-    // its duration — this is the case that made duration-awareness a
-    // prerequisite rather than a nicety.
-    await this.assertSlotBookable({
-      date: existing.appointmentDate,
-      time: existing.appointmentTime,
-      ignoreAppointmentId: id,
-      enforceOpeningHours: true,
-      minNoticeHours: 0,
-      durationMinutes: parseDurationMinutes(next.duration),
-    });
-
     const round = (n: number) => Math.round(n * 100) / 100;
     // Promo price wins when it undercuts the list price, same as booking.
     const newPrice =
@@ -866,24 +887,47 @@ export class AppointmentService extends Connection {
       ? round(payment.amount - (payment.refundedAmount ?? 0))
       : 0;
 
-    const appointment = await this.appointment.update({
-      where: { id },
-      data: {
-        serviceId: newServiceId,
-        totalPrice: newPrice,
-        discountAmount: discount,
-      },
-      include: serviceInclude,
-    });
+    const appointment = await this.withSlotLock(
+      existing.studioId,
+      existing.appointmentDate,
+      async (tx) => {
+        // The new service may run longer, so the slot has to be re-checked
+        // against its duration — this is the case that made
+        // duration-awareness a prerequisite rather than a nicety.
+        await this.assertSlotBookable(
+          {
+            date: existing.appointmentDate,
+            time: existing.appointmentTime,
+            ignoreAppointmentId: id,
+            enforceOpeningHours: true,
+            minNoticeHours: 0,
+            durationMinutes: parseDurationMinutes(next.duration),
+          },
+          tx,
+        );
 
-    // Keep the payment's "full amount due" in step, so the balance a customer
-    // still owes is computed from the new price everywhere it is shown.
-    if (payment) {
-      await this.payment.update({
-        where: { id: payment.id },
-        data: { totalAmount: newDue },
-      });
-    }
+        const updated = await tx.appointment.update({
+          where: { id },
+          data: {
+            serviceId: newServiceId,
+            totalPrice: newPrice,
+            discountAmount: discount,
+          },
+          include: serviceInclude,
+        });
+
+        // Keep the payment's "full amount due" in step, so the balance a
+        // customer still owes is computed from the new price everywhere it is
+        // shown.
+        if (payment) {
+          await tx.payment.update({
+            where: { id: payment.id },
+            data: { totalAmount: newDue },
+          });
+        }
+        return updated;
+      },
+    );
 
     let refunded = 0;
     let balanceDue = round(Math.max(0, newDue - netPaid));
@@ -953,9 +997,7 @@ export class AppointmentService extends Connection {
     if (appointment.email) {
       try {
         const studio = await this.currentStudioBranding();
-        const brand: EmailBrand = studio
-          ? { kind: "studio", studio }
-          : { kind: "zuri", zuri: { name: "Zuri Studios", websiteUrl: "https://zuristudios.com", supportEmail: "hello@zuristudios.com" } };
+        const brand = brandFromStudio(studio, storefrontFallbackBrand);
         const { subject, html } = bookingServiceChanged(brand, {
           serviceName: next.name,
           date: formatDate(appointment.appointmentDate),
@@ -964,7 +1006,7 @@ export class AppointmentService extends Connection {
           studioName: studio?.name ?? "the studio",
           bookingRef: shortRef("APT", appointment.id),
           customerFirstName:
-            appointment.fullName.split(" ")[0] || appointment.fullName,
+            firstName(appointment.fullName),
           previousServiceName: existing.service?.name ?? "your previous service",
           lines: [
             { label: "New total", value: ghs(newDue) },
@@ -1030,12 +1072,20 @@ export class AppointmentService extends Connection {
       );
     }
 
-    // Refund redeemed points if the booking is cancelled (once).
+    // Refund redeemed points if the booking is cancelled (once). Claiming the
+    // `pointsRefunded` flag with a conditional update is what makes "once"
+    // hold when two cancellations land together: only one of them flips it.
     if (
       status === "CANCELLED" &&
       appointment.userId &&
       appointment.pointsRedeemed > 0 &&
-      !appointment.pointsRefunded
+      !appointment.pointsRefunded &&
+      (
+        await this.appointment.updateMany({
+          where: { id: appointment.id, pointsRefunded: false },
+          data: { pointsRefunded: true },
+        })
+      ).count === 1
     ) {
       await this.loyaltyPoints.upsert({
         where: { userId: appointment.userId },
@@ -1055,10 +1105,6 @@ export class AppointmentService extends Connection {
           appointmentId: appointment.id,
         },
       });
-      await this.appointment.update({
-        where: { id: appointment.id },
-        data: { pointsRefunded: true },
-      });
       appointment.pointsRefunded = true;
     }
 
@@ -1071,9 +1117,7 @@ export class AppointmentService extends Connection {
     ) {
       try {
         const studio = await this.currentStudioBranding();
-        const brand: EmailBrand = studio
-          ? { kind: "studio", studio }
-          : { kind: "zuri", zuri: { name: "Zuri Studios", websiteUrl: "https://zuristudios.com", supportEmail: "customersupport@zuristudios.com" } };
+        const brand = brandFromStudio(studio, storefrontFallbackBrand);
         const core = {
           serviceName: appointment.service?.name ?? "your service",
           date: formatDate(appointment.appointmentDate),
@@ -1082,7 +1126,7 @@ export class AppointmentService extends Connection {
           studioName: studio?.name ?? "the studio",
           bookingRef: shortRef("APT", appointment.id),
         };
-        const customerFirstName = appointment.fullName.split(" ")[0] || appointment.fullName;
+        const customerFirstName = firstName(appointment.fullName);
 
         if (status === "CONFIRMED" && existing.status === "PENDING_RESCHEDULE") {
           // Approving a customer's reschedule. The right email is the one that
@@ -1184,24 +1228,33 @@ export class AppointmentService extends Connection {
     totalPrice: number,
     serviceName: string,
   ): Promise<number> {
-    // Guard against double-awarding if the status is set to COMPLETED again.
-    const alreadyEarned = await this.loyaltyTransaction.findFirst({
-      where: { appointmentId, type: "EARNED" },
-    });
-    if (alreadyEarned) return 0;
-
     const points = Math.floor(totalPrice / AppointmentService.GHS_PER_POINT);
     if (points <= 0) return 0;
 
-    await this.loyaltyTransaction.create({
-      data: {
-        userId,
-        points,
-        type: "EARNED",
-        description: `Earned for ${serviceName}`,
-        appointmentId,
+    // Guard against double-awarding if the status is set to COMPLETED again.
+    // The check and the EARNED row are written under one lock, so two
+    // completions arriving together can't both see "not yet earned".
+    const awarded = await this.withAdvisoryLock(
+      `loyalty-earned:${appointmentId}`,
+      async (tx) => {
+        const alreadyEarned = await tx.loyaltyTransaction.findFirst({
+          where: { appointmentId, type: "EARNED" },
+          select: { id: true },
+        });
+        if (alreadyEarned) return false;
+        await tx.loyaltyTransaction.create({
+          data: {
+            userId,
+            points,
+            type: "EARNED",
+            description: `Earned for ${serviceName}`,
+            appointmentId,
+          },
+        });
+        return true;
       },
-    });
+    );
+    if (!awarded) return 0;
 
     await this.loyaltyPoints.upsert({
       where: { userId },
@@ -1223,6 +1276,14 @@ export class AppointmentService extends Connection {
     });
     if (!referral) return;
 
+    // Claim the reward before paying it, so two first-visit completions for
+    // the same friend can't both award the referrer.
+    const claimed = await this.referral.updateMany({
+      where: { id: referral.id, rewarded: false },
+      data: { rewarded: true },
+    });
+    if (claimed.count === 0) return;
+
     const bonus = AppointmentService.REFERRAL_BONUS;
 
     await this.loyaltyTransaction.create({
@@ -1241,11 +1302,6 @@ export class AppointmentService extends Connection {
         lifetimePoints: { increment: bonus },
       },
       create: { userId: referral.referrerId, points: bonus, lifetimePoints: bonus },
-    });
-
-    await this.referral.update({
-      where: { id: referral.id },
-      data: { rewarded: true },
     });
   }
 

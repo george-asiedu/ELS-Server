@@ -10,7 +10,7 @@ import { safeClientOrigin } from "../utils/helper";
 import { NotificationService } from "../notifications/notificationService";
 import { NotificationTemplate } from "../notifications/registry";
 import { orderConfirmed, orderPaymentFailed, orderFulfilled } from "../notifications/templates/shop";
-import { EmailBrand, MoneyLine } from "../notifications/types";
+import { MoneyLine } from "../notifications/types";
 import { ghs, receiptDate, receiptNumber } from "../notifications/format";
 import { buildReceiptPdf } from "../notifications/receiptPdf";
 import { receiptMethodLabel } from "../notifications/design/shell";
@@ -64,20 +64,6 @@ export class OrderService extends Connection {
   private notifications = new NotificationService();
   private audit = new AuditService();
   private ledger = new LedgerService();
-
-  private async brandForNotification(studioIdOverride?: string | null): Promise<EmailBrand> {
-    const studio = await this.currentStudioBranding(studioIdOverride ?? undefined);
-    return studio ?
-				{ kind: 'studio', studio }
-			:	{
-					kind: 'zuri',
-					zuri: {
-						name: 'Zuri Studios',
-						websiteUrl: 'https://zuristudios.com',
-						supportEmail: 'customersupport@zuristudios.com',
-					},
-				};
-  }
 
   private static readonly POINTS_PER_GHS = 10; // 10 pts = GHS 1
   private static readonly REFERRAL_ORDER_BONUS = 50;
@@ -574,7 +560,7 @@ export class OrderService extends Connection {
 
     if (status === "FULFILLED" && order.customerEmail) {
       try {
-        const brand = await this.brandForNotification(order.studioId);
+        const brand = await this.studioEmailBrand(order.studioId);
         const { subject, html } = orderFulfilled(brand, {
           orderNumber: order.orderNumber,
           fulfillment: order.fulfillment as "PICKUP" | "DELIVERY",
@@ -817,7 +803,7 @@ export class OrderService extends Connection {
         });
         if (order.customerEmail) {
           try {
-            const brand = await this.brandForNotification(order.studioId);
+            const brand = await this.studioEmailBrand(order.studioId);
             const { subject, html } = orderPaymentFailed(brand, {
               orderNumber: order.orderNumber,
               amountAttempted: ghs(order.total),
@@ -840,14 +826,26 @@ export class OrderService extends Connection {
       return order;
     }
 
-    const paid = await this.order.update({
-      where: { id: order.id },
+    // The webhook, reconcile sweep and customer verify can race here. Only the
+    // caller that flips PENDING_PAYMENT → PAID runs the side effects below
+    // (stock, loyalty, cart, receipt); the rest return the order as it stands.
+    const claimed = await this.order.updateMany({
+      where: { id: order.id, status: "PENDING_PAYMENT" },
       data: {
         status: "PAID",
         transactionId: String(data.id),
         channel: data.channel ?? null,
         paidAt: data.paid_at ? new Date(data.paid_at) : new Date(),
       },
+    });
+    if (claimed.count === 0) {
+      return this.order.findUnique({
+        where: { id: order.id },
+        include: orderInclude,
+      });
+    }
+    const paid = await this.order.findUniqueOrThrow({
+      where: { id: order.id },
       include: orderInclude,
     });
 
@@ -895,16 +893,19 @@ export class OrderService extends Connection {
       },
     });
 
-    // Decrement stock (never below zero).
+    // Decrement stock (never below zero). Done in the database rather than
+    // read-then-write, so concurrent orders for one product can't overwrite
+    // each other's decrement.
     for (const item of paid.items) {
       if (!item.productId) continue;
-      const product = await this.product.findUnique({
-        where: { id: item.productId },
+      const decremented = await this.product.updateMany({
+        where: { id: item.productId, trackStock: true, stock: { gte: item.quantity } },
+        data: { stock: { decrement: item.quantity } },
       });
-      if (product?.trackStock) {
-        await this.product.update({
-          where: { id: product.id },
-          data: { stock: Math.max(0, product.stock - item.quantity) },
+      if (decremented.count === 0) {
+        await this.product.updateMany({
+          where: { id: item.productId, trackStock: true, stock: { lt: item.quantity } },
+          data: { stock: 0 },
         });
       }
     }
@@ -945,7 +946,7 @@ export class OrderService extends Connection {
     // Receipt email (best-effort).
     if (paid.customerEmail) {
       try {
-        const brand = await this.brandForNotification(paid.studioId);
+        const brand = await this.studioEmailBrand(paid.studioId);
         const lines: MoneyLine[] = [
           { label: "Subtotal", value: ghs(paid.subtotal) },
           ...(paid.discountAmount > 0 ? [{ label: "Discount", value: `-${ghs(paid.discountAmount)}`, muted: true }] : []),

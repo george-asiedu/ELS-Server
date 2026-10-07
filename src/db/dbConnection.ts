@@ -2,8 +2,14 @@ import { createTenantClient, RawDb, TenantDb } from "../tenant/tenantClient";
 import { getTenantContext } from "../tenant/context";
 import { shortId, studioCode } from "../utils/shortId";
 import { env } from "../config/env.config";
-import { StudioBrandingInfo } from "../notifications/types";
+import { EmailBrand, StudioBrandingInfo } from "../notifications/types";
+import { brandFromStudio, storefrontFallbackBrand } from "../notifications/brand";
 import { S3BucketService } from "../bucket/s3BucketService";
+
+const s3 = new S3BucketService();
+
+// The client handed to an interactive transaction callback on the tenant db.
+export type TenantTx = Parameters<Parameters<TenantDb["$transaction"]>[0]>[0];
 
 /**
  * Base class every service extends. It exposes the Prisma model delegates as
@@ -67,6 +73,31 @@ export class Connection {
   get paymentAttempt() { return this.db.paymentAttempt; }
   get ledgerEntry() { return this.db.ledgerEntry; }
   get refund() { return this.db.refund; }
+
+  /**
+   * Run `fn` in a transaction holding a Postgres advisory lock on `key`.
+   *
+   * For check-then-write rules (is this slot free? were these points already
+   * awarded?): doing both inside `fn` makes concurrent requests for the same
+   * key queue behind each other instead of both passing the check. The lock is
+   * released when the transaction commits or rolls back.
+   *
+   * Inside `fn`, findUnique* and upsert on scoped models are re-dispatched by
+   * the tenant extension through the raw client — outside the transaction (see
+   * tenantExtension.ts). Use findFirst/findMany/create/update/updateMany for
+   * anything that must commit or roll back with the rest.
+   */
+  protected async withAdvisoryLock<T>(
+    key: string,
+    fn: (tx: TenantTx) => Promise<T>,
+  ): Promise<T> {
+    return this.db.$transaction(async (tx) => {
+      // $executeRaw, not $queryRaw: the function returns `void`, which
+      // Prisma can't deserialize as a result column.
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${key}::text))`;
+      return fn(tx);
+    });
+  }
 
   // The current studio's Paystack subaccount code (for split settlement), or
   // null when the studio hasn't connected a payout account — in which case
@@ -141,7 +172,7 @@ export class Connection {
     return {
       name: studio.name,
       slug: studio.slug,
-      logoUrl: new S3BucketService().deliveryUrl(branding?.logoUrl ?? null) ?? null,
+      logoUrl: s3.deliveryUrl(branding?.logoUrl ?? null) ?? null,
       primaryColor: branding?.primaryColor ?? null,
       websiteUrl,
       bookingUrl: `${websiteUrl}/book`,
@@ -149,6 +180,18 @@ export class Connection {
       phone: contact?.phone ?? null,
       address: contact?.address ?? null,
     };
+  }
+
+  // The brand a notification email renders with: the studio's own identity
+  // when it resolves, else `fallback`. Customer-facing storefront mail uses
+  // the default; account/security mail passes `platformBrand`. See
+  // currentStudioBranding for when `studioIdOverride` is required.
+  protected async studioEmailBrand(
+    studioIdOverride?: string | null,
+    fallback: EmailBrand = storefrontFallbackBrand,
+  ): Promise<EmailBrand> {
+    const studio = await this.currentStudioBranding(studioIdOverride ?? undefined);
+    return brandFromStudio(studio, fallback);
   }
 
   // Where to send a studio-owner notification (new booking request, etc): the
