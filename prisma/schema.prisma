@@ -184,15 +184,29 @@ model StudioBranding {
   @@map("studio_branding")
 }
 
-// Per-studio editable page content (a fixed set of fields).
+// Per-studio editable landing-page content. Every field is optional: null
+// means "use the storefront's default wording/image".
 model StudioContent {
   id               String  @id @default(cuid())
   studioId         String  @unique
+  heroEyebrow      String?
   heroHeadline     String?
   heroSubtext      String?
+  heroImageUrl     String?
+  aboutHeading     String?
   aboutText        String?
+  aboutImageUrl    String?
+  featuresHeading  String?
   // Array of { title, description, icon } for the landing feature cards.
   featureCards     Json?
+  servicesHeading  String?
+  galleryHeading   String?
+  reviewsHeading   String?
+  loyaltyHeading   String?
+  loyaltyText      String?
+  ctaHeading       String?
+  ctaImageUrl      String?
+  contactHeading   String?
   showTestimonials Boolean @default(true)
 
   studio Studio @relation(fields: [studioId], references: [id], onDelete: Cascade)

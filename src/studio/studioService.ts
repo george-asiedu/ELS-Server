@@ -58,6 +58,34 @@ const normalizeColor = (
   return s;
 };
 
+// Landing-page text a studio admin can set, with each field's length cap.
+// Null (or blank) means the storefront shows its default wording.
+const CONTENT_TEXT_LIMITS = {
+  heroEyebrow: 40,
+  heroHeadline: 100,
+  heroSubtext: 300,
+  aboutHeading: 120,
+  aboutText: 500,
+  featuresHeading: 120,
+  servicesHeading: 120,
+  galleryHeading: 120,
+  reviewsHeading: 120,
+  loyaltyHeading: 120,
+  loyaltyText: 300,
+  ctaHeading: 120,
+  contactHeading: 120,
+} as const;
+type ContentTextField = keyof typeof CONTENT_TEXT_LIMITS;
+
+// Landing-page images: uploaded through /uploads under the studio's "studio"
+// media prefix, stored as their delivery URL.
+const CONTENT_IMAGE_FIELDS = [
+  "heroImageUrl",
+  "aboutImageUrl",
+  "ctaImageUrl",
+] as const;
+type ContentImageField = (typeof CONTENT_IMAGE_FIELDS)[number];
+
 // Feature cards are stored as JSON; a string-indexed record keeps them
 // assignable to Prisma's InputJsonValue.
 type FeatureCard = Record<string, string>;
@@ -133,13 +161,7 @@ export class StudioService extends Connection {
         accentColor: studio.branding?.accentColor ?? null,
         fontFamily: studio.branding?.fontFamily ?? null,
       },
-      content: {
-        heroHeadline: studio.content?.heroHeadline ?? null,
-        heroSubtext: studio.content?.heroSubtext ?? null,
-        aboutText: studio.content?.aboutText ?? null,
-        featureCards: studio.content?.featureCards ?? null,
-        showTestimonials: studio.content?.showTestimonials ?? true,
-      },
+      content: this.publicContent(studio.content),
       settings: {
         commerce: studio.settings?.commerce ?? false,
         loyalty: studio.settings?.loyalty ?? true,
@@ -664,6 +686,36 @@ export class StudioService extends Connection {
 
   // ---- Admin: content ---------------------------------------------------
 
+  // Every editable landing field, with images rewritten to their delivery URL.
+  private publicContent(
+    content:
+      | ({ featureCards: unknown; showTestimonials: boolean } & Record<
+          ContentTextField | ContentImageField,
+          string | null
+        >)
+      | null
+      | undefined,
+  ) {
+    const text = Object.fromEntries(
+      (Object.keys(CONTENT_TEXT_LIMITS) as ContentTextField[]).map((f) => [
+        f,
+        content?.[f] ?? null,
+      ]),
+    ) as Record<ContentTextField, string | null>;
+    const images = Object.fromEntries(
+      CONTENT_IMAGE_FIELDS.map((f) => [
+        f,
+        this.s3.deliveryUrl(content?.[f] ?? null) ?? null,
+      ]),
+    ) as Record<ContentImageField, string | null>;
+    return {
+      ...text,
+      ...images,
+      featureCards: content?.featureCards ?? null,
+      showTestimonials: content?.showTestimonials ?? true,
+    };
+  }
+
   public async getContent(studioId: string | null | undefined) {
     const id = this.requireStudioId(studioId);
     const content = await this.studioContent.upsert({
@@ -671,7 +723,7 @@ export class StudioService extends Connection {
       update: {},
       create: { studioId: id },
     });
-    return { message: "Content retrieved", data: content };
+    return { message: "Content retrieved", data: this.publicContent(content) };
   }
 
   // ---- Admin: payout (Paystack subaccount for split settlement) ---------
@@ -854,35 +906,47 @@ export class StudioService extends Connection {
 
   public async updateContent(
     studioId: string | null | undefined,
-    input: {
-      heroHeadline?: unknown;
-      heroSubtext?: unknown;
-      aboutText?: unknown;
+    input: Partial<Record<ContentTextField | ContentImageField, unknown>> & {
       featureCards?: unknown;
       showTestimonials?: unknown;
     },
   ) {
     const id = this.requireStudioId(studioId);
 
-    const data: {
-      heroHeadline?: string | null;
-      heroSubtext?: string | null;
-      aboutText?: string | null;
+    const data: Partial<
+      Record<ContentTextField | ContentImageField, string | null>
+    > & {
       featureCards?: FeatureCard[];
       showTestimonials?: boolean;
     } = {};
 
-    const text = (v: unknown, max: number) => {
-      const s = String(v ?? "").trim();
-      return s ? s.slice(0, max) : null;
-    };
+    // Omitted = leave unchanged; blank = back to the default.
+    for (const [field, max] of Object.entries(CONTENT_TEXT_LIMITS) as [
+      ContentTextField,
+      number,
+    ][]) {
+      if (input[field] === undefined) continue;
+      const s = String(input[field] ?? "").trim();
+      data[field] = s ? s.slice(0, max) : null;
+    }
 
-    if (input.heroHeadline !== undefined)
-      data.heroHeadline = text(input.heroHeadline, 100);
-    if (input.heroSubtext !== undefined)
-      data.heroSubtext = text(input.heroSubtext, 300);
-    if (input.aboutText !== undefined)
-      data.aboutText = text(input.aboutText, 500);
+    // Images must be this studio's own uploads, so a page can't be pointed at
+    // someone else's media or an arbitrary host.
+    for (const field of CONTENT_IMAGE_FIELDS) {
+      const value = input[field];
+      if (value === undefined) continue;
+      if (value === null || value === "") {
+        data[field] = null;
+        continue;
+      }
+      if (typeof value !== "string") {
+        throw new ApiError(
+          `${field} must be an image URL`,
+          HttpCode.BAD_REQUEST,
+        );
+      }
+      data[field] = this.s3.assertOwnedMediaUrl(value, "studio");
+    }
 
     const cards = sanitizeFeatureCards(input.featureCards);
     if (cards !== undefined) data.featureCards = cards;
@@ -895,7 +959,7 @@ export class StudioService extends Connection {
       update: data,
       create: { studioId: id, ...data },
     });
-    return { message: "Content updated", data: content };
+    return { message: "Content updated", data: this.publicContent(content) };
   }
 
   // Background sweep (see queue/workers/billingReminderWorker.ts, run on a
