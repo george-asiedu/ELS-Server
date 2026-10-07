@@ -80,7 +80,15 @@ export class PlatformController {
   };
 
   public static updateBillingConfig = async (req: Request, res: Response) => {
+    const before = await platformService.getBillingConfig();
     const result = await platformService.updateBillingConfig(req.body ?? {});
+    // Fees decide what new studios pay, so every change is on the record.
+    await audit.record({
+      actor: { id: req.user.id, email: req.user.email, role: req.user.role },
+      action: "platform.billing_config.updated",
+      targetType: "PlatformConfig",
+      metadata: { before, after: result.data },
+    });
     return res.status(200).json(result);
   };
 

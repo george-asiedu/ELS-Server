@@ -24,6 +24,13 @@ export const addPeriod = (from: Date, cadence: Cadence): Date => {
   return d;
 };
 
+// `months` calendar months after `from` (a setup fee's covered period).
+export const addMonths = (from: Date, months: number): Date => {
+  const d = new Date(from);
+  d.setMonth(d.getMonth() + months);
+  return d;
+};
+
 // Renewals extend from whichever is later — the current period end (so unused
 // days aren't lost) or now (if the studio already lapsed).
 export const extendPeriod = (

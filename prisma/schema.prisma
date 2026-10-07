@@ -368,6 +368,12 @@ model StudioSignup {
   reference         String         @unique
   status            SignupStatus   @default(PENDING)
   studioId          String?
+  // What this signup was charged (GHS) and, for a subscription setup fee, how
+  // many months it covers. Fixed when payment starts so a later change to the
+  // platform's fees can't change what this studio paid for. Null on signups
+  // made before these were recorded.
+  amountCharged     Float?
+  coverageMonths    Int?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -425,6 +431,14 @@ model PlatformConfig {
   // One-time activation fee (GHS) charged at signup for REVENUE_SHARE studios.
   setupFeeStandard          Float   @default(0)
   setupFeePremium           Float   @default(0)
+
+  // Subscription setup fee (GHS) per plan, charged at signup instead of the
+  // first period's price. It covers the first `setupFeeMonths*` months; the
+  // normal monthly/yearly price is due after that. 0 turns it off.
+  subscriptionSetupFeeStandard Float @default(0)
+  subscriptionSetupFeePremium  Float @default(0)
+  setupFeeMonthsMonthly        Int   @default(2)
+  setupFeeMonthsYearly         Int   @default(3)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

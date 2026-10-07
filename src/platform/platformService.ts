@@ -74,9 +74,52 @@ export interface BillingConfig {
   revenueShareEnabled: boolean;
   commissionStandardPercent: number;
   commissionPremiumPercent: number;
+  // One-time activation fee for REVENUE_SHARE studios (covers no period).
   setupFeeStandard: number;
   setupFeePremium: number;
+  // Subscription setup fee: charged at signup in place of the first period's
+  // price and covering the first setupFeeMonths* months. 0 = no setup fee.
+  subscriptionSetupFeeStandard: number;
+  subscriptionSetupFeePremium: number;
+  setupFeeMonthsMonthly: number;
+  setupFeeMonthsYearly: number;
 }
+
+const toBillingConfig = (row: BillingConfig): BillingConfig => ({
+  revenueShareEnabled: row.revenueShareEnabled,
+  commissionStandardPercent: row.commissionStandardPercent,
+  commissionPremiumPercent: row.commissionPremiumPercent,
+  setupFeeStandard: row.setupFeeStandard,
+  setupFeePremium: row.setupFeePremium,
+  subscriptionSetupFeeStandard: row.subscriptionSetupFeeStandard,
+  subscriptionSetupFeePremium: row.subscriptionSetupFeePremium,
+  setupFeeMonthsMonthly: row.setupFeeMonthsMonthly,
+  setupFeeMonthsYearly: row.setupFeeMonthsYearly,
+});
+
+/**
+ * The subscription setup fee for a plan and cadence, and how many months it
+ * covers, or null when the plan has no setup fee (the studio then pays the
+ * first period's price as usual).
+ */
+export const subscriptionSetupFor = (
+  plan: Plan,
+  cadence: "MONTHLY" | "YEARLY",
+  cfg: BillingConfig,
+): { fee: number; months: number } | null => {
+  const fee =
+    plan === "PREMIUM"
+      ? cfg.subscriptionSetupFeePremium
+      : cfg.subscriptionSetupFeeStandard;
+  if (!(fee > 0)) return null;
+  return {
+    fee,
+    months:
+      cadence === "YEARLY"
+        ? cfg.setupFeeMonthsYearly
+        : cfg.setupFeeMonthsMonthly,
+  };
+};
 
 // Commission % the platform takes per transaction for a plan (REVENUE_SHARE).
 export const commissionFor = (plan: Plan, cfg: BillingConfig): number =>
@@ -149,13 +192,7 @@ export class PlatformService extends Connection {
   public async getBillingConfig(): Promise<BillingConfig> {
     const existing = await this.platformConfig.findFirst();
     const row = existing ?? (await this.platformConfig.create({ data: {} }));
-    return {
-      revenueShareEnabled: row.revenueShareEnabled,
-      commissionStandardPercent: row.commissionStandardPercent,
-      commissionPremiumPercent: row.commissionPremiumPercent,
-      setupFeeStandard: row.setupFeeStandard,
-      setupFeePremium: row.setupFeePremium,
-    };
+    return toBillingConfig(row);
   }
 
   public async updateBillingConfig(input: Partial<BillingConfig>) {
@@ -169,6 +206,13 @@ export class PlatformService extends Connection {
     const nonNeg = (n: unknown, fallback: number) => {
       const v = Number(n);
       return Number.isFinite(v) ? Math.max(0, v) : fallback;
+    };
+    // Whole months a setup fee covers: at least 1, at most 24.
+    const months = (n: unknown, fallback: number) => {
+      const v = Number(n);
+      return Number.isFinite(v)
+        ? Math.min(24, Math.max(1, Math.round(v)))
+        : fallback;
     };
     const current = await this.getBillingConfig();
     const row = await this.platformConfig.update({
@@ -191,18 +235,25 @@ export class PlatformService extends Connection {
           current.setupFeeStandard,
         ),
         setupFeePremium: nonNeg(input.setupFeePremium, current.setupFeePremium),
+        subscriptionSetupFeeStandard: nonNeg(
+          input.subscriptionSetupFeeStandard,
+          current.subscriptionSetupFeeStandard,
+        ),
+        subscriptionSetupFeePremium: nonNeg(
+          input.subscriptionSetupFeePremium,
+          current.subscriptionSetupFeePremium,
+        ),
+        setupFeeMonthsMonthly: months(
+          input.setupFeeMonthsMonthly,
+          current.setupFeeMonthsMonthly,
+        ),
+        setupFeeMonthsYearly: months(
+          input.setupFeeMonthsYearly,
+          current.setupFeeMonthsYearly,
+        ),
       },
     });
-    return {
-      message: "Billing config updated",
-      data: {
-        revenueShareEnabled: row.revenueShareEnabled,
-        commissionStandardPercent: row.commissionStandardPercent,
-        commissionPremiumPercent: row.commissionPremiumPercent,
-        setupFeeStandard: row.setupFeeStandard,
-        setupFeePremium: row.setupFeePremium,
-      },
-    };
+    return { message: "Billing config updated", data: toBillingConfig(row) };
   }
 
   // ---- Listing / detail -------------------------------------------------
