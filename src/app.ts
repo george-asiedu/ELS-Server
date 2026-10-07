@@ -98,6 +98,10 @@ const isAllowedOrigin = (origin: string): boolean => {
   return extraOrigins.includes(origin.toLowerCase().replace(/\/$/, ""));
 };
 
+// Rate-limit replies use the same JSON shape as every other API error, so
+// the app can show the message instead of "Request failed with status 429".
+const limitMessage = (message: string) => ({ status: "fail", message });
+
 const withRateLimitStore = (namespace: string) => {
   const store = rateLimitStore(namespace);
   return store ? { store } : {};
@@ -132,12 +136,20 @@ app.use("/api", recordPlatformActivity);
 // billed command per request — several per page view. It's a coarse abuse
 // guard, so it stays in process memory (per instance). The limits that guard
 // accounts and money below share state through Redis across instances.
+//
+// One page view makes 8-10 API calls, and mobile networks put many phones
+// behind one shared address, so the limit is generous: it's there to stop a
+// flood, not to meter normal browsing. Skipped in local development, where
+// every request comes from one machine.
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  limit: 120,
+  limit: 1000,
   standardHeaders: "draft-8",
   legacyHeaders: false,
-  message: "Too many requests from this IP, please try again later.",
+  skip: () => env.nodeEnv === "development",
+  message: limitMessage(
+    "You're sending requests faster than usual. Please wait a few minutes and try again.",
+  ),
 });
 const loginIpLimiter = rateLimit({
   ...withRateLimitStore("login-ip"),
@@ -145,7 +157,7 @@ const loginIpLimiter = rateLimit({
   limit: 20,
   standardHeaders: "draft-8",
   legacyHeaders: false,
-  message: "Too many sign-in attempts. Try again later.",
+  message: limitMessage("Too many sign-in attempts. Try again later."),
 });
 const loginAccountLimiter = rateLimit({
   ...withRateLimitStore("login-account"),
@@ -164,7 +176,9 @@ const loginAccountLimiter = rateLimit({
           .toLowerCase()}`,
       )
       .digest("hex"),
-  message: "Too many sign-in attempts for this account. Try again later.",
+  message: limitMessage(
+    "Too many sign-in attempts for this account. Try again later.",
+  ),
 });
 const sensitiveActionLimiter = rateLimit({
   ...withRateLimitStore("payments"),
@@ -172,7 +186,9 @@ const sensitiveActionLimiter = rateLimit({
   limit: 30,
   standardHeaders: "draft-8",
   legacyHeaders: false,
-  message: "Too many requests from this IP, please try again later.",
+  message: limitMessage(
+    "Too many attempts in a short time. Please wait a minute and try again.",
+  ),
 });
 const accountCreationLimiter = rateLimit({
   ...withRateLimitStore("account-creation"),
@@ -180,7 +196,7 @@ const accountCreationLimiter = rateLimit({
   limit: 10,
   standardHeaders: "draft-8",
   legacyHeaders: false,
-  message: "Too many account creation attempts. Try again later.",
+  message: limitMessage("Too many account creation attempts. Try again later."),
 });
 const recoveryLimiter = rateLimit({
   ...withRateLimitStore("account-recovery"),
@@ -188,7 +204,7 @@ const recoveryLimiter = rateLimit({
   limit: 5,
   standardHeaders: "draft-8",
   legacyHeaders: false,
-  message: "Too many recovery attempts. Try again later.",
+  message: limitMessage("Too many recovery attempts. Try again later."),
 });
 app.use("/api", limiter);
 app.use("/api/auth/login", loginIpLimiter);

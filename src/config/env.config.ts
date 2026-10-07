@@ -24,7 +24,14 @@ const requiredVars = [
 ];
 const missing = requiredVars.filter((v) => !process.env[v]);
 
-const configuredTrustProxyHops = Number(process.env.TRUST_PROXY_HOPS ?? 0);
+// How many reverse proxies sit in front of the app. Without the right value
+// every request appears to come from the proxy, so per-IP rate limits turn
+// into one shared limit for all visitors. Render puts one load balancer in
+// front and sets RENDER=true, so that's the default there; elsewhere it's 0
+// unless TRUST_PROXY_HOPS says otherwise.
+const configuredTrustProxyHops = Number(
+  process.env.TRUST_PROXY_HOPS ?? (process.env.RENDER === "true" ? 1 : 0),
+);
 const trustProxyHops =
   Number.isSafeInteger(configuredTrustProxyHops) &&
   configuredTrustProxyHops >= 0
