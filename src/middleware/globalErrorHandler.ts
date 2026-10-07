@@ -135,6 +135,7 @@ export const globalErrorHandler = (
   res.status(statusCode).json({
     status: statusCode >= 500 ? "error" : "fail",
     message,
+    ...(!isServerFault && appError?.errors ? { errors: appError.errors } : {}),
     ...(reference ? { reference } : {}),
     // Stacks are for local debugging only, and only on our own faults.
     ...(process.env.NODE_ENV === "development" && isServerFault
