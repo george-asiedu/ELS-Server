@@ -77,6 +77,14 @@ export const env = {
   // with retries. When unset, the app still works: emails send synchronously
   // inline and there's no reconciliation sweep — see src/queue/README.md.
   redisUrl: (process.env.REDIS_URL as string) || "",
+  // Recurring jobs (reconciliation, reminders) run from this process. On by
+  // default only in production, so a laptop pointed at a shared database
+  // doesn't start sending reminder emails. Set SCHEDULER_ENABLED=true|false to
+  // override. Each job can also be switched off from the platform console.
+  schedulerEnabled:
+    process.env.SCHEDULER_ENABLED !== undefined
+      ? process.env.SCHEDULER_ENABLED.trim().toLowerCase() === "true"
+      : (process.env.NODE_ENV ?? "").trim().toLowerCase() === "production",
   clientUrl: process.env.CLIENT_URL as string,
   // Studio slug used when a request carries no studio hint (subdomain/header).
   // Bridges the existing single-tenant frontend during the multi-tenant rollout.

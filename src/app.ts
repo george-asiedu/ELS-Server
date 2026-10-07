@@ -11,6 +11,7 @@ import { globalErrorHandler } from "./middleware/globalErrorHandler";
 import { resolveTenant } from "./middleware/tenant";
 import routes from "./routes/index";
 import { bootstrapQueues, shutdownQueues } from "./queue";
+import { startScheduler, stopScheduler } from "./scheduler/scheduler";
 import { createTenantClient } from "./tenant/tenantClient";
 import { createHash } from "crypto";
 import { rateLimitStore } from "./middleware/rateLimitStore";
@@ -127,8 +128,11 @@ app.use(hpp());
 // API requests are still recorded without inspecting their payloads.
 app.use("/api", recordPlatformActivity);
 
+// The general per-IP limit runs on every API request, so in Redis it was one
+// billed command per request — several per page view. It's a coarse abuse
+// guard, so it stays in process memory (per instance). The limits that guard
+// accounts and money below share state through Redis across instances.
 const limiter = rateLimit({
-  ...withRateLimitStore("api"),
   windowMs: 15 * 60 * 1000,
   limit: 120,
   standardHeaders: "draft-8",
@@ -264,12 +268,20 @@ const server = app.listen(port, "0.0.0.0", () => {
   console.log(`Server is running on port ${port}`);
 });
 
-// Background job queues (email sending, payment reconciliation). Started
-// in-process alongside the API — fine at this scale; see queue/README.md for
-// how to split workers into a separate Render service later if load grows.
+// Background email queue (Redis, optional) and the recurring-job scheduler
+// (database-backed; see src/scheduler). Both run in-process alongside the API.
 bootstrapQueues().catch((error) => {
   console.error("Failed to start queues:", error);
 });
+if (env.schedulerEnabled) {
+  startScheduler().catch((error) => {
+    console.error("Failed to start scheduler:", error);
+  });
+} else {
+  console.log(
+    "Scheduler off (SCHEDULER_ENABLED is not true): recurring jobs won't run here.",
+  );
+}
 
 // Graceful shutdown. The host sends SIGTERM before replacing an instance on
 // every deploy: stop accepting connections, let in-flight requests and queue
@@ -287,6 +299,7 @@ const shutdown = (signal: string) => {
   }, SHUTDOWN_DEADLINE_MS).unref();
 
   server.close(async () => {
+    await stopScheduler();
     await shutdownQueues().catch((error) =>
       console.error("Error closing queues:", error),
     );

@@ -4,6 +4,7 @@ import { FeatureRequestController } from "../featureRequest/featureRequestContro
 import { PlatformReviewController } from "../platformReview/platformReviewController";
 import { authenticate, requireSuperAdmin } from "../middleware/auth";
 import { getQueueStatus } from "../queue/queueStatus";
+import { SchedulerController } from "../scheduler/schedulerController";
 import { PlatformActivityLogService } from "./platformActivityLog";
 import { LedgerController } from "../ledger/ledgerController";
 
@@ -87,8 +88,13 @@ router.get("/activity-logs", async (req, res, next) => {
   }
 });
 
-// Background job queues (email sending, payment reconciliation) — read-only.
+// Background email queue — read-only.
 router.get("/queues", getQueueStatus);
+
+// Recurring jobs (reconciliation, reminders): list, switch on/off, run now.
+router.get("/jobs", SchedulerController.list);
+router.patch("/jobs/:key", SchedulerController.setEnabled);
+router.post("/jobs/:key/run", SchedulerController.runNow);
 
 // Feature-request triage across all studios.
 router.get("/feature-requests", FeatureRequestController.platformList);
