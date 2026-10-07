@@ -17,6 +17,9 @@ router.post("/auth/login", PlatformController.login);
 router.post("/auth/forgot-password", PlatformController.forgotPassword);
 router.post("/auth/reset-password", PlatformController.resetPassword);
 
+// Public: site details, prices and setup fees for the platform pages.
+router.get("/public-config", PlatformController.publicConfig);
+
 // Everything below requires a signed-in super admin.
 router.use(authenticate, requireSuperAdmin);
 router.post("/auth/logout", PlatformController.logout);
@@ -25,6 +28,8 @@ router.get("/me", PlatformController.me);
 router.get("/analytics", PlatformController.analytics);
 router.get("/billing-config", PlatformController.getBillingConfig);
 router.patch("/billing-config", PlatformController.updateBillingConfig);
+router.get("/site-settings", PlatformController.getSiteSettings);
+router.patch("/site-settings", PlatformController.updateSiteSettings);
 
 router.get("/studios", PlatformController.listStudios);
 router.post("/studios", PlatformController.createStudio);

@@ -13,6 +13,7 @@ import { NotificationTemplate } from "../notifications/registry";
 import { studioAccountSuspended } from "../notifications/templates/studio";
 import { platformBrand } from "../notifications/brand";
 import { env } from "../config/env.config";
+import { createTenantClient } from "../tenant/tenantClient";
 import { randomBytes, createHash } from "crypto";
 import { passwordResetRequested } from "../notifications/templates/auth";
 import { AuditService } from "../audit/auditService";
@@ -83,9 +84,28 @@ export interface BillingConfig {
   subscriptionSetupFeePremium: number;
   setupFeeMonthsMonthly: number;
   setupFeeMonthsYearly: number;
+  // Plan prices (GHS) actually charged: the super admin's value, or the
+  // built-in default when unset.
+  priceStandardMonthly: number;
+  priceStandardYearly: number;
+  pricePremiumMonthly: number;
+  pricePremiumYearly: number;
 }
 
-const toBillingConfig = (row: BillingConfig): BillingConfig => ({
+type PlatformConfigRow = Omit<
+  BillingConfig,
+  | "priceStandardMonthly"
+  | "priceStandardYearly"
+  | "pricePremiumMonthly"
+  | "pricePremiumYearly"
+> & {
+  priceStandardMonthly: number | null;
+  priceStandardYearly: number | null;
+  pricePremiumMonthly: number | null;
+  pricePremiumYearly: number | null;
+};
+
+const toBillingConfig = (row: PlatformConfigRow): BillingConfig => ({
   revenueShareEnabled: row.revenueShareEnabled,
   commissionStandardPercent: row.commissionStandardPercent,
   commissionPremiumPercent: row.commissionPremiumPercent,
@@ -95,7 +115,120 @@ const toBillingConfig = (row: BillingConfig): BillingConfig => ({
   subscriptionSetupFeePremium: row.subscriptionSetupFeePremium,
   setupFeeMonthsMonthly: row.setupFeeMonthsMonthly,
   setupFeeMonthsYearly: row.setupFeeMonthsYearly,
+  priceStandardMonthly:
+    row.priceStandardMonthly ?? env.paystack.prices.STANDARD_MONTHLY,
+  priceStandardYearly:
+    row.priceStandardYearly ?? env.paystack.prices.STANDARD_YEARLY,
+  pricePremiumMonthly:
+    row.pricePremiumMonthly ?? env.paystack.prices.PREMIUM_MONTHLY,
+  pricePremiumYearly:
+    row.pricePremiumYearly ?? env.paystack.prices.PREMIUM_YEARLY,
 });
+
+/**
+ * The platform's billing settings (prices, setup fees, revenue-share rates).
+ * PlatformConfig is a single row, created with defaults on first read.
+ */
+export const loadBillingConfig = async (): Promise<BillingConfig> => {
+  const { raw } = createTenantClient();
+  const existing = await raw.platformConfig.findFirst();
+  const row = existing ?? (await raw.platformConfig.create({ data: {} }));
+  return toBillingConfig(row);
+};
+
+// Public details shown on the platform's own pages. Null = the frontend's
+// built-in default for that field.
+export interface SiteSettings {
+  siteName: string | null;
+  siteHeroBadge: string | null;
+  supportEmail: string | null;
+  supportWhatsapp: string | null;
+  demoStudioSlug: string | null;
+}
+
+const SITE_FIELDS = [
+  "siteName",
+  "siteHeroBadge",
+  "supportEmail",
+  "supportWhatsapp",
+  "demoStudioSlug",
+] as const;
+
+export const loadSiteSettings = async (): Promise<SiteSettings> => {
+  const { raw } = createTenantClient();
+  const row =
+    (await raw.platformConfig.findFirst()) ??
+    (await raw.platformConfig.create({ data: {} }));
+  return Object.fromEntries(
+    SITE_FIELDS.map((f) => [f, row[f]]),
+  ) as unknown as SiteSettings;
+};
+
+/**
+ * Validate and save the site details. Omitted = unchanged; blank = back to the
+ * default. Each field is checked for what it is used as (a mail link, a wa.me
+ * link, a studio address) so a typo can't break the page.
+ */
+export const saveSiteSettings = async (
+  input: Partial<Record<keyof SiteSettings, unknown>>,
+): Promise<SiteSettings> => {
+  const data: Partial<Record<keyof SiteSettings, string | null>> = {};
+  const text = (v: unknown, max: number) => {
+    const t = String(v ?? "").trim();
+    return t ? t.slice(0, max) : null;
+  };
+  if (input.siteName !== undefined) data.siteName = text(input.siteName, 60);
+  if (input.siteHeroBadge !== undefined)
+    data.siteHeroBadge = text(input.siteHeroBadge, 80);
+  if (input.supportEmail !== undefined) {
+    const v = text(input.supportEmail, 120)?.toLowerCase() ?? null;
+    if (v && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v)) {
+      throw new ApiError("Enter a valid support email", HttpCode.BAD_REQUEST);
+    }
+    data.supportEmail = v;
+  }
+  if (input.supportWhatsapp !== undefined) {
+    // Stored as digits only: that's what a wa.me link needs.
+    const digits = String(input.supportWhatsapp ?? "").replace(/\D/g, "");
+    if (digits && (digits.length < 9 || digits.length > 15)) {
+      throw new ApiError(
+        "Enter the WhatsApp number with its country code, e.g. 233201234567",
+        HttpCode.BAD_REQUEST,
+      );
+    }
+    data.supportWhatsapp = digits || null;
+  }
+  if (input.demoStudioSlug !== undefined) {
+    const slug = text(input.demoStudioSlug, 63)?.toLowerCase() ?? null;
+    if (slug && !SLUG_RE.test(slug)) {
+      throw new ApiError(
+        'The demo studio must be a studio address like "els"',
+        HttpCode.BAD_REQUEST,
+      );
+    }
+    data.demoStudioSlug = slug;
+  }
+  const { raw } = createTenantClient();
+  const existing =
+    (await raw.platformConfig.findFirst()) ??
+    (await raw.platformConfig.create({ data: {} }));
+  await raw.platformConfig.update({ where: { id: existing.id }, data });
+  return loadSiteSettings();
+};
+
+/** What a plan costs per period, in GHS. */
+export const planPriceFor = (
+  plan: Plan,
+  cadence: "MONTHLY" | "YEARLY",
+  cfg: BillingConfig,
+): number =>
+  plan === "PREMIUM"
+    ? cadence === "YEARLY"
+      ? cfg.pricePremiumYearly
+      : cfg.pricePremiumMonthly
+    : cadence === "YEARLY"
+      ? cfg.priceStandardYearly
+      : cfg.priceStandardMonthly;
 
 /**
  * The subscription setup fee for a plan and cadence, and how many months it
@@ -190,9 +323,7 @@ export class PlatformService extends Connection {
 
   // Read the singleton config, creating it with defaults on first access.
   public async getBillingConfig(): Promise<BillingConfig> {
-    const existing = await this.platformConfig.findFirst();
-    const row = existing ?? (await this.platformConfig.create({ data: {} }));
-    return toBillingConfig(row);
+    return loadBillingConfig();
   }
 
   public async updateBillingConfig(input: Partial<BillingConfig>) {
@@ -206,6 +337,10 @@ export class PlatformService extends Connection {
     const nonNeg = (n: unknown, fallback: number) => {
       const v = Number(n);
       return Number.isFinite(v) ? Math.max(0, v) : fallback;
+    };
+    const positive = (n: unknown, fallback: number) => {
+      const v = Number(n);
+      return Number.isFinite(v) && v > 0 ? Math.round(v * 100) / 100 : fallback;
     };
     // Whole months a setup fee covers: at least 1, at most 24.
     const months = (n: unknown, fallback: number) => {
@@ -250,6 +385,23 @@ export class PlatformService extends Connection {
         setupFeeMonthsYearly: months(
           input.setupFeeMonthsYearly,
           current.setupFeeMonthsYearly,
+        ),
+        // A plan must cost something: 0 or blank keeps the current price.
+        priceStandardMonthly: positive(
+          input.priceStandardMonthly,
+          current.priceStandardMonthly,
+        ),
+        priceStandardYearly: positive(
+          input.priceStandardYearly,
+          current.priceStandardYearly,
+        ),
+        pricePremiumMonthly: positive(
+          input.pricePremiumMonthly,
+          current.pricePremiumMonthly,
+        ),
+        pricePremiumYearly: positive(
+          input.pricePremiumYearly,
+          current.pricePremiumYearly,
         ),
       },
     });

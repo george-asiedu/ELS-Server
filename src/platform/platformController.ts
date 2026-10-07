@@ -1,5 +1,10 @@
 import { Request, Response } from "express";
-import { PlatformService } from "./platformService";
+import {
+  loadBillingConfig,
+  loadSiteSettings,
+  saveSiteSettings,
+  PlatformService,
+} from "./platformService";
 import { PlatformAuthService } from "./platformAuthService";
 import { AuditService } from "../audit/auditService";
 import { ApiError } from "../middleware/apiError";
@@ -90,6 +95,38 @@ export class PlatformController {
       metadata: { before, after: result.data },
     });
     return res.status(200).json(result);
+  };
+
+  // Public: what the platform pages need before anyone signs in (site
+  // details, plan prices, setup fees). Nothing here is secret.
+  public static publicConfig = async (_req: Request, res: Response) => {
+    const [site, billing] = await Promise.all([
+      loadSiteSettings(),
+      loadBillingConfig(),
+    ]);
+    return res
+      .status(200)
+      .json({ message: "Platform config", data: { site, billing } });
+  };
+
+  public static getSiteSettings = async (_req: Request, res: Response) => {
+    return res
+      .status(200)
+      .json({ message: "Site settings", data: await loadSiteSettings() });
+  };
+
+  public static updateSiteSettings = async (req: Request, res: Response) => {
+    const before = await loadSiteSettings();
+    const after = await saveSiteSettings(req.body ?? {});
+    await audit.record({
+      actor: { id: req.user.id, email: req.user.email, role: req.user.role },
+      action: "platform.site_settings.updated",
+      targetType: "PlatformConfig",
+      metadata: { before, after },
+    });
+    return res
+      .status(200)
+      .json({ message: "Site settings saved", data: after });
   };
 
   public static listStudios = async (_req: Request, res: Response) => {

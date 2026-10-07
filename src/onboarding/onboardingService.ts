@@ -13,11 +13,12 @@ import {
   commissionFor,
   setupFeeFor,
   subscriptionSetupFor,
+  planPriceFor,
 } from "../platform/platformService";
 import {
   Plan,
   Cadence,
-  pricePesewas,
+  toPesewas,
   addPeriod,
   addMonths,
 } from "../billing/billingPlans";
@@ -154,7 +155,7 @@ export class OnboardingService extends Connection {
         ? Math.round(setupFeeFor(plan, cfg) * 100)
         : setup
           ? Math.round(setup.fee * 100)
-          : pricePesewas(plan, cadence);
+          : toPesewas(planPriceFor(plan, cadence, cfg));
 
     if (billingMode === "SUBSCRIPTION" && !amountPesewas) {
       throw new ApiError(
@@ -315,7 +316,7 @@ export class OnboardingService extends Connection {
       signup.amountCharged ??
       (revenueShare
         ? setupFeeFor(plan, cfg)
-        : pricePesewas(plan, cadence) / 100);
+        : planPriceFor(plan, cadence, cfg));
     await this.audit.record({
       actor: { email: signup.ownerEmail, role: "customer" },
       action: "payment.signup.succeeded",

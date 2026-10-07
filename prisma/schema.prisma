@@ -390,6 +390,37 @@ enum ScheduledJobStatus {
   FAILED
 }
 
+enum StudioBillingChargeKind {
+  RENEWAL
+  PLAN_CHANGE
+}
+
+enum StudioBillingChargeStatus {
+  PENDING
+  APPLIED
+}
+
+// One studio-to-platform payment for a renewal or a plan change, recorded
+// when it starts. Applying it uses these stored values (never ones sent by the
+// browser), checks Paystack collected `amount`, and flips PENDING -> APPLIED
+// once, so a paid reference can't be applied twice or for a different plan.
+model StudioBillingCharge {
+  id        String                    @id @default(cuid())
+  reference String                    @unique
+  studioId  String
+  kind      StudioBillingChargeKind
+  plan      StudioPlan
+  cadence   BillingCadence
+  amount    Float
+  status    StudioBillingChargeStatus @default(PENDING)
+  appliedAt DateTime?
+  createdAt DateTime                  @default(now())
+  updatedAt DateTime                  @updatedAt
+
+  @@index([studioId])
+  @@map("studio_billing_charges")
+}
+
 // Recurring background jobs (payment reconciliation, reminders) and their
 // on/off switch. Runs are claimed by updating this row, so a job runs once per
 // scheduled slot even with several API instances, without needing Redis. See
@@ -439,6 +470,21 @@ model PlatformConfig {
   subscriptionSetupFeePremium  Float @default(0)
   setupFeeMonthsMonthly        Int   @default(2)
   setupFeeMonthsYearly         Int   @default(3)
+
+  // Plan prices (GHS). Null = the built-in default (the PLAN_* env value,
+  // else 150 / 1500 / 350 / 3500), so existing pricing holds until edited.
+  priceStandardMonthly Float?
+  priceStandardYearly  Float?
+  pricePremiumMonthly  Float?
+  pricePremiumYearly   Float?
+
+  // Public site details shown on the platform pages. Null = the frontend's
+  // built-in default.
+  siteName        String?
+  siteHeroBadge   String?
+  supportEmail    String?
+  supportWhatsapp String?
+  demoStudioSlug  String?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

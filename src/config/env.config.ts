@@ -109,8 +109,9 @@ export const env = {
       PREMIUM_YEARLY:
         (process.env.PAYSTACK_PLAN_PREMIUM_YEARLY as string) || "",
     },
-    // Plan prices in GHS per period. Charged as a one-time Mobile Money payment
-    // at signup/renewal; keep in sync with the frontend PLANS display prices.
+    // Default plan prices in GHS per period, used until the super admin sets
+    // prices in the platform console (Billing). The console's values are what
+    // is charged and shown; these are only the fallback.
     prices: {
       STANDARD_MONTHLY: Number(process.env.PLAN_STANDARD_MONTHLY) || 150,
       STANDARD_YEARLY: Number(process.env.PLAN_STANDARD_YEARLY) || 1500,

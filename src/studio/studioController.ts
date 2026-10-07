@@ -73,14 +73,12 @@ export class StudioController {
   };
 
   public static applyBillingChange = async (req: Request, res: Response) => {
+    // Only the reference is read: the plan and cadence it pays for were
+    // recorded when the payment started.
     const reference = String(req.body?.reference ?? "");
-    const plan = String(req.body?.plan ?? "");
-    const cadence = String(req.body?.cadence ?? "");
     const result = await studioService.applyBillingChange(
       req.studioId,
       reference,
-      plan,
-      cadence,
     );
     return res.status(200).json(result);
   };

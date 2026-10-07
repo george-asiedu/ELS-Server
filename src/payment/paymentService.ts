@@ -12,6 +12,11 @@ import { forgetStudioSlug } from "../tenant/studioResolver";
 import { AuditService } from "../audit/auditService";
 import { LedgerService } from "../ledger/ledgerService";
 import { RefundService } from "../refund/refundService";
+import {
+  StudioService,
+  isStudioBillingReference,
+} from "../studio/studioService";
+import { S3BucketService } from "../bucket/s3BucketService";
 import { safeClientOrigin } from "../utils/helper";
 import { runAsSuperAdmin } from "../tenant/context";
 import { NotificationService } from "../notifications/notificationService";
@@ -69,6 +74,7 @@ export class PaymentService extends Connection {
   private audit = new AuditService();
   private ledger = new LedgerService();
   private refunds = new RefundService();
+  private studioBilling = new StudioService(new S3BucketService());
 
   private async settings() {
     const existing = await this.paymentSettings.findFirst();
@@ -414,12 +420,41 @@ export class PaymentService extends Connection {
         failed,
         expired: expiredPayments.count + expiredOrders.count,
         expiredAttempts: expiredAttempts.count,
+        billingChecked: 0,
+        billingApplied: 0,
         errors,
       };
 
+      // Renewals and plan changes paid at Paystack but never applied (the
+      // webhook was missed and the admin never came back to the page).
+      const staleCharges = await this.studioBillingCharge.findMany({
+        where: {
+          status: "PENDING",
+          createdAt: { lt: graceCutoff, gt: deadCutoff },
+        },
+        select: { reference: true },
+      });
+      result.billingChecked = staleCharges.length;
+      for (const { reference } of staleCharges) {
+        try {
+          if (
+            (await this.studioBilling.applyBillingCharge(reference)) ===
+            "applied"
+          ) {
+            result.billingApplied++;
+          }
+        } catch {
+          // Not paid (yet): the normal case for an abandoned checkout.
+        }
+      }
+
       // Only log a run that actually found/changed something — a clean sweep
       // every 15 minutes would otherwise flood the platform activity log.
-      if (result.checked > 0 || result.expired > 0) {
+      if (
+        result.checked > 0 ||
+        result.expired > 0 ||
+        result.billingApplied > 0
+      ) {
         await this.audit.record({
           actor: { email: "system", role: "cron" },
           action: "payments.reconciled",
@@ -888,6 +923,10 @@ export class PaymentService extends Connection {
         if (isSignupReference(reference)) {
           // A studio-subscription first payment → provision the studio.
           await this.onboarding.finalize(reference);
+        } else if (isStudioBillingReference(reference)) {
+          // A studio's renewal or plan change. Applying it here means a studio
+          // that paid and closed the tab is still renewed.
+          await this.studioBilling.applyBillingCharge(reference);
         } else {
           // Appointment payments, product orders, and combined booking+product
           // charges (which share a reference) — finalize both; each is a no-op
