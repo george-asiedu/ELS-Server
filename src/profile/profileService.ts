@@ -37,8 +37,8 @@ export class ProfileService extends UserRepository {
         message: "Profile processed successfully",
         data: profile,
       };
-    } catch (error: any) {
-      if (error.code === "P2025") {
+    } catch (error) {
+      if ((error as { code?: string }).code === "P2025") {
         throw new ApiError("User not found", 404);
       }
       throw error;

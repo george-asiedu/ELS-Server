@@ -286,7 +286,7 @@ export class S3BucketService {
 
     try {
       await this.s3.send(new DeleteObjectCommand(params));
-    } catch (error) {
+    } catch {
       throw new ApiError("Failed to delete file", 500);
     }
   }

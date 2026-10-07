@@ -206,7 +206,7 @@ export class AuthService extends UserRepository {
         // event (a user can legitimately request a reset more than once).
         entityId: hashedToken,
       });
-    } catch (error) {
+    } catch {
       // Roll back the token if the email couldn't even be queued/sent. Once a
       // queue is configured (REDIS_URL), "sent" here just means "enqueued" —
       // a delivery failure after retries happens later in the worker and can't

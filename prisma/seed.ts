@@ -317,6 +317,7 @@ async function seedServices(studioId: string) {
     return;
   }
   await prisma.service.createMany({
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- the seed fixtures predate the studioId column's typing
     data: services.map((s) => ({ ...s, studioId })) as unknown as any[],
   });
   console.log(`✔ Seeded ${services.length} services (nails, lashes, hair).`);

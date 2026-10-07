@@ -13,7 +13,7 @@ Two things run through here:
 
 Set `REDIS_URL` in `.env` (and on Render) to turn this on:
 
-```
+```sh
 REDIS_URL=redis://default:<password>@<host>:<port>
 ```
 

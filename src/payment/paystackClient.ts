@@ -61,7 +61,6 @@ const authHeaders = () => ({
   "Content-Type": "application/json",
 });
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 const call = async <T>(path: string, init?: RequestInit): Promise<T> => {
   const res = await fetch(`${PAYSTACK_BASE}${path}`, {
     ...init,
@@ -179,9 +178,7 @@ export const paystack = {
     });
   },
 
-  async getSubscription(
-    code: string,
-  ): Promise<{
+  async getSubscription(code: string): Promise<{
     subscription_code: string;
     email_token: string;
     status: string;
