@@ -105,25 +105,35 @@ type PlatformConfigRow = Omit<
   pricePremiumYearly: number | null;
 };
 
-const toBillingConfig = (row: PlatformConfigRow): BillingConfig => ({
-  revenueShareEnabled: row.revenueShareEnabled,
-  commissionStandardPercent: row.commissionStandardPercent,
-  commissionPremiumPercent: row.commissionPremiumPercent,
-  setupFeeStandard: row.setupFeeStandard,
-  setupFeePremium: row.setupFeePremium,
-  subscriptionSetupFeeStandard: row.subscriptionSetupFeeStandard,
-  subscriptionSetupFeePremium: row.subscriptionSetupFeePremium,
-  setupFeeMonthsMonthly: row.setupFeeMonthsMonthly,
-  setupFeeMonthsYearly: row.setupFeeMonthsYearly,
-  priceStandardMonthly:
-    row.priceStandardMonthly ?? env.paystack.prices.STANDARD_MONTHLY,
-  priceStandardYearly:
-    row.priceStandardYearly ?? env.paystack.prices.STANDARD_YEARLY,
-  pricePremiumMonthly:
-    row.pricePremiumMonthly ?? env.paystack.prices.PREMIUM_MONTHLY,
-  pricePremiumYearly:
-    row.pricePremiumYearly ?? env.paystack.prices.PREMIUM_YEARLY,
-});
+// A yearly plan costs this many months of the monthly price: two months free,
+// which the platform page advertises ("save 2 months"). Yearly prices are
+// always derived from the monthly ones so the two can't drift apart. Mirrored
+// by YEARLY_FREE_MONTHS in the frontend's config/platform.ts.
+export const YEARLY_MONTHS_CHARGED = 10;
+const yearlyFrom = (monthly: number) =>
+  Math.round(monthly * YEARLY_MONTHS_CHARGED * 100) / 100;
+
+const toBillingConfig = (row: PlatformConfigRow): BillingConfig => {
+  const standardMonthly =
+    row.priceStandardMonthly ?? env.paystack.prices.STANDARD_MONTHLY;
+  const premiumMonthly =
+    row.pricePremiumMonthly ?? env.paystack.prices.PREMIUM_MONTHLY;
+  return {
+    revenueShareEnabled: row.revenueShareEnabled,
+    commissionStandardPercent: row.commissionStandardPercent,
+    commissionPremiumPercent: row.commissionPremiumPercent,
+    setupFeeStandard: row.setupFeeStandard,
+    setupFeePremium: row.setupFeePremium,
+    subscriptionSetupFeeStandard: row.subscriptionSetupFeeStandard,
+    subscriptionSetupFeePremium: row.subscriptionSetupFeePremium,
+    setupFeeMonthsMonthly: row.setupFeeMonthsMonthly,
+    setupFeeMonthsYearly: row.setupFeeMonthsYearly,
+    priceStandardMonthly: standardMonthly,
+    priceStandardYearly: yearlyFrom(standardMonthly),
+    pricePremiumMonthly: premiumMonthly,
+    pricePremiumYearly: yearlyFrom(premiumMonthly),
+  };
+};
 
 /**
  * The platform's billing settings (prices, setup fees, revenue-share rates).
@@ -350,6 +360,14 @@ export class PlatformService extends Connection {
         : fallback;
     };
     const current = await this.getBillingConfig();
+    const standardMonthly = positive(
+      input.priceStandardMonthly,
+      current.priceStandardMonthly,
+    );
+    const premiumMonthly = positive(
+      input.pricePremiumMonthly,
+      current.pricePremiumMonthly,
+    );
     const row = await this.platformConfig.update({
       where: { id },
       data: {
@@ -387,22 +405,11 @@ export class PlatformService extends Connection {
           current.setupFeeMonthsYearly,
         ),
         // A plan must cost something: 0 or blank keeps the current price.
-        priceStandardMonthly: positive(
-          input.priceStandardMonthly,
-          current.priceStandardMonthly,
-        ),
-        priceStandardYearly: positive(
-          input.priceStandardYearly,
-          current.priceStandardYearly,
-        ),
-        pricePremiumMonthly: positive(
-          input.pricePremiumMonthly,
-          current.pricePremiumMonthly,
-        ),
-        pricePremiumYearly: positive(
-          input.pricePremiumYearly,
-          current.pricePremiumYearly,
-        ),
+        // Yearly prices are stored for reference but always follow monthly.
+        priceStandardMonthly: standardMonthly,
+        priceStandardYearly: yearlyFrom(standardMonthly),
+        pricePremiumMonthly: premiumMonthly,
+        pricePremiumYearly: yearlyFrom(premiumMonthly),
       },
     });
     return { message: "Billing config updated", data: toBillingConfig(row) };

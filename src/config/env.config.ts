@@ -118,7 +118,9 @@ export const env = {
     },
     // Default plan prices in GHS per period, used until the super admin sets
     // prices in the platform console (Billing). The console's values are what
-    // is charged and shown; these are only the fallback.
+    // is charged and shown; these are only the fallback. The *_YEARLY values
+    // are no longer read: a yearly price is always 10x the monthly one (see
+    // YEARLY_MONTHS_CHARGED in platform/platformService).
     prices: {
       STANDARD_MONTHLY: Number(process.env.PLAN_STANDARD_MONTHLY) || 150,
       STANDARD_YEARLY: Number(process.env.PLAN_STANDARD_YEARLY) || 1500,
