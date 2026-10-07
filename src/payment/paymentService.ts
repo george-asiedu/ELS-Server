@@ -4,17 +4,28 @@ import { ApiError } from "../middleware/apiError";
 import { env } from "../config/env.config";
 import { paystack, PaystackVerifyData } from "./paystackClient";
 import { OrderService } from "../order/orderService";
-import { OnboardingService, isSignupReference } from "../onboarding/onboardingService";
+import {
+  OnboardingService,
+  isSignupReference,
+} from "../onboarding/onboardingService";
 import { forgetStudioSlug } from "../tenant/studioResolver";
 import { AuditService } from "../audit/auditService";
 import { LedgerService } from "../ledger/ledgerService";
 import { RefundService } from "../refund/refundService";
+import {
+  StudioService,
+  isStudioBillingReference,
+} from "../studio/studioService";
+import { S3BucketService } from "../bucket/s3BucketService";
 import { safeClientOrigin } from "../utils/helper";
 import { runAsSuperAdmin } from "../tenant/context";
 import { NotificationService } from "../notifications/notificationService";
 import { NotificationTemplate } from "../notifications/registry";
-import { paymentSuccess, paymentFailed } from "../notifications/templates/payment";
-import { EmailBrand, MoneyLine } from "../notifications/types";
+import {
+  paymentSuccess,
+  paymentFailed,
+} from "../notifications/templates/payment";
+import { MoneyLine } from "../notifications/types";
 import {
   ghs,
   receiptDate,
@@ -25,6 +36,11 @@ import { buildReceiptPdf } from "../notifications/receiptPdf";
 import { receiptMethodLabel } from "../notifications/design/shell";
 
 type PaymentType = "FULL" | "PARTIAL";
+
+// Statuses a payment reaches only after money was collected. A refund moves a
+// payment between these, never back to PAID, and nothing here may move out of
+// them on the strength of a replayed verify or webhook.
+const COLLECTED_STATUSES = ["PAID", "REFUNDED", "PARTIALLY_REFUNDED"];
 
 const appointmentInclude = {
   appointment: {
@@ -58,6 +74,7 @@ export class PaymentService extends Connection {
   private audit = new AuditService();
   private ledger = new LedgerService();
   private refunds = new RefundService();
+  private studioBilling = new StudioService(new S3BucketService());
 
   private async settings() {
     const existing = await this.paymentSettings.findFirst();
@@ -102,7 +119,8 @@ export class PaymentService extends Connection {
 
     const amountDue =
       (appointment.totalPrice ?? 0) - (appointment.discountAmount ?? 0);
-    if (amountDue <= 0) throw new ApiError("Nothing to pay for this booking", 400);
+    if (amountDue <= 0)
+      throw new ApiError("Nothing to pay for this booking", 400);
 
     const charge =
       type === "PARTIAL"
@@ -287,7 +305,9 @@ export class PaymentService extends Connection {
     const status =
       paystackStatus === "success"
         ? "success"
-        : ["failed", "abandoned", "reversed", "timeout"].includes(paystackStatus)
+        : ["failed", "abandoned", "reversed", "timeout"].includes(
+              paystackStatus,
+            )
           ? "failed"
           : "pending";
 
@@ -367,24 +387,32 @@ export class PaymentService extends Connection {
 
       // Anything past the dead cutoff gets marked FAILED without calling
       // Paystack — the transaction window has closed on their side too.
-      const [expiredPayments, expiredOrders, expiredAttempts] = await Promise.all([
-        this.payment.updateMany({
-          where: { status: "PENDING", reference: { not: null }, createdAt: { lte: deadCutoff } },
-          data: { status: "FAILED" },
-        }),
-        this.order.updateMany({
-          where: {
-            status: "PENDING_PAYMENT",
-            reference: { not: null },
-            createdAt: { lte: deadCutoff },
-          },
-          data: { status: "CANCELLED" },
-        }),
-        this.paymentAttempt.updateMany({
-          where: { status: "PENDING", createdAt: { lte: deadCutoff } },
-          data: { status: "ABANDONED", failureReason: "Transaction window closed" },
-        }),
-      ]);
+      const [expiredPayments, expiredOrders, expiredAttempts] =
+        await Promise.all([
+          this.payment.updateMany({
+            where: {
+              status: "PENDING",
+              reference: { not: null },
+              createdAt: { lte: deadCutoff },
+            },
+            data: { status: "FAILED" },
+          }),
+          this.order.updateMany({
+            where: {
+              status: "PENDING_PAYMENT",
+              reference: { not: null },
+              createdAt: { lte: deadCutoff },
+            },
+            data: { status: "CANCELLED" },
+          }),
+          this.paymentAttempt.updateMany({
+            where: { status: "PENDING", createdAt: { lte: deadCutoff } },
+            data: {
+              status: "ABANDONED",
+              failureReason: "Transaction window closed",
+            },
+          }),
+        ]);
 
       const result = {
         checked: references.size,
@@ -392,12 +420,41 @@ export class PaymentService extends Connection {
         failed,
         expired: expiredPayments.count + expiredOrders.count,
         expiredAttempts: expiredAttempts.count,
+        billingChecked: 0,
+        billingApplied: 0,
         errors,
       };
 
+      // Renewals and plan changes paid at Paystack but never applied (the
+      // webhook was missed and the admin never came back to the page).
+      const staleCharges = await this.studioBillingCharge.findMany({
+        where: {
+          status: "PENDING",
+          createdAt: { lt: graceCutoff, gt: deadCutoff },
+        },
+        select: { reference: true },
+      });
+      result.billingChecked = staleCharges.length;
+      for (const { reference } of staleCharges) {
+        try {
+          if (
+            (await this.studioBilling.applyBillingCharge(reference)) ===
+            "applied"
+          ) {
+            result.billingApplied++;
+          }
+        } catch {
+          // Not paid (yet): the normal case for an abandoned checkout.
+        }
+      }
+
       // Only log a run that actually found/changed something — a clean sweep
       // every 15 minutes would otherwise flood the platform activity log.
-      if (result.checked > 0 || result.expired > 0) {
+      if (
+        result.checked > 0 ||
+        result.expired > 0 ||
+        result.billingApplied > 0
+      ) {
         await this.audit.record({
           actor: { email: "system", role: "cron" },
           action: "payments.reconciled",
@@ -454,7 +511,10 @@ export class PaymentService extends Connection {
           failureReason: check.reason,
         });
         await this.audit.record({
-          actor: { email: payment.appointment?.email ?? "system", role: "system" },
+          actor: {
+            email: payment.appointment?.email ?? "system",
+            role: "system",
+          },
           action: "payment.booking.amount_mismatch",
           targetType: "Payment",
           targetId: payment.id,
@@ -495,10 +555,16 @@ export class PaymentService extends Connection {
       // The booking is already settled by a DIFFERENT reference: this is a
       // genuine second charge, not a replay. Record it as money received that
       // needs refunding rather than silently discarding it.
-      if (payment.status === "PAID" && payment.reference !== reference) {
+      if (
+        COLLECTED_STATUSES.includes(payment.status) &&
+        payment.reference !== reference
+      ) {
         await this.ledger.settleAttempt(reference, data, { status: "SUCCESS" });
         await this.audit.record({
-          actor: { email: payment.appointment?.email ?? "system", role: "system" },
+          actor: {
+            email: payment.appointment?.email ?? "system",
+            role: "system",
+          },
           action: "payment.booking.duplicate_charge",
           targetType: "Payment",
           targetId: payment.id,
@@ -534,15 +600,28 @@ export class PaymentService extends Connection {
       }
     }
 
-    if (succeeded && payment.status !== "PAID") {
-      const updated = await this.payment.update({
-        where: { id: payment.id },
+    if (succeeded && !COLLECTED_STATUSES.includes(payment.status)) {
+      // The webhook, the reconcile sweep and the customer's own verify can all
+      // arrive at once. Claim the PENDING/FAILED → PAID transition with a
+      // conditional update so exactly one of them finalizes; the others fall
+      // through and return the row as it now stands.
+      const claimed = await this.payment.updateMany({
+        where: { id: payment.id, status: { in: ["PENDING", "FAILED"] } },
         data: {
           status: "PAID",
           transactionId: String(data.id),
           channel: data.channel ?? null,
           paidAt: data.paid_at ? new Date(data.paid_at) : new Date(),
         },
+      });
+      if (claimed.count === 0) {
+        return this.payment.findUnique({
+          where: { id: payment.id },
+          include: appointmentInclude,
+        });
+      }
+      const updated = await this.payment.findUniqueOrThrow({
+        where: { id: payment.id },
         include: appointmentInclude,
       });
       await this.ledger.settleAttempt(reference, data, { status: "SUCCESS" });
@@ -575,9 +654,20 @@ export class PaymentService extends Connection {
     }
 
     if (!succeeded && payment.status === "PENDING") {
-      const failed = await this.payment.update({
-        where: { id: payment.id },
+      // Same race as above: only one caller may record the failure (and send
+      // the failure email), and never over a success that landed meanwhile.
+      const claimed = await this.payment.updateMany({
+        where: { id: payment.id, status: "PENDING" },
         data: { status: "FAILED" },
+      });
+      if (claimed.count === 0) {
+        return this.payment.findUnique({
+          where: { id: payment.id },
+          include: appointmentInclude,
+        });
+      }
+      const failed = await this.payment.findUniqueOrThrow({
+        where: { id: payment.id },
         include: appointmentInclude,
       });
       await this.ledger.settleAttempt(reference, data, {
@@ -663,26 +753,7 @@ export class PaymentService extends Connection {
     });
   }
 
-  // `studioIdOverride` is required when called from outside the studio's own
-  // request context (e.g. the reconciliation cron, which runs in the
-  // super-admin context — see currentStudioBranding's doc comment).
-  private async brandForNotification(studioIdOverride?: string | null): Promise<EmailBrand> {
-    const studio = await this.currentStudioBranding(studioIdOverride ?? undefined);
-    return studio ?
-				{ kind: 'studio', studio }
-			:	{
-					kind: 'zuri',
-					zuri: {
-						name: 'Zuri Studios',
-						websiteUrl: 'https://zuristudios.com',
-						supportEmail: 'customersupport@zuristudios.com',
-					},
-				};
-  }
-
-  private async sendReceipt(
-    payment: PaymentWithAppointment & { id: string },
-  ) {
+  private async sendReceipt(payment: PaymentWithAppointment & { id: string }) {
     const appt = payment.appointment;
     if (!appt?.email) return;
     try {
@@ -690,10 +761,21 @@ export class PaymentService extends Connection {
       const isPartial = payment.type === "PARTIAL";
       const lines: MoneyLine[] = [
         { label: "Total", value: ghs(payment.totalAmount) },
-        { label: isPartial ? "Deposit paid" : "Amount paid", value: ghs(payment.amount) },
-        ...(balance > 0 ? [{ label: "Balance due at studio", value: ghs(balance), muted: true }] : []),
+        {
+          label: isPartial ? "Deposit paid" : "Amount paid",
+          value: ghs(payment.amount),
+        },
+        ...(balance > 0
+          ? [
+              {
+                label: "Balance due at studio",
+                value: ghs(balance),
+                muted: true,
+              },
+            ]
+          : []),
       ];
-      const brand = await this.brandForNotification(payment.studioId);
+      const brand = await this.studioEmailBrand(payment.studioId);
       const paidTo =
         brand.kind === "studio" ? brand.studio.name : brand.zuri.name;
       const paidToEmail =
@@ -715,7 +797,9 @@ export class PaymentService extends Connection {
           amountPaid: ghs(payment.amount),
           balanceDue: balance > 0 ? ghs(balance) : null,
         },
-        ...(brand.kind === "studio" && brand.studio.bookingUrl ? { viewUrl: brand.studio.bookingUrl } : {}),
+        ...(brand.kind === "studio" && brand.studio.bookingUrl
+          ? { viewUrl: brand.studio.bookingUrl }
+          : {}),
       });
       // The receipt travels as a PDF attachment; the email body only points at
       // it. Generated per-send rather than stored, so it always reflects the
@@ -777,13 +861,15 @@ export class PaymentService extends Connection {
     const appt = payment.appointment;
     if (!appt?.email) return;
     try {
-      const brand = await this.brandForNotification(payment.studioId);
+      const brand = await this.studioEmailBrand(payment.studioId);
       const { subject, html } = paymentFailed(brand, {
         customerFirstName: appt.fullName.split(" ")[0] || appt.fullName,
         serviceName: appt.service?.name ?? "your service",
         amountAttempted: ghs(payment.amount),
         reference: payment.reference ?? payment.id,
-        ...(brand.kind === "studio" && brand.studio.bookingUrl ? { retryUrl: brand.studio.bookingUrl } : {}),
+        ...(brand.kind === "studio" && brand.studio.bookingUrl
+          ? { retryUrl: brand.studio.bookingUrl }
+          : {}),
       });
       await this.notifications.send({
         template: NotificationTemplate.PAYMENT_FAILED,
@@ -810,11 +896,24 @@ export class PaymentService extends Connection {
       .createHmac("sha512", env.paystack.secretKey)
       .update(rawBody)
       .digest("hex");
-    if (!signature || hash !== signature) {
+    // Constant-time compare, so the signature can't be recovered byte by byte
+    // from response timing.
+    const expected = Buffer.from(hash, "utf8");
+    const received = Buffer.from(signature ?? "", "utf8");
+    if (
+      expected.length !== received.length ||
+      !crypto.timingSafeEqual(expected, received)
+    ) {
       throw new ApiError("Invalid webhook signature", 401);
     }
 
-    const event = JSON.parse(rawBody.toString("utf8"));
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let event: any;
+    try {
+      event = JSON.parse(rawBody.toString("utf8"));
+    } catch {
+      throw new ApiError("Invalid webhook payload", 400);
+    }
     const type: string = event?.event ?? "";
     const data = event?.data ?? {};
 
@@ -824,6 +923,10 @@ export class PaymentService extends Connection {
         if (isSignupReference(reference)) {
           // A studio-subscription first payment → provision the studio.
           await this.onboarding.finalize(reference);
+        } else if (isStudioBillingReference(reference)) {
+          // A studio's renewal or plan change. Applying it here means a studio
+          // that paid and closed the tab is still renewed.
+          await this.studioBilling.applyBillingCharge(reference);
         } else {
           // Appointment payments, product orders, and combined booking+product
           // charges (which share a reference) — finalize both; each is a no-op
@@ -859,7 +962,10 @@ export class PaymentService extends Connection {
             );
           }
         }
-      } else if (type.startsWith("subscription.") || type.startsWith("invoice.")) {
+      } else if (
+        type.startsWith("subscription.") ||
+        type.startsWith("invoice.")
+      ) {
         await this.handleBillingEvent(type, data);
       }
     } catch (error) {
@@ -893,7 +999,8 @@ export class PaymentService extends Connection {
       return;
     }
 
-    const subCode = data?.subscription_code ?? data?.subscription?.subscription_code;
+    const subCode =
+      data?.subscription_code ?? data?.subscription?.subscription_code;
     const studio = subCode
       ? await this.studio.findFirst({ where: { subscriptionCode: subCode } })
       : null;

@@ -61,7 +61,6 @@ const authHeaders = () => ({
   "Content-Type": "application/json",
 });
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 const call = async <T>(path: string, init?: RequestInit): Promise<T> => {
   const res = await fetch(`${PAYSTACK_BASE}${path}`, {
     ...init,
@@ -179,12 +178,16 @@ export const paystack = {
     });
   },
 
-  async getSubscription(
-    code: string,
-  ): Promise<{ subscription_code: string; email_token: string; status: string }> {
-    return call<{ subscription_code: string; email_token: string; status: string }>(
-      `/subscription/${encodeURIComponent(code)}`,
-    );
+  async getSubscription(code: string): Promise<{
+    subscription_code: string;
+    email_token: string;
+    status: string;
+  }> {
+    return call<{
+      subscription_code: string;
+      email_token: string;
+      status: string;
+    }>(`/subscription/${encodeURIComponent(code)}`);
   },
 
   // Cancel a subscription (used when a studio switches plan/cadence).
@@ -201,9 +204,7 @@ export const paystack = {
   // ---- Subaccounts (per-studio split settlement) ----
 
   async listMobileMoneyBanks(): Promise<PaystackBank[]> {
-    return call<PaystackBank[]>(
-      "/bank?currency=GHS&type=mobile_money",
-    );
+    return call<PaystackBank[]>("/bank?currency=GHS&type=mobile_money");
   },
 
   // Regular banks for GHS settlement (excludes mobile money).
@@ -263,9 +264,7 @@ export const paystack = {
           ...(args.settlementBank
             ? { settlement_bank: args.settlementBank }
             : {}),
-          ...(args.accountNumber
-            ? { account_number: args.accountNumber }
-            : {}),
+          ...(args.accountNumber ? { account_number: args.accountNumber } : {}),
           ...(args.percentageCharge !== undefined
             ? { percentage_charge: args.percentageCharge }
             : {}),

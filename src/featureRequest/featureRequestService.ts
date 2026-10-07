@@ -7,7 +7,7 @@ import {
   featureRequestSubmitted,
   featureRequestStatusChanged,
 } from "../notifications/templates/featureRequest";
-import { EmailBrand } from "../notifications/types";
+import { platformBrand } from "../notifications/brand";
 import { env } from "../config/env.config";
 import { runAsSuperAdmin } from "../tenant/context";
 
@@ -28,19 +28,6 @@ type FeatureRequestStatus = (typeof FEATURE_REQUEST_STATUSES)[number];
  */
 export class FeatureRequestService extends Connection {
   private notifications = new NotificationService();
-
-  // Platform identity — feature-request mail is platform business, not studio
-  // storefront business, so both directions are Zuri-branded.
-  private zuriBrand(): EmailBrand {
-    return {
-      kind: "zuri",
-      zuri: {
-        name: "Zuri Studios",
-        websiteUrl: env.clientUrl,
-        supportEmail: env.senderEmail,
-      },
-    };
-  }
 
   /**
    * Every super admin's email. User is a tenant-scoped model, so this must run
@@ -140,7 +127,7 @@ export class FeatureRequestService extends Connection {
           )
         : null;
 
-      const { subject, html } = featureRequestSubmitted(this.zuriBrand(), {
+      const { subject, html } = featureRequestSubmitted(platformBrand, {
         studioName: studio?.name ?? "A studio",
         studioSlug: studio?.slug ?? studioId,
         title,
@@ -178,7 +165,8 @@ export class FeatureRequestService extends Connection {
 
   public async listAll(status?: string) {
     const where =
-      status && FEATURE_REQUEST_STATUSES.includes(status as FeatureRequestStatus)
+      status &&
+      FEATURE_REQUEST_STATUSES.includes(status as FeatureRequestStatus)
         ? { status: status as FeatureRequestStatus }
         : {};
     const requests = await this.featureRequest.findMany({
@@ -206,7 +194,7 @@ export class FeatureRequestService extends Connection {
     try {
       const to = await this.studioNotifyEmail(studioId);
       if (!to) return;
-      const { subject, html } = featureRequestStatusChanged(this.zuriBrand(), {
+      const { subject, html } = featureRequestStatusChanged(platformBrand, {
         title,
         status,
         dashboardUrl: `${env.clientUrl}/admin/feature-requests`,

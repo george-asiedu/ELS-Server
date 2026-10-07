@@ -1,5 +1,3 @@
-import { env } from "../config/env.config";
-
 export type Plan = "STANDARD" | "PREMIUM";
 export type Cadence = "MONTHLY" | "YEARLY";
 
@@ -8,19 +6,22 @@ export type Cadence = "MONTHLY" | "YEARLY";
 // tokenized for automatic recurring billing, so a studio pays for a period up
 // front and renews manually before it lapses.
 
-export const priceGhs = (plan: Plan, cadence: Cadence): number => {
-  const key = `${plan}_${cadence}` as keyof typeof env.paystack.prices;
-  return env.paystack.prices[key];
-};
-
-export const pricePesewas = (plan: Plan, cadence: Cadence): number =>
-  Math.round(priceGhs(plan, cadence) * 100);
+// Prices are set by the super admin (PlatformConfig); see planPriceFor and
+// loadBillingConfig in platform/platformService.
+export const toPesewas = (ghs: number): number => Math.round(ghs * 100);
 
 // End of a fresh billing period starting at `from`.
 export const addPeriod = (from: Date, cadence: Cadence): Date => {
   const d = new Date(from);
   if (cadence === "YEARLY") d.setFullYear(d.getFullYear() + 1);
   else d.setMonth(d.getMonth() + 1);
+  return d;
+};
+
+// `months` calendar months after `from` (a setup fee's covered period).
+export const addMonths = (from: Date, months: number): Date => {
+  const d = new Date(from);
+  d.setMonth(d.getMonth() + months);
   return d;
 };
 

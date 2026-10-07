@@ -1,4 +1,4 @@
-import { Request, Response, NextFunction } from "express";
+import { Request, Response } from "express";
 import {
   LedgerService,
   LedgerType,
@@ -109,89 +109,49 @@ const buildQuery = (req: Request, studioId?: string | undefined) => {
 export class LedgerController {
   // Studio admin: their own studio's ledger. Scoping is enforced by the tenant
   // extension, not by a parameter.
-  public static list = async (
-    req: Request,
-    res: Response,
-    next: NextFunction,
-  ) => {
-    try {
-      const result = await ledger.list(buildQuery(req));
-      return res.status(200).json({ message: "Transactions", ...result });
-    } catch (error) {
-      return next(error);
-    }
+  public static list = async (req: Request, res: Response) => {
+    const result = await ledger.list(buildQuery(req));
+    return res.status(200).json({ message: "Transactions", ...result });
   };
 
-  public static summary = async (
-    req: Request,
-    res: Response,
-    next: NextFunction,
-  ) => {
-    try {
-      const from = dateParam(req.query.from, "from");
-      const to = dateParam(req.query.to, "to");
-      const result = await ledger.summary({
-        ...(from ? { from } : {}),
-        ...(to ? { to } : {}),
-      });
-      return res
-        .status(200)
-        .json({ message: "Transaction summary", data: result });
-    } catch (error) {
-      return next(error);
-    }
+  public static summary = async (req: Request, res: Response) => {
+    const from = dateParam(req.query.from, "from");
+    const to = dateParam(req.query.to, "to");
+    const result = await ledger.summary({
+      ...(from ? { from } : {}),
+      ...(to ? { to } : {}),
+    });
+    return res
+      .status(200)
+      .json({ message: "Transaction summary", data: result });
   };
 
-  public static detail = async (
-    req: Request,
-    res: Response,
-    next: NextFunction,
-  ) => {
-    try {
-      const id = str(req.params.id);
-      if (!id) throw new ApiError("A transaction id is required", 400);
-      const result = await ledger.detail(id);
-      return res.status(200).json({ message: "Transaction", data: result });
-    } catch (error) {
-      return next(error);
-    }
+  public static detail = async (req: Request, res: Response) => {
+    const id = str(req.params.id);
+    if (!id) throw new ApiError("A transaction id is required", 400);
+    const result = await ledger.detail(id);
+    return res.status(200).json({ message: "Transaction", data: result });
   };
 
   // Super admin: any studio's ledger. `studioId` is required so a platform
   // call is always explicit about whose books it is reading.
-  public static platformList = async (
-    req: Request,
-    res: Response,
-    next: NextFunction,
-  ) => {
-    try {
-      const studioId = str(req.query.studioId) ?? str(req.params.studioId);
-      const result = await ledger.list(buildQuery(req, studioId));
-      return res.status(200).json({ message: "Transactions", ...result });
-    } catch (error) {
-      return next(error);
-    }
+  public static platformList = async (req: Request, res: Response) => {
+    const studioId = str(req.query.studioId) ?? str(req.params.studioId);
+    const result = await ledger.list(buildQuery(req, studioId));
+    return res.status(200).json({ message: "Transactions", ...result });
   };
 
-  public static platformSummary = async (
-    req: Request,
-    res: Response,
-    next: NextFunction,
-  ) => {
-    try {
-      const studioId = str(req.query.studioId) ?? str(req.params.studioId);
-      const from = dateParam(req.query.from, "from");
-      const to = dateParam(req.query.to, "to");
-      const result = await ledger.summary({
-        ...(studioId ? { studioId } : {}),
-        ...(from ? { from } : {}),
-        ...(to ? { to } : {}),
-      });
-      return res
-        .status(200)
-        .json({ message: "Transaction summary", data: result });
-    } catch (error) {
-      return next(error);
-    }
+  public static platformSummary = async (req: Request, res: Response) => {
+    const studioId = str(req.query.studioId) ?? str(req.params.studioId);
+    const from = dateParam(req.query.from, "from");
+    const to = dateParam(req.query.to, "to");
+    const result = await ledger.summary({
+      ...(studioId ? { studioId } : {}),
+      ...(from ? { from } : {}),
+      ...(to ? { to } : {}),
+    });
+    return res
+      .status(200)
+      .json({ message: "Transaction summary", data: result });
   };
 }

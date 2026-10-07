@@ -26,7 +26,10 @@ export class AccountService extends UserRepository {
 
   public async redeem(userId: string, points: number) {
     if (!Number.isInteger(points) || points <= 0) {
-      throw new ApiError("Points to redeem must be a positive whole number", 400);
+      throw new ApiError(
+        "Points to redeem must be a positive whole number",
+        400,
+      );
     }
     if (points < MIN_REDEEM_POINTS) {
       throw new ApiError(

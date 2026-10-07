@@ -1,7 +1,11 @@
 import { Connection } from "../db/dbConnection";
 import { ApiError } from "../middleware/apiError";
 import { S3BucketService } from "../bucket/s3BucketService";
-import { CursorPage, cursorPageArgs, cursorPageResult } from "../utils/cursorPagination";
+import {
+  CursorPage,
+  cursorPageArgs,
+  cursorPageResult,
+} from "../utils/cursorPagination";
 
 export interface CreateProductInput {
   name: string;
@@ -41,8 +45,13 @@ export class ProductService extends Connection {
       orderBy: [{ category: "asc" }, { name: "asc" }, { id: "asc" }],
       ...cursorPageArgs(page),
     });
-    products.forEach((item) => { item.imageUrl = this.s3.deliveryUrl(item.imageUrl); });
-    return { message: "Products retrieved successfully", ...cursorPageResult(products, page) };
+    products.forEach((item) => {
+      item.imageUrl = this.s3.deliveryUrl(item.imageUrl);
+    });
+    return {
+      message: "Products retrieved successfully",
+      ...cursorPageResult(products, page),
+    };
   }
 
   public async listAll(page: CursorPage) {
@@ -50,8 +59,13 @@ export class ProductService extends Connection {
       orderBy: [{ category: "asc" }, { name: "asc" }, { id: "asc" }],
       ...cursorPageArgs(page),
     });
-    products.forEach((item) => { item.imageUrl = this.s3.deliveryUrl(item.imageUrl); });
-    return { message: "Products retrieved successfully", ...cursorPageResult(products, page) };
+    products.forEach((item) => {
+      item.imageUrl = this.s3.deliveryUrl(item.imageUrl);
+    });
+    return {
+      message: "Products retrieved successfully",
+      ...cursorPageResult(products, page),
+    };
   }
 
   public async getById(id: string) {
@@ -64,9 +78,12 @@ export class ProductService extends Connection {
   public async create(data: CreateProductInput) {
     await this.assertCategoryExists(data.category);
     if (!data.name?.trim()) throw new ApiError("Product name is required", 400);
-    if (!(data.price >= 0)) throw new ApiError("A valid price is required", 400);
+    if (!(data.price >= 0))
+      throw new ApiError("A valid price is required", 400);
 
-    const imageUrl = data.imageUrl ? this.s3.assertOwnedMediaUrl(data.imageUrl, "products") : undefined;
+    const imageUrl = data.imageUrl
+      ? this.s3.assertOwnedMediaUrl(data.imageUrl, "products")
+      : undefined;
 
     const product = await this.product.create({
       data: {
@@ -86,17 +103,16 @@ export class ProductService extends Connection {
     return { message: "Product created successfully", data: product };
   }
 
-  public async update(
-    id: string,
-    data: UpdateProductInput,
-  ) {
+  public async update(id: string, data: UpdateProductInput) {
     const existing = await this.product.findUnique({ where: { id } });
     if (!existing) throw new ApiError("Product not found", 404);
     if (data.category !== undefined) {
       await this.assertCategoryExists(data.category);
     }
 
-    const imageUrl = data.imageUrl ? this.s3.assertOwnedMediaUrl(data.imageUrl, "products") : undefined;
+    const imageUrl = data.imageUrl
+      ? this.s3.assertOwnedMediaUrl(data.imageUrl, "products")
+      : undefined;
 
     const product = await this.product.update({
       where: { id },
@@ -107,10 +123,14 @@ export class ProductService extends Connection {
           : {}),
         ...(data.price !== undefined ? { price: data.price } : {}),
         ...(data.costPrice !== undefined ? { costPrice: data.costPrice } : {}),
-        ...(data.promoPrice !== undefined ? { promoPrice: data.promoPrice } : {}),
+        ...(data.promoPrice !== undefined
+          ? { promoPrice: data.promoPrice }
+          : {}),
         ...(data.category !== undefined ? { category: data.category } : {}),
         ...(data.stock !== undefined ? { stock: data.stock } : {}),
-        ...(data.trackStock !== undefined ? { trackStock: data.trackStock } : {}),
+        ...(data.trackStock !== undefined
+          ? { trackStock: data.trackStock }
+          : {}),
         ...(data.active !== undefined ? { active: data.active } : {}),
         ...(data.popular !== undefined ? { popular: data.popular } : {}),
         ...(imageUrl ? { imageUrl } : {}),

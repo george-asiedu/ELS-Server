@@ -20,7 +20,11 @@ interface BookingCore {
 
 export const bookingRequestCustomer = (
   brand: EmailBrand,
-  data: BookingCore & { customerFirstName: string; paymentRequired: boolean; bookingUrl?: string },
+  data: BookingCore & {
+    customerFirstName: string;
+    paymentRequired: boolean;
+    bookingUrl?: string;
+  },
 ) => {
   const color = brandColor(brand);
   return {
@@ -79,7 +83,11 @@ export const bookingRequestStudio = (
 
 export const bookingCompleted = (
   brand: EmailBrand,
-  data: BookingCore & { customerFirstName: string; loyaltyPointsEarned?: number; reviewUrl?: string },
+  data: BookingCore & {
+    customerFirstName: string;
+    loyaltyPointsEarned?: number;
+    reviewUrl?: string;
+  },
 ) => {
   const color = brandColor(brand);
   return {
@@ -106,13 +114,17 @@ export const bookingCompleted = (
 
 export const bookingCancelled = (
   brand: EmailBrand,
-  data: BookingCore & { customerFirstName: string; reason?: string | null; bookingUrl?: string },
+  data: BookingCore & {
+    customerFirstName: string;
+    reason?: string | null;
+    bookingUrl?: string;
+  },
 ) => ({
   subject: "Your appointment has been cancelled",
   html: renderShell({
     brand,
     previewText: `Your ${data.serviceName} appointment was cancelled.`,
-      documentType: "Appointment cancelled",
+    documentType: "Appointment cancelled",
     bodyHtml: `
       ${statusBadge("error", "CANCELLED")}
       <h1 style="margin: 0 0 12px; font-family: Georgia, serif; font-size: 22px; color: #2A1B1F; text-align: center;">Appointment cancelled</h1>

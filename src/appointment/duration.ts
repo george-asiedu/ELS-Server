@@ -12,7 +12,10 @@ export const parseDurationMinutes = (
   const text = duration.toLowerCase().trim();
 
   // "1h30", "1h 30m", "1:30"
-  const combined = /^(\d+)\s*(?:h|hr|hrs|hour|hours|:)\s*(\d{1,2})\s*(?:m|min|mins|minutes)?$/.exec(text);
+  const combined =
+    /^(\d+)\s*(?:h|hr|hrs|hour|hours|:)\s*(\d{1,2})\s*(?:m|min|mins|minutes)?$/.exec(
+      text,
+    );
   if (combined) {
     return Number(combined[1]) * 60 + Number(combined[2]);
   }

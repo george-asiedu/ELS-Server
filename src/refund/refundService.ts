@@ -1,15 +1,18 @@
-import { Connection } from "../db/dbConnection";
+import { Connection, TenantTx } from "../db/dbConnection";
 import { ApiError } from "../middleware/apiError";
 import { paystack } from "../payment/paystackClient";
 import { AuditService } from "../audit/auditService";
 import { LedgerService } from "../ledger/ledgerService";
 import { NotificationService } from "../notifications/notificationService";
 import { NotificationTemplate } from "../notifications/registry";
-import { refundProcessed, refundFailed } from "../notifications/templates/refund";
+import {
+  refundProcessed,
+  refundFailed,
+} from "../notifications/templates/refund";
 import { buildReceiptPdf } from "../notifications/receiptPdf";
 import { ghs, receiptDate, receiptNumber } from "../notifications/format";
-import { EmailBrand, MoneyLine } from "../notifications/types";
-import { env } from "../config/env.config";
+import { platformBrand } from "../notifications/brand";
+import { MoneyLine } from "../notifications/types";
 
 export interface RefundActor {
   id?: string | null;
@@ -20,25 +23,21 @@ export interface RefundActor {
 // Money comparisons happen in pesewas (integers) so float representation can
 // never let a refund creep a fraction over what was collected.
 const toPesewas = (n: number) => Math.round(n * 100);
+const round2 = (n: number) => Math.round(n * 100) / 100;
+
+// What a refund is drawn against. A booking refund draws on its Payment, a
+// shop refund on its Order; the lock key is per source so refunds against
+// different payments never wait on each other.
+type RefundSource =
+  | { kind: "payment"; id: string }
+  | { kind: "order"; id: string };
+const sourceLockKey = (source: RefundSource) =>
+  `refund-source:${source.kind}:${source.id}`;
 
 export class RefundService extends Connection {
   private audit = new AuditService();
   private ledger = new LedgerService();
   private notifications = new NotificationService();
-
-  private async brandFor(studioId?: string | null): Promise<EmailBrand> {
-    const studio = await this.currentStudioBranding(studioId ?? undefined);
-    return studio
-      ? { kind: "studio", studio }
-      : {
-          kind: "zuri",
-          zuri: {
-            name: "Zuri Studios",
-            websiteUrl: env.clientUrl,
-            supportEmail: env.senderEmail,
-          },
-        };
-  }
 
   /**
    * Issue a refund against a booking payment.
@@ -76,43 +75,32 @@ export class RefundService extends Connection {
       );
     }
 
-    const alreadyRefunded = payment.refundedAmount ?? 0;
-    const refundable =
-      Math.round((payment.amount - alreadyRefunded) * 100) / 100;
-    if (refundable <= 0) {
-      throw new ApiError("This payment has already been fully refunded", 400);
-    }
-
-    const amount = input.amount ?? refundable;
-    if (!Number.isFinite(amount) || amount <= 0) {
-      throw new ApiError("Refund amount must be greater than 0", 400);
-    }
-    if (toPesewas(amount) > toPesewas(refundable)) {
-      throw new ApiError(
-        `Refund exceeds what's left on this payment (${ghs(refundable)} refundable)`,
-        400,
-      );
-    }
-
     const reference = await this.makeReference("RF");
     const appt = payment.appointment;
 
-    const refund = await this.refund.create({
-      data: {
-        reference,
-        amount,
-        currency: payment.currency ?? "GHS",
-        status: "PENDING",
-        paymentId: payment.id,
-        appointmentId: payment.appointmentId,
-        ...(payment.transactionId ? { transactionId: payment.transactionId } : {}),
-        ...(input.reason ? { reason: input.reason.trim() } : {}),
-        ...(appt?.fullName ? { customerName: appt.fullName } : {}),
-        ...(appt?.email ? { customerEmail: appt.email } : {}),
-        ...(actor.email ? { initiatedByEmail: actor.email } : {}),
-        ...(actor.role ? { initiatedByRole: actor.role } : {}),
-      },
-    });
+    const { amount, refundable, refund } = await this.reserveRefund(
+      { kind: "payment", id: payment.id },
+      input.amount,
+      (tx, amount) =>
+        tx.refund.create({
+          data: {
+            reference,
+            amount,
+            currency: payment.currency ?? "GHS",
+            status: "PENDING",
+            paymentId: payment.id,
+            appointmentId: payment.appointmentId,
+            ...(payment.transactionId
+              ? { transactionId: payment.transactionId }
+              : {}),
+            ...(input.reason ? { reason: input.reason.trim() } : {}),
+            ...(appt?.fullName ? { customerName: appt.fullName } : {}),
+            ...(appt?.email ? { customerEmail: appt.email } : {}),
+            ...(actor.email ? { initiatedByEmail: actor.email } : {}),
+            ...(actor.role ? { initiatedByRole: actor.role } : {}),
+          },
+        }),
+    );
 
     await this.audit.record({
       actor,
@@ -193,39 +181,31 @@ export class RefundService extends Connection {
       );
     }
 
-    const alreadyRefunded = order.refundedAmount ?? 0;
-    const refundable = Math.round((order.total - alreadyRefunded) * 100) / 100;
-    if (refundable <= 0) {
-      throw new ApiError("This order has already been fully refunded", 400);
-    }
-
-    const amount = input.amount ?? refundable;
-    if (!Number.isFinite(amount) || amount <= 0) {
-      throw new ApiError("Refund amount must be greater than 0", 400);
-    }
-    if (toPesewas(amount) > toPesewas(refundable)) {
-      throw new ApiError(
-        `Refund exceeds what's left on this order (${ghs(refundable)} refundable)`,
-        400,
-      );
-    }
-
     const reference = await this.makeReference("RF");
-    const refund = await this.refund.create({
-      data: {
-        reference,
-        amount,
-        currency: "GHS",
-        status: "PENDING",
-        orderId: order.id,
-        ...(order.transactionId ? { transactionId: order.transactionId } : {}),
-        ...(input.reason ? { reason: input.reason.trim() } : {}),
-        ...(order.customerName ? { customerName: order.customerName } : {}),
-        ...(order.customerEmail ? { customerEmail: order.customerEmail } : {}),
-        ...(actor.email ? { initiatedByEmail: actor.email } : {}),
-        ...(actor.role ? { initiatedByRole: actor.role } : {}),
-      },
-    });
+    const { amount, refund } = await this.reserveRefund(
+      { kind: "order", id: order.id },
+      input.amount,
+      (tx, amount) =>
+        tx.refund.create({
+          data: {
+            reference,
+            amount,
+            currency: "GHS",
+            status: "PENDING",
+            orderId: order.id,
+            ...(order.transactionId
+              ? { transactionId: order.transactionId }
+              : {}),
+            ...(input.reason ? { reason: input.reason.trim() } : {}),
+            ...(order.customerName ? { customerName: order.customerName } : {}),
+            ...(order.customerEmail
+              ? { customerEmail: order.customerEmail }
+              : {}),
+            ...(actor.email ? { initiatedByEmail: actor.email } : {}),
+            ...(actor.role ? { initiatedByRole: actor.role } : {}),
+          },
+        }),
+    );
 
     await this.audit.record({
       actor,
@@ -277,6 +257,85 @@ export class RefundService extends Connection {
   }
 
   /**
+   * Work out what is still refundable on `source` and write the PENDING refund
+   * row (via `create`) as one locked step.
+   *
+   * The ceiling is what was collected, minus what has already been refunded,
+   * minus refunds still in flight. Counting in-flight refunds matters because
+   * `refundedAmount` only moves when a refund settles: without it, a second
+   * full refund issued while the first was still pending at Paystack would
+   * pass the check. The lock stops two concurrent requests both passing it.
+   */
+  private reserveRefund<R extends { id: string }>(
+    source: RefundSource,
+    requested: number | undefined,
+    create: (tx: TenantTx, amount: number) => Promise<R>,
+  ): Promise<{ amount: number; refundable: number; refund: R }> {
+    return this.withAdvisoryLock(sourceLockKey(source), async (tx) => {
+      const totals =
+        source.kind === "payment"
+          ? await tx.payment
+              .findFirst({
+                where: { id: source.id },
+                select: { amount: true, refundedAmount: true },
+              })
+              .then(
+                (p) =>
+                  p && { collected: p.amount, refunded: p.refundedAmount ?? 0 },
+              )
+          : await tx.order
+              .findFirst({
+                where: { id: source.id },
+                select: { total: true, refundedAmount: true },
+              })
+              .then(
+                (o) =>
+                  o && { collected: o.total, refunded: o.refundedAmount ?? 0 },
+              );
+      if (!totals) {
+        throw new ApiError(
+          source.kind === "payment" ? "Payment not found" : "Order not found",
+          404,
+        );
+      }
+      const inFlight = await tx.refund.aggregate({
+        where:
+          source.kind === "payment"
+            ? { paymentId: source.id, status: "PENDING" }
+            : { orderId: source.id, status: "PENDING" },
+        _sum: { amount: true },
+      });
+      const pending = inFlight._sum.amount ?? 0;
+
+      if (toPesewas(totals.collected - totals.refunded) <= 0) {
+        throw new ApiError(
+          `This ${source.kind} has already been fully refunded`,
+          400,
+        );
+      }
+      const refundable = round2(totals.collected - totals.refunded - pending);
+      if (refundable <= 0) {
+        throw new ApiError(
+          `A refund for the rest of this ${source.kind} is already in progress`,
+          400,
+        );
+      }
+
+      const amount = requested ?? refundable;
+      if (!Number.isFinite(amount) || amount <= 0) {
+        throw new ApiError("Refund amount must be greater than 0", 400);
+      }
+      if (toPesewas(amount) > toPesewas(refundable)) {
+        throw new ApiError(
+          `Refund exceeds what's left on this ${source.kind} (${ghs(refundable)} refundable)`,
+          400,
+        );
+      }
+      return { amount, refundable, refund: await create(tx, amount) };
+    });
+  }
+
+  /**
    * Apply a terminal outcome to a refund. Called from the Paystack webhook and
    * from the immediate path above.
    *
@@ -293,13 +352,75 @@ export class RefundService extends Connection {
     if (!refund) return null;
     if (refund.status !== "PENDING") return refund;
 
-    const updated = await this.refund.update({
+    // The webhook and the immediate path above can settle the same refund at
+    // once. Claiming PENDING → outcome with a conditional update lets exactly
+    // one of them through; the running total moves in the same locked step,
+    // so reserveRefund never sees the refund in neither "pending" nor
+    // "refunded".
+    const apply = async (
+      db: Pick<TenantTx, "refund" | "payment" | "order">,
+    ) => {
+      const claimed = await db.refund.updateMany({
+        where: { id: refund.id, status: "PENDING" },
+        data: {
+          status: outcome,
+          ...(outcome === "PROCESSED" ? { processedAt: new Date() } : {}),
+          ...(failureReason ? { failureReason } : {}),
+        },
+      });
+      if (claimed.count === 0) return false;
+      if (outcome !== "PROCESSED") return true;
+
+      // Roll the running total forward and move the source row's status.
+      if (refund.paymentId) {
+        const payment = await db.payment.findFirst({
+          where: { id: refund.paymentId },
+          select: { id: true, amount: true, refundedAmount: true },
+        });
+        if (payment) {
+          const total = round2((payment.refundedAmount ?? 0) + refund.amount);
+          await db.payment.update({
+            where: { id: payment.id },
+            data: {
+              refundedAmount: total,
+              status:
+                toPesewas(total) >= toPesewas(payment.amount)
+                  ? "REFUNDED"
+                  : "PARTIALLY_REFUNDED",
+            },
+          });
+        }
+      }
+      if (refund.orderId) {
+        const order = await db.order.findFirst({
+          where: { id: refund.orderId },
+          select: { id: true, refundedAmount: true },
+        });
+        if (order) {
+          await db.order.update({
+            where: { id: order.id },
+            data: {
+              refundedAmount: round2(
+                (order.refundedAmount ?? 0) + refund.amount,
+              ),
+            },
+          });
+        }
+      }
+      return true;
+    };
+    const source: RefundSource | null = refund.paymentId
+      ? { kind: "payment", id: refund.paymentId }
+      : refund.orderId
+        ? { kind: "order", id: refund.orderId }
+        : null;
+    const applied = source
+      ? await this.withAdvisoryLock(sourceLockKey(source), apply)
+      : await apply(this.db);
+    if (!applied) return this.refund.findUnique({ where: { id: refund.id } });
+
+    const updated = await this.refund.findUniqueOrThrow({
       where: { id: refund.id },
-      data: {
-        status: outcome,
-        ...(outcome === "PROCESSED" ? { processedAt: new Date() } : {}),
-        ...(failureReason ? { failureReason } : {}),
-      },
     });
 
     if (outcome === "FAILED") {
@@ -309,42 +430,14 @@ export class RefundService extends Connection {
         targetType: "Refund",
         targetId: refund.id,
         studioId: refund.studioId ?? undefined,
-        metadata: { reference, amount: refund.amount, reason: failureReason ?? null },
+        metadata: {
+          reference,
+          amount: refund.amount,
+          reason: failureReason ?? null,
+        },
       });
       await this.notifyFailed(updated);
       return updated;
-    }
-
-    // Roll the running total forward and move the source row's status.
-    if (refund.paymentId) {
-      const payment = await this.payment.findUnique({
-        where: { id: refund.paymentId },
-      });
-      if (payment) {
-        const total =
-          Math.round(((payment.refundedAmount ?? 0) + refund.amount) * 100) / 100;
-        await this.payment.update({
-          where: { id: payment.id },
-          data: {
-            refundedAmount: total,
-            status:
-              toPesewas(total) >= toPesewas(payment.amount)
-                ? "REFUNDED"
-                : "PARTIALLY_REFUNDED",
-          },
-        });
-      }
-    }
-    if (refund.orderId) {
-      const order = await this.order.findUnique({ where: { id: refund.orderId } });
-      if (order) {
-        const total =
-          Math.round(((order.refundedAmount ?? 0) + refund.amount) * 100) / 100;
-        await this.order.update({
-          where: { id: order.id },
-          data: { refundedAmount: total },
-        });
-      }
     }
 
     // Money leaving the studio: a DEBIT, deduped on the refund reference.
@@ -401,8 +494,9 @@ export class RefundService extends Connection {
   }) {
     if (!refund.customerEmail) return;
     try {
-      const brand = await this.brandFor(refund.studioId);
-      const paidTo = brand.kind === "studio" ? brand.studio.name : brand.zuri.name;
+      const brand = await this.studioEmailBrand(refund.studioId, platformBrand);
+      const paidTo =
+        brand.kind === "studio" ? brand.studio.name : brand.zuri.name;
       const paidToEmail =
         brand.kind === "studio" ? brand.studio.email : brand.zuri.supportEmail;
 
@@ -414,7 +508,9 @@ export class RefundService extends Connection {
       if (refund.paymentId) {
         const p = await this.payment.findUnique({
           where: { id: refund.paymentId },
-          include: { appointment: { include: { service: { select: { name: true } } } } },
+          include: {
+            appointment: { include: { service: { select: { name: true } } } },
+          },
         });
         if (p) {
           originalPaid = p.amount;
@@ -423,14 +519,19 @@ export class RefundService extends Connection {
           what = svc ? `your ${svc} appointment` : "your appointment";
         }
       } else if (refund.orderId) {
-        const o = await this.order.findUnique({ where: { id: refund.orderId } });
+        const o = await this.order.findUnique({
+          where: { id: refund.orderId },
+        });
         if (o) {
           originalPaid = o.total;
           totalRefunded = o.refundedAmount ?? refund.amount;
           what = `order ${o.orderNumber}`;
         }
       }
-      const stillPaid = Math.max(0, Math.round((originalPaid - totalRefunded) * 100) / 100);
+      const stillPaid = Math.max(
+        0,
+        Math.round((originalPaid - totalRefunded) * 100) / 100,
+      );
       const isPartial = toPesewas(totalRefunded) < toPesewas(originalPaid);
 
       const lines: MoneyLine[] = [
@@ -443,7 +544,8 @@ export class RefundService extends Connection {
 
       const pdf = buildReceiptPdf({
         studioName: paidTo,
-        primaryColor: brand.kind === "studio" ? brand.studio.primaryColor : null,
+        primaryColor:
+          brand.kind === "studio" ? brand.studio.primaryColor : null,
         title: isPartial ? "Partial refund receipt" : "Refund receipt",
         receiptNumber: receiptNumber("RF", refund.id),
         issuedAt: refund.processedAt ?? new Date(),
@@ -454,7 +556,9 @@ export class RefundService extends Connection {
             : []),
           { label: "Originally paid", value: ghs(originalPaid) },
           { label: "Refunded", value: ghs(refund.amount), strong: true },
-          ...(isPartial ? [{ label: "Still paid", value: ghs(stillPaid) }] : []),
+          ...(isPartial
+            ? [{ label: "Still paid", value: ghs(stillPaid) }]
+            : []),
           ...(refund.reason ? [{ label: "Reason", value: refund.reason }] : []),
         ],
         amountPaid: ghs(refund.amount),
@@ -480,7 +584,10 @@ export class RefundService extends Connection {
 
       const { subject, html } = refundProcessed(brand, {
         ...(refund.customerName
-          ? { customerFirstName: refund.customerName.split(" ")[0] ?? refund.customerName }
+          ? {
+              customerFirstName:
+                refund.customerName.split(" ")[0] ?? refund.customerName,
+            }
           : {}),
         subject: what,
         isPartial,
@@ -525,12 +632,15 @@ export class RefundService extends Connection {
   }) {
     if (!refund.customerEmail) return;
     try {
-      const brand = await this.brandFor(refund.studioId);
+      const brand = await this.studioEmailBrand(refund.studioId, platformBrand);
       const support =
         brand.kind === "studio" ? brand.studio.email : brand.zuri.supportEmail;
       const { subject, html } = refundFailed(brand, {
         ...(refund.customerName
-          ? { customerFirstName: refund.customerName.split(" ")[0] ?? refund.customerName }
+          ? {
+              customerFirstName:
+                refund.customerName.split(" ")[0] ?? refund.customerName,
+            }
           : {}),
         subject: "your recent payment",
         refundAmount: ghs(refund.amount),

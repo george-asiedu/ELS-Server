@@ -1,7 +1,11 @@
 import { Connection } from "../db/dbConnection";
 import { ApiError } from "../middleware/apiError";
 import { CreateReviewInput } from "./reviewModels";
-import { CursorPage, cursorPageArgs, cursorPageResult } from "../utils/cursorPagination";
+import {
+  CursorPage,
+  cursorPageArgs,
+  cursorPageResult,
+} from "../utils/cursorPagination";
 
 const reviewInclude = {
   user: {
@@ -64,7 +68,10 @@ export class ReviewService extends Connection {
       include: reviewInclude,
       ...cursorPageArgs(page),
     });
-    return { message: "Reviews retrieved successfully", ...cursorPageResult(reviews, page) };
+    return {
+      message: "Reviews retrieved successfully",
+      ...cursorPageResult(reviews, page),
+    };
   }
 
   public async setApproved(id: string, approved: boolean) {

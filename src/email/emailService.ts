@@ -77,4 +77,3 @@ export const sendEmailNow = async ({
     throw new Error(`Plunk email send failed (${res.status}): ${detail}`);
   }
 };
-

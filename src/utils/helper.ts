@@ -62,7 +62,7 @@ export const generateCode = (): string => {
 };
 
 export type ValidatorError =
-  | ErrorObject<string, Record<string, any>, unknown>
+  | ErrorObject
   | { instancePath: string; message: string };
 
 // Helper function to safely extract ajv error message

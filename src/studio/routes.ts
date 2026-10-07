@@ -1,7 +1,6 @@
 import { Router } from "express";
 import { StudioController } from "./studioController";
 import { authenticate, requireAdmin } from "../middleware/auth";
-import { reenterTenant } from "../middleware/tenant";
 
 const router: Router = Router();
 
@@ -14,32 +13,81 @@ router.get("/resolve-domain", StudioController.resolveDomain);
 // Admin: custom domain management.
 router.get("/domain", authenticate, requireAdmin, StudioController.getDomain);
 router.put("/domain", authenticate, requireAdmin, StudioController.setDomain);
-router.post("/domain/verify", authenticate, requireAdmin, StudioController.verifyDomain);
+router.post(
+  "/domain/verify",
+  authenticate,
+  requireAdmin,
+  StudioController.verifyDomain,
+);
 
 // Admin: the studio owner edits their own branding + landing content.
-router.get("/branding", authenticate, requireAdmin, StudioController.getBranding);
+router.get(
+  "/branding",
+  authenticate,
+  requireAdmin,
+  StudioController.getBranding,
+);
 router.put(
   "/branding",
   authenticate,
   requireAdmin,
-  reenterTenant,
   StudioController.updateBranding,
 );
 router.get("/content", authenticate, requireAdmin, StudioController.getContent);
-router.put("/content", authenticate, requireAdmin, StudioController.updateContent);
+router.put(
+  "/content",
+  authenticate,
+  requireAdmin,
+  StudioController.updateContent,
+);
 
 // Admin: payout account (Paystack subaccount) for split settlement.
 // Billing: view + change plan/cadence.
 router.get("/billing", authenticate, requireAdmin, StudioController.getBilling);
-router.post("/billing/change", authenticate, requireAdmin, StudioController.startBillingChange);
-router.post("/billing/apply", authenticate, requireAdmin, StudioController.applyBillingChange);
-router.post("/billing/renew", authenticate, requireAdmin, StudioController.startRenewal);
-router.post("/billing/renew/apply", authenticate, requireAdmin, StudioController.applyRenewal);
+router.post(
+  "/billing/change",
+  authenticate,
+  requireAdmin,
+  StudioController.startBillingChange,
+);
+router.post(
+  "/billing/apply",
+  authenticate,
+  requireAdmin,
+  StudioController.applyBillingChange,
+);
+router.post(
+  "/billing/renew",
+  authenticate,
+  requireAdmin,
+  StudioController.startRenewal,
+);
+router.post(
+  "/billing/renew/apply",
+  authenticate,
+  requireAdmin,
+  StudioController.applyRenewal,
+);
 
 router.get("/loyalty", authenticate, requireAdmin, StudioController.getLoyalty);
-router.put("/loyalty", authenticate, requireAdmin, StudioController.updateLoyalty);
+router.put(
+  "/loyalty",
+  authenticate,
+  requireAdmin,
+  StudioController.updateLoyalty,
+);
 router.get("/payout", authenticate, requireAdmin, StudioController.getPayout);
-router.get("/payout/resolve", authenticate, requireAdmin, StudioController.resolvePayout);
-router.put("/payout", authenticate, requireAdmin, StudioController.updatePayout);
+router.get(
+  "/payout/resolve",
+  authenticate,
+  requireAdmin,
+  StudioController.resolvePayout,
+);
+router.put(
+  "/payout",
+  authenticate,
+  requireAdmin,
+  StudioController.updatePayout,
+);
 
 export default router;

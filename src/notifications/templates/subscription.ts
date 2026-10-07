@@ -8,13 +8,18 @@ import { EmailBrand } from "../types";
 
 export const subscriptionExpiringSoon = (
   brand: EmailBrand,
-  data: { planName: string; renewsOn: string; amountDue: string; manageUrl: string },
+  data: {
+    planName: string;
+    renewsOn: string;
+    amountDue: string;
+    manageUrl: string;
+  },
 ) => ({
   subject: "Your Zuri Studios plan renews soon",
   html: renderShell({
     brand,
     previewText: `Your plan renews on ${data.renewsOn}.`,
-      documentType: "Subscription notice",
+    documentType: "Subscription notice",
     bodyHtml: `
       ${statusBadge("info", "RENEWS SOON")}
       <h1 style="margin: 0 0 12px; font-family: Georgia, serif; font-size: 22px; color: #2A1B1F; text-align: center;">Your plan renews soon</h1>
@@ -35,7 +40,7 @@ export const subscriptionExpired = (
   html: renderShell({
     brand,
     previewText: "Your plan has expired — renew to restore your storefront.",
-      documentType: "Subscription notice",
+    documentType: "Subscription notice",
     bodyHtml: `
       ${statusBadge("warning", "PLAN EXPIRED")}
       <h1 style="margin: 0 0 12px; font-family: Georgia, serif; font-size: 22px; color: #2A1B1F; text-align: center;">Your plan has expired</h1>

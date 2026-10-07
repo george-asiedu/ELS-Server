@@ -10,7 +10,9 @@ import { env } from "./config/env.config";
 import { globalErrorHandler } from "./middleware/globalErrorHandler";
 import { resolveTenant } from "./middleware/tenant";
 import routes from "./routes/index";
-import { bootstrapQueues } from "./queue";
+import { bootstrapQueues, shutdownQueues } from "./queue";
+import { startScheduler, stopScheduler } from "./scheduler/scheduler";
+import { createTenantClient } from "./tenant/tenantClient";
 import { createHash } from "crypto";
 import { rateLimitStore } from "./middleware/rateLimitStore";
 import { ApiError } from "./middleware/apiError";
@@ -22,9 +24,11 @@ if (env.trustProxyHops > 0) app.set("trust proxy", env.trustProxyHops);
 
 // Do not log query strings: payment references and password-reset links may
 // appear in URLs. Keep enough request metadata for operational diagnosis.
-app.use(morgan(':method :status :response-time ms', {
-  skip: (_req, res) => res.statusCode < 400,
-}));
+app.use(
+  morgan(":method :status :response-time ms", {
+    skip: (_req, res) => res.statusCode < 400,
+  }),
+);
 app.disable("x-powered-by");
 app.use(
   helmet({
@@ -59,24 +63,44 @@ const isAllowedOrigin = (origin: string): boolean => {
     host = parsed.hostname.toLowerCase();
     protocol = parsed.protocol;
     port = parsed.port;
-    if (parsed.username || parsed.password || parsed.pathname !== "/" || parsed.search || parsed.hash) {
+    if (
+      parsed.username ||
+      parsed.password ||
+      parsed.pathname !== "/" ||
+      parsed.search ||
+      parsed.hash
+    ) {
       return false;
     }
   } catch {
     return false;
   }
-  if (protocol !== "https:" && !(env.nodeEnv !== "production" && protocol === "http:")) {
+  if (
+    protocol !== "https:" &&
+    !(env.nodeEnv !== "production" && protocol === "http:")
+  ) {
     return false;
   }
-  if (env.nodeEnv !== "production" && (host === "localhost" || host.startsWith("127.") || host.endsWith(".local"))) {
+  if (
+    env.nodeEnv !== "production" &&
+    (host === "localhost" || host.startsWith("127.") || host.endsWith(".local"))
+  ) {
     return true;
   }
   const root = env.rootDomain?.toLowerCase();
-  if (!port && root && (host === root || host === `www.${root}` || host.endsWith(`.${root}`))) {
+  if (
+    !port &&
+    root &&
+    (host === root || host === `www.${root}` || host.endsWith(`.${root}`))
+  ) {
     return true;
   }
   return extraOrigins.includes(origin.toLowerCase().replace(/\/$/, ""));
 };
+
+// Rate-limit replies use the same JSON shape as every other API error, so
+// the app can show the message instead of "Request failed with status 429".
+const limitMessage = (message: string) => ({ status: "fail", message });
 
 const withRateLimitStore = (namespace: string) => {
   const store = rateLimitStore(namespace);
@@ -86,7 +110,13 @@ const withRateLimitStore = (namespace: string) => {
 app.use(
   cors({
     methods: ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allowedHeaders: ["Authorization", "Content-Type", "X-Studio-Slug", "X-Device-Id", "Idempotency-Key"],
+    allowedHeaders: [
+      "Authorization",
+      "Content-Type",
+      "X-Studio-Slug",
+      "X-Device-Id",
+      "Idempotency-Key",
+    ],
     maxAge: 600,
     origin: (origin, cb) => {
       // No Origin header = same-origin, curl, or server-to-server (e.g. the
@@ -102,13 +132,24 @@ app.use(hpp());
 // API requests are still recorded without inspecting their payloads.
 app.use("/api", recordPlatformActivity);
 
+// The general per-IP limit runs on every API request, so in Redis it was one
+// billed command per request — several per page view. It's a coarse abuse
+// guard, so it stays in process memory (per instance). The limits that guard
+// accounts and money below share state through Redis across instances.
+//
+// One page view makes 8-10 API calls, and mobile networks put many phones
+// behind one shared address, so the limit is generous: it's there to stop a
+// flood, not to meter normal browsing. Skipped in local development, where
+// every request comes from one machine.
 const limiter = rateLimit({
-  ...withRateLimitStore("api"),
   windowMs: 15 * 60 * 1000,
-  limit: 120,
+  limit: 1000,
   standardHeaders: "draft-8",
   legacyHeaders: false,
-  message: "Too many requests from this IP, please try again later.",
+  skip: () => env.nodeEnv === "development",
+  message: limitMessage(
+    "You're sending requests faster than usual. Please wait a few minutes and try again.",
+  ),
 });
 const loginIpLimiter = rateLimit({
   ...withRateLimitStore("login-ip"),
@@ -116,7 +157,7 @@ const loginIpLimiter = rateLimit({
   limit: 20,
   standardHeaders: "draft-8",
   legacyHeaders: false,
-  message: "Too many sign-in attempts. Try again later.",
+  message: limitMessage("Too many sign-in attempts. Try again later."),
 });
 const loginAccountLimiter = rateLimit({
   ...withRateLimitStore("login-account"),
@@ -125,10 +166,19 @@ const loginAccountLimiter = rateLimit({
   standardHeaders: "draft-8",
   legacyHeaders: false,
   validate: { keyGeneratorIpFallback: false },
-  keyGenerator: (req) => createHash("sha256")
-    .update(`${String(req.headers["x-studio-slug"] ?? req.hostname)}:${String(req.body?.email ?? "").trim().toLowerCase()}`)
-    .digest("hex"),
-  message: "Too many sign-in attempts for this account. Try again later.",
+  keyGenerator: (req) =>
+    createHash("sha256")
+      .update(
+        `${String(req.headers["x-studio-slug"] ?? req.hostname)}:${String(
+          req.body?.email ?? "",
+        )
+          .trim()
+          .toLowerCase()}`,
+      )
+      .digest("hex"),
+  message: limitMessage(
+    "Too many sign-in attempts for this account. Try again later.",
+  ),
 });
 const sensitiveActionLimiter = rateLimit({
   ...withRateLimitStore("payments"),
@@ -136,7 +186,9 @@ const sensitiveActionLimiter = rateLimit({
   limit: 30,
   standardHeaders: "draft-8",
   legacyHeaders: false,
-  message: "Too many requests from this IP, please try again later.",
+  message: limitMessage(
+    "Too many attempts in a short time. Please wait a minute and try again.",
+  ),
 });
 const accountCreationLimiter = rateLimit({
   ...withRateLimitStore("account-creation"),
@@ -144,7 +196,7 @@ const accountCreationLimiter = rateLimit({
   limit: 10,
   standardHeaders: "draft-8",
   legacyHeaders: false,
-  message: "Too many account creation attempts. Try again later.",
+  message: limitMessage("Too many account creation attempts. Try again later."),
 });
 const recoveryLimiter = rateLimit({
   ...withRateLimitStore("account-recovery"),
@@ -152,7 +204,7 @@ const recoveryLimiter = rateLimit({
   limit: 5,
   standardHeaders: "draft-8",
   legacyHeaders: false,
-  message: "Too many recovery attempts. Try again later.",
+  message: limitMessage("Too many recovery attempts. Try again later."),
 });
 app.use("/api", limiter);
 app.use("/api/auth/login", loginIpLimiter);
@@ -182,7 +234,9 @@ app.use(
     },
   }),
 );
-app.use(express.urlencoded({ extended: false, limit: "64kb", parameterLimit: 100 }));
+app.use(
+  express.urlencoded({ extended: false, limit: "64kb", parameterLimit: 100 }),
+);
 app.use("/api/auth/login", loginAccountLimiter);
 app.use("/api/platform/auth/login", loginAccountLimiter);
 app.use(xss());
@@ -226,13 +280,52 @@ const port = env.port;
 if (!port)
   throw new Error("Port number is not defined in environment variables");
 
-app.listen(port, "0.0.0.0", () => {
+const server = app.listen(port, "0.0.0.0", () => {
   console.log(`Server is running on port ${port}`);
 });
 
-// Background job queues (email sending, payment reconciliation). Started
-// in-process alongside the API — fine at this scale; see queue/README.md for
-// how to split workers into a separate Render service later if load grows.
+// Background email queue (Redis, optional) and the recurring-job scheduler
+// (database-backed; see src/scheduler). Both run in-process alongside the API.
 bootstrapQueues().catch((error) => {
   console.error("Failed to start queues:", error);
 });
+if (env.schedulerEnabled) {
+  startScheduler().catch((error) => {
+    console.error("Failed to start scheduler:", error);
+  });
+} else {
+  console.log(
+    "Scheduler off (SCHEDULER_ENABLED is not true): recurring jobs won't run here.",
+  );
+}
+
+// Graceful shutdown. The host sends SIGTERM before replacing an instance on
+// every deploy: stop accepting connections, let in-flight requests and queue
+// jobs finish, then release the database pool. A hard deadline makes sure a
+// stuck request can't hold the old instance up forever.
+const SHUTDOWN_DEADLINE_MS = 25_000;
+let shuttingDown = false;
+const shutdown = (signal: string) => {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.log(`${signal} received — shutting down`);
+  setTimeout(() => {
+    console.error("Shutdown deadline passed — exiting");
+    process.exit(1);
+  }, SHUTDOWN_DEADLINE_MS).unref();
+
+  server.close(async () => {
+    await stopScheduler();
+    await shutdownQueues().catch((error) =>
+      console.error("Error closing queues:", error),
+    );
+    await createTenantClient()
+      .raw.$disconnect()
+      .catch(() => undefined);
+    process.exit(0);
+  });
+  // Idle keep-alive sockets would otherwise hold server.close() open.
+  server.closeIdleConnections();
+};
+process.on("SIGTERM", () => shutdown("SIGTERM"));
+process.on("SIGINT", () => shutdown("SIGINT"));

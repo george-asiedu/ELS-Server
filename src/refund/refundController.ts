@@ -1,4 +1,4 @@
-import { Request, Response, NextFunction } from "express";
+import { Request, Response } from "express";
 import { RefundService } from "./refundService";
 import { ApiError } from "../middleware/apiError";
 
@@ -32,67 +32,43 @@ const parseReason = (raw: unknown): string | undefined => {
 };
 
 export class RefundController {
-  public static refundPayment = async (
-    req: Request,
-    res: Response,
-    next: NextFunction,
-  ) => {
-    try {
-      const { paymentId } = req.params;
-      if (!paymentId) throw new ApiError("A payment id is required", 400);
-      const result = await refunds.refundPayment(paymentId, actor(req), {
-        ...(parseAmount(req.body?.amount) !== undefined
-          ? { amount: parseAmount(req.body?.amount)! }
-          : {}),
-        ...(parseReason(req.body?.reason)
-          ? { reason: parseReason(req.body?.reason)! }
-          : {}),
-      });
-      return res.status(200).json(result);
-    } catch (error) {
-      return next(error);
-    }
+  public static refundPayment = async (req: Request, res: Response) => {
+    const { paymentId } = req.params;
+    if (!paymentId) throw new ApiError("A payment id is required", 400);
+    const result = await refunds.refundPayment(paymentId, actor(req), {
+      ...(parseAmount(req.body?.amount) !== undefined
+        ? { amount: parseAmount(req.body?.amount)! }
+        : {}),
+      ...(parseReason(req.body?.reason)
+        ? { reason: parseReason(req.body?.reason)! }
+        : {}),
+    });
+    return res.status(200).json(result);
   };
 
-  public static refundOrder = async (
-    req: Request,
-    res: Response,
-    next: NextFunction,
-  ) => {
-    try {
-      const { orderId } = req.params;
-      if (!orderId) throw new ApiError("An order id is required", 400);
-      const result = await refunds.refundOrder(orderId, actor(req), {
-        ...(parseAmount(req.body?.amount) !== undefined
-          ? { amount: parseAmount(req.body?.amount)! }
-          : {}),
-        ...(parseReason(req.body?.reason)
-          ? { reason: parseReason(req.body?.reason)! }
-          : {}),
-      });
-      return res.status(200).json(result);
-    } catch (error) {
-      return next(error);
-    }
+  public static refundOrder = async (req: Request, res: Response) => {
+    const { orderId } = req.params;
+    if (!orderId) throw new ApiError("An order id is required", 400);
+    const result = await refunds.refundOrder(orderId, actor(req), {
+      ...(parseAmount(req.body?.amount) !== undefined
+        ? { amount: parseAmount(req.body?.amount)! }
+        : {}),
+      ...(parseReason(req.body?.reason)
+        ? { reason: parseReason(req.body?.reason)! }
+        : {}),
+    });
+    return res.status(200).json(result);
   };
 
-  public static list = async (
-    req: Request,
-    res: Response,
-    next: NextFunction,
-  ) => {
-    try {
-      const status =
-        typeof req.query.status === "string" ? req.query.status : undefined;
-      const limit =
-        typeof req.query.limit === "string" ? Number(req.query.limit) : undefined;
-      const result = await refunds.list({
-        ...(status ? { status } : {}),
-        ...(limit !== undefined ? { limit } : {}),
-      });
-      return res.status(200).json(result);
-    } catch (error) {
-      return next(error);
-    }
+  public static list = async (req: Request, res: Response) => {
+    const status =
+      typeof req.query.status === "string" ? req.query.status : undefined;
+    const limit =
+      typeof req.query.limit === "string" ? Number(req.query.limit) : undefined;
+    const result = await refunds.list({
+      ...(status ? { status } : {}),
+      ...(limit !== undefined ? { limit } : {}),
+    });
+    return res.status(200).json(result);
   };
 }

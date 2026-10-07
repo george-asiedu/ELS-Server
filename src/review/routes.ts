@@ -12,7 +12,12 @@ router.post("/", authenticate, ReviewController.create);
 
 // Admin
 router.get("/all", authenticate, requireAdmin, ReviewController.listAll);
-router.patch("/:id/approve", authenticate, requireAdmin, ReviewController.approve);
+router.patch(
+  "/:id/approve",
+  authenticate,
+  requireAdmin,
+  ReviewController.approve,
+);
 router.delete("/:id", authenticate, requireAdmin, ReviewController.remove);
 
 export default router;

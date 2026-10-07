@@ -47,7 +47,7 @@ export class UserRepository extends Connection {
 
     return newUser;
   }
-  
+
   public async updateEmail(id: string, email: string) {
     const updatedUser = await this.user.update({
       where: { id },
@@ -56,7 +56,7 @@ export class UserRepository extends Connection {
 
     return updatedUser;
   }
-  
+
   public async updatePassword(id: string, password: string) {
     const hashedPassword = await getPasswordHash(password);
     const updatedUser = await this.user.update({
@@ -69,19 +69,19 @@ export class UserRepository extends Connection {
 
   public async createProfile(userId: string, data: Profile) {
     const cleanData = Object.fromEntries(
-      Object.entries(data).filter(([_, value]) => value !== undefined)
-    );;
-    
+      Object.entries(data).filter(([_, value]) => value !== undefined),
+    );
+
     return await this.profile.upsert({
       where: { userId },
       update: cleanData,
       create: {
         ...cleanData,
-        user: { connect: { id: userId } }
+        user: { connect: { id: userId } },
       },
       include: {
-        user: { select: { id: true, email: true, role: true } }
-      }
+        user: { select: { id: true, email: true, role: true } },
+      },
     });
   }
 
@@ -108,8 +108,12 @@ export class UserRepository extends Connection {
       where: { id },
     });
   }
-  
-  public async setResetTokenForUser(userId: string, hashedToken: string, expiry: Date) {
+
+  public async setResetTokenForUser(
+    userId: string,
+    hashedToken: string,
+    expiry: Date,
+  ) {
     return await this.user.update({
       where: { id: userId },
       data: {
@@ -118,7 +122,7 @@ export class UserRepository extends Connection {
       },
     });
   }
-  
+
   public async findUserByResetToken(hashedToken: string) {
     const user = await this.user.findFirst({
       where: {
@@ -127,8 +131,11 @@ export class UserRepository extends Connection {
     });
     return user;
   }
-  
-  public async resetPasswordByUserId(userId: string, newHashedPassword: string) {
+
+  public async resetPasswordByUserId(
+    userId: string,
+    newHashedPassword: string,
+  ) {
     return await this.user.update({
       where: { id: userId },
       data: {

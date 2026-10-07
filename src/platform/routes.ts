@@ -4,6 +4,7 @@ import { FeatureRequestController } from "../featureRequest/featureRequestContro
 import { PlatformReviewController } from "../platformReview/platformReviewController";
 import { authenticate, requireSuperAdmin } from "../middleware/auth";
 import { getQueueStatus } from "../queue/queueStatus";
+import { SchedulerController } from "../scheduler/schedulerController";
 import { PlatformActivityLogService } from "./platformActivityLog";
 import { LedgerController } from "../ledger/ledgerController";
 
@@ -16,6 +17,9 @@ router.post("/auth/login", PlatformController.login);
 router.post("/auth/forgot-password", PlatformController.forgotPassword);
 router.post("/auth/reset-password", PlatformController.resetPassword);
 
+// Public: site details, prices and setup fees for the platform pages.
+router.get("/public-config", PlatformController.publicConfig);
+
 // Everything below requires a signed-in super admin.
 router.use(authenticate, requireSuperAdmin);
 router.post("/auth/logout", PlatformController.logout);
@@ -24,6 +28,8 @@ router.get("/me", PlatformController.me);
 router.get("/analytics", PlatformController.analytics);
 router.get("/billing-config", PlatformController.getBillingConfig);
 router.patch("/billing-config", PlatformController.updateBillingConfig);
+router.get("/site-settings", PlatformController.getSiteSettings);
+router.patch("/site-settings", PlatformController.updateSiteSettings);
 
 router.get("/studios", PlatformController.listStudios);
 router.post("/studios", PlatformController.createStudio);
@@ -54,13 +60,25 @@ router.get("/audit-logs", PlatformController.listAudit);
 
 router.get("/activity-logs", async (req, res, next) => {
   try {
-    const cursor = typeof req.query.cursor === "string" ? req.query.cursor : undefined;
-    const limitValue = typeof req.query.limit === "string" ? req.query.limit : undefined;
-    const studioId = typeof req.query.studioId === "string" ? req.query.studioId : undefined;
-    const method = typeof req.query.method === "string" ? req.query.method : undefined;
-    const statusCode = typeof req.query.statusCode === "string" ? Number(req.query.statusCode) : undefined;
-    if (statusCode !== undefined && (![200, 300, 400, 500].includes(statusCode))) {
-      return res.status(400).json({ message: "statusCode must be one of 200, 300, 400, or 500" });
+    const cursor =
+      typeof req.query.cursor === "string" ? req.query.cursor : undefined;
+    const limitValue =
+      typeof req.query.limit === "string" ? req.query.limit : undefined;
+    const studioId =
+      typeof req.query.studioId === "string" ? req.query.studioId : undefined;
+    const method =
+      typeof req.query.method === "string" ? req.query.method : undefined;
+    const statusCode =
+      typeof req.query.statusCode === "string"
+        ? Number(req.query.statusCode)
+        : undefined;
+    if (
+      statusCode !== undefined &&
+      ![200, 300, 400, 500].includes(statusCode)
+    ) {
+      return res
+        .status(400)
+        .json({ message: "statusCode must be one of 200, 300, 400, or 500" });
     }
     const result = await activityLogs.list({
       ...(cursor ? { cursor } : {}),
@@ -75,8 +93,13 @@ router.get("/activity-logs", async (req, res, next) => {
   }
 });
 
-// Background job queues (email sending, payment reconciliation) — read-only.
+// Background email queue — read-only.
 router.get("/queues", getQueueStatus);
+
+// Recurring jobs (reconciliation, reminders): list, switch on/off, run now.
+router.get("/jobs", SchedulerController.list);
+router.patch("/jobs/:key", SchedulerController.setEnabled);
+router.post("/jobs/:key/run", SchedulerController.runNow);
 
 // Feature-request triage across all studios.
 router.get("/feature-requests", FeatureRequestController.platformList);

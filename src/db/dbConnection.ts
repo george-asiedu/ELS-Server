@@ -2,8 +2,18 @@ import { createTenantClient, RawDb, TenantDb } from "../tenant/tenantClient";
 import { getTenantContext } from "../tenant/context";
 import { shortId, studioCode } from "../utils/shortId";
 import { env } from "../config/env.config";
-import { StudioBrandingInfo } from "../notifications/types";
+import { EmailBrand, StudioBrandingInfo } from "../notifications/types";
+import {
+  brandFromStudio,
+  storefrontFallbackBrand,
+} from "../notifications/brand";
 import { S3BucketService } from "../bucket/s3BucketService";
+import { TX_OPTIONS } from "./transactionOptions";
+
+const s3 = new S3BucketService();
+
+// The client handed to an interactive transaction callback on the tenant db.
+export type TenantTx = Parameters<Parameters<TenantDb["$transaction"]>[0]>[0];
 
 /**
  * Base class every service extends. It exposes the Prisma model delegates as
@@ -38,35 +48,118 @@ export class Connection {
   }
 
   // ---- Tenant-owned model delegates (scoped by the tenant extension) ----
-  get user() { return this.db.user; }
-  get profile() { return this.db.profile; }
-  get appointment() { return this.db.appointment; }
-  get service() { return this.db.service; }
-  get serviceAddOn() { return this.db.serviceAddOn; }
-  get payment() { return this.db.payment; }
-  get paymentSettings() { return this.db.paymentSettings; }
-  get review() { return this.db.review; }
-  get gallery() { return this.db.gallery; }
-  get category() { return this.db.category; }
-  get businessHours() { return this.db.businessHours; }
-  get blockedDate() { return this.db.blockedDate; }
-  get contactInfo() { return this.db.contactInfo; }
-  get loyaltyPoints() { return this.db.loyaltyPoints; }
-  get loyaltyTransaction() { return this.db.loyaltyTransaction; }
-  get referralCode() { return this.db.referralCode; }
-  get referral() { return this.db.referral; }
-  get product() { return this.db.product; }
-  get productCategory() { return this.db.productCategory; }
-  get cart() { return this.db.cart; }
-  get cartItem() { return this.db.cartItem; }
-  get order() { return this.db.order; }
-  get orderItem() { return this.db.orderItem; }
-  get referralOrderReward() { return this.db.referralOrderReward; }
-  get commerceSettings() { return this.db.commerceSettings; }
-  get promoBanner() { return this.db.promoBanner; }
-  get paymentAttempt() { return this.db.paymentAttempt; }
-  get ledgerEntry() { return this.db.ledgerEntry; }
-  get refund() { return this.db.refund; }
+  get user() {
+    return this.db.user;
+  }
+  get profile() {
+    return this.db.profile;
+  }
+  get appointment() {
+    return this.db.appointment;
+  }
+  get service() {
+    return this.db.service;
+  }
+  get serviceAddOn() {
+    return this.db.serviceAddOn;
+  }
+  get payment() {
+    return this.db.payment;
+  }
+  get paymentSettings() {
+    return this.db.paymentSettings;
+  }
+  get review() {
+    return this.db.review;
+  }
+  get gallery() {
+    return this.db.gallery;
+  }
+  get category() {
+    return this.db.category;
+  }
+  get businessHours() {
+    return this.db.businessHours;
+  }
+  get blockedDate() {
+    return this.db.blockedDate;
+  }
+  get contactInfo() {
+    return this.db.contactInfo;
+  }
+  get loyaltyPoints() {
+    return this.db.loyaltyPoints;
+  }
+  get loyaltyTransaction() {
+    return this.db.loyaltyTransaction;
+  }
+  get referralCode() {
+    return this.db.referralCode;
+  }
+  get referral() {
+    return this.db.referral;
+  }
+  get product() {
+    return this.db.product;
+  }
+  get productCategory() {
+    return this.db.productCategory;
+  }
+  get cart() {
+    return this.db.cart;
+  }
+  get cartItem() {
+    return this.db.cartItem;
+  }
+  get order() {
+    return this.db.order;
+  }
+  get orderItem() {
+    return this.db.orderItem;
+  }
+  get referralOrderReward() {
+    return this.db.referralOrderReward;
+  }
+  get commerceSettings() {
+    return this.db.commerceSettings;
+  }
+  get promoBanner() {
+    return this.db.promoBanner;
+  }
+  get paymentAttempt() {
+    return this.db.paymentAttempt;
+  }
+  get ledgerEntry() {
+    return this.db.ledgerEntry;
+  }
+  get refund() {
+    return this.db.refund;
+  }
+
+  /**
+   * Run `fn` in a transaction holding a Postgres advisory lock on `key`.
+   *
+   * For check-then-write rules (is this slot free? were these points already
+   * awarded?): doing both inside `fn` makes concurrent requests for the same
+   * key queue behind each other instead of both passing the check. The lock is
+   * released when the transaction commits or rolls back.
+   *
+   * Inside `fn`, findUnique* and upsert on scoped models are re-dispatched by
+   * the tenant extension through the raw client — outside the transaction (see
+   * tenantExtension.ts). Use findFirst/findMany/create/update/updateMany for
+   * anything that must commit or roll back with the rest.
+   */
+  protected async withAdvisoryLock<T>(
+    key: string,
+    fn: (tx: TenantTx) => Promise<T>,
+  ): Promise<T> {
+    return this.db.$transaction(async (tx) => {
+      // $executeRaw, not $queryRaw: the function returns `void`, which
+      // Prisma can't deserialize as a result column.
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${key}::text))`;
+      return fn(tx);
+    }, TX_OPTIONS);
+  }
 
   // The current studio's Paystack subaccount code (for split settlement), or
   // null when the studio hasn't connected a payout account — in which case
@@ -130,9 +223,18 @@ export class Connection {
     const studioId = studioIdOverride ?? getTenantContext()?.studioId;
     if (!studioId) return null;
     const [studio, branding, contact] = await Promise.all([
-      this.studio.findUnique({ where: { id: studioId }, select: { name: true, slug: true } }),
-      this.studioBranding.findUnique({ where: { studioId }, select: { logoUrl: true, primaryColor: true } }),
-      this.contactInfo.findFirst({ where: { studioId }, select: { email: true, phone: true, address: true } }),
+      this.studio.findUnique({
+        where: { id: studioId },
+        select: { name: true, slug: true },
+      }),
+      this.studioBranding.findUnique({
+        where: { studioId },
+        select: { logoUrl: true, primaryColor: true },
+      }),
+      this.contactInfo.findFirst({
+        where: { studioId },
+        select: { email: true, phone: true, address: true },
+      }),
     ]);
     if (!studio) return null;
     const websiteUrl = env.rootDomain
@@ -141,7 +243,7 @@ export class Connection {
     return {
       name: studio.name,
       slug: studio.slug,
-      logoUrl: new S3BucketService().deliveryUrl(branding?.logoUrl ?? null) ?? null,
+      logoUrl: s3.deliveryUrl(branding?.logoUrl ?? null) ?? null,
       primaryColor: branding?.primaryColor ?? null,
       websiteUrl,
       bookingUrl: `${websiteUrl}/book`,
@@ -151,10 +253,26 @@ export class Connection {
     };
   }
 
+  // The brand a notification email renders with: the studio's own identity
+  // when it resolves, else `fallback`. Customer-facing storefront mail uses
+  // the default; account/security mail passes `platformBrand`. See
+  // currentStudioBranding for when `studioIdOverride` is required.
+  protected async studioEmailBrand(
+    studioIdOverride?: string | null,
+    fallback: EmailBrand = storefrontFallbackBrand,
+  ): Promise<EmailBrand> {
+    const studio = await this.currentStudioBranding(
+      studioIdOverride ?? undefined,
+    );
+    return brandFromStudio(studio, fallback);
+  }
+
   // Where to send a studio-owner notification (new booking request, etc): the
   // studio's published contact email if set and shown, else the account
   // owner's login email. Null when neither is available.
-  protected async currentStudioNotifyEmail(studioIdOverride?: string): Promise<string | null> {
+  protected async currentStudioNotifyEmail(
+    studioIdOverride?: string,
+  ): Promise<string | null> {
     const studioId = studioIdOverride ?? getTenantContext()?.studioId;
     if (!studioId) return null;
     const contact = await this.contactInfo.findFirst({
@@ -188,15 +306,40 @@ export class Connection {
   }
 
   // ---- Platform models (not auto-scoped; used by super-admin/onboarding) ----
-  get studio() { return this.db.studio; }
-  get studioBranding() { return this.db.studioBranding; }
-  get studioContent() { return this.db.studioContent; }
-  get studioSettings() { return this.db.studioSettings; }
-  get featureRequest() { return this.db.featureRequest; }
-  get auditLog() { return this.db.auditLog; }
-  get platformActivityLog() { return this.db.platformActivityLog; }
-  get notificationLog() { return this.db.notificationLog; }
-  get studioSignup() { return this.db.studioSignup; }
-  get platformReview() { return this.db.platformReview; }
-  get platformConfig() { return this.db.platformConfig; }
+  get studio() {
+    return this.db.studio;
+  }
+  get studioBranding() {
+    return this.db.studioBranding;
+  }
+  get studioContent() {
+    return this.db.studioContent;
+  }
+  get studioSettings() {
+    return this.db.studioSettings;
+  }
+  get featureRequest() {
+    return this.db.featureRequest;
+  }
+  get auditLog() {
+    return this.db.auditLog;
+  }
+  get platformActivityLog() {
+    return this.db.platformActivityLog;
+  }
+  get notificationLog() {
+    return this.db.notificationLog;
+  }
+  get studioSignup() {
+    return this.db.studioSignup;
+  }
+  get platformReview() {
+    return this.db.platformReview;
+  }
+  get studioBillingCharge() {
+    return this.db.studioBillingCharge;
+  }
+  get platformConfig() {
+    return this.db.platformConfig;
+  }
 }

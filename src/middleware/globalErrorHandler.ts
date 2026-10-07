@@ -6,9 +6,12 @@ import { ApiError } from "./apiError";
 // What a customer sees when something breaks on our side. Never leaks a stack,
 // a driver message, or a table name — those go to the logs under `reference`,
 // which the user is told to quote to support.
+//
+// It deliberately promises nothing about the outcome (e.g. "nothing was
+// charged"): the same handler serves logins, bookings and payments, and an
+// error after a charge went through would make that untrue.
 const FALLBACK_MESSAGE =
-  "Something went wrong on our end and your request didn't go through. " +
-  "Nothing was charged. Please try again in a moment.";
+  "Something went wrong on our side. Please try again in a moment.";
 
 // Infrastructure failures a user can actually act on. Anything not listed here
 // falls through to FALLBACK_MESSAGE rather than exposing the raw error.
@@ -60,6 +63,15 @@ const friendlyFor = (err: Error): ApiError | null => {
       HttpCode.NOT_FOUND,
     );
   }
+  // A transaction that hit a conflict or was closed before it finished. It
+  // rolled back, so trying again is safe and usually works.
+  if (code === "P2028" || code === "P2034") {
+    return new ApiError(
+      "We're busy right now. Please try again in a few seconds.",
+      HttpCode.SERVICE_UNAVAILABLE,
+    );
+  }
+
   // Database unreachable / connection pool exhausted.
   if (code === "P1001" || code === "P1002" || code === "P2024") {
     return new ApiError(
@@ -110,7 +122,9 @@ export const globalErrorHandler = (
   // A 5xx is our fault and is never explained to the user in detail. Tag it so
   // the log line and the user's message share one id they can quote to support.
   const isServerFault = statusCode >= 500;
-  const reference = isServerFault ? randomUUID().slice(0, 8).toUpperCase() : null;
+  const reference = isServerFault
+    ? randomUUID().slice(0, 8).toUpperCase()
+    : null;
 
   if (isServerFault) {
     console.error(
@@ -126,15 +140,18 @@ export const globalErrorHandler = (
     );
   }
 
-  // 4xx messages are written for users already (they come from ApiError call
-  // sites), so they pass through. 5xx never does.
-  const message = isServerFault
-    ? FALLBACK_MESSAGE
-    : (appError?.message ?? FALLBACK_MESSAGE);
+  // ApiError messages are written for users (at the call site, or by
+  // friendlyFor above), so they pass through whatever the status. Anything
+  // else is an unexpected crash whose raw message may expose internals, so it
+  // gets the generic text. A 5xx carries its reference in the message too,
+  // since that's the part the app shows.
+  const base = appError?.message ?? FALLBACK_MESSAGE;
+  const message = reference ? `${base} (Reference: ${reference})` : base;
 
   res.status(statusCode).json({
     status: statusCode >= 500 ? "error" : "fail",
     message,
+    ...(!isServerFault && appError?.errors ? { errors: appError.errors } : {}),
     ...(reference ? { reference } : {}),
     // Stacks are for local debugging only, and only on our own faults.
     ...(process.env.NODE_ENV === "development" && isServerFault

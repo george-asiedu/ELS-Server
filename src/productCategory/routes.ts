@@ -8,9 +8,19 @@ const router: Router = Router();
 router.get("/", ProductCategoryController.list);
 
 // Admin
-router.get("/all", authenticate, requireAdmin, ProductCategoryController.listAll);
+router.get(
+  "/all",
+  authenticate,
+  requireAdmin,
+  ProductCategoryController.listAll,
+);
 router.post("/", authenticate, requireAdmin, ProductCategoryController.create);
-router.put("/:id", authenticate, requireAdmin, ProductCategoryController.update);
+router.put(
+  "/:id",
+  authenticate,
+  requireAdmin,
+  ProductCategoryController.update,
+);
 router.delete(
   "/:id",
   authenticate,

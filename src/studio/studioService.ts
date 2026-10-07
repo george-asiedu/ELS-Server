@@ -7,12 +7,16 @@ import { env } from "../config/env.config";
 import { randomUUID } from "crypto";
 import { shortId } from "../utils/shortId";
 import { promises as dns } from "dns";
-import { planFlags } from "../platform/platformService";
+import {
+  planFlags,
+  planPriceFor,
+  loadBillingConfig,
+} from "../platform/platformService";
 import { AuditService } from "../audit/auditService";
 import {
   Plan,
   Cadence,
-  pricePesewas,
+  toPesewas,
   extendPeriod,
   isLapsed,
 } from "../billing/billingPlans";
@@ -27,12 +31,8 @@ import {
   subscriptionExpiringSoon,
   subscriptionExpired,
 } from "../notifications/templates/subscription";
-import { EmailBrand } from "../notifications/types";
-
-const zuriBillingBrand: EmailBrand = {
-  kind: "zuri",
-  zuri: { name: "Zuri Studios", websiteUrl: env.clientUrl, supportEmail: env.senderEmail },
-};
+import { platformBrand } from "../notifications/brand";
+import { ghs } from "../notifications/format";
 
 const DOMAIN_RE = /^(?!-)[a-z0-9-]{1,63}(\.[a-z0-9-]{1,63})+$/;
 const normalizeDomain = (raw: string) =>
@@ -55,10 +55,41 @@ const normalizeColor = (
   if (value === null || value === "") return null;
   const s = String(value).trim();
   if (!HEX_RE.test(s)) {
-    throw new ApiError(`${field} must be a hex color like #4F46E5`, HttpCode.BAD_REQUEST);
+    throw new ApiError(
+      `${field} must be a hex color like #4F46E5`,
+      HttpCode.BAD_REQUEST,
+    );
   }
   return s;
 };
+
+// Landing-page text a studio admin can set, with each field's length cap.
+// Null (or blank) means the storefront shows its default wording.
+const CONTENT_TEXT_LIMITS = {
+  heroEyebrow: 40,
+  heroHeadline: 100,
+  heroSubtext: 300,
+  aboutHeading: 120,
+  aboutText: 500,
+  featuresHeading: 120,
+  servicesHeading: 120,
+  galleryHeading: 120,
+  reviewsHeading: 120,
+  loyaltyHeading: 120,
+  loyaltyText: 300,
+  ctaHeading: 120,
+  contactHeading: 120,
+} as const;
+type ContentTextField = keyof typeof CONTENT_TEXT_LIMITS;
+
+// Landing-page images: uploaded through /uploads under the studio's "studio"
+// media prefix, stored as their delivery URL.
+const CONTENT_IMAGE_FIELDS = [
+  "heroImageUrl",
+  "aboutImageUrl",
+  "ctaImageUrl",
+] as const;
+type ContentImageField = (typeof CONTENT_IMAGE_FIELDS)[number];
 
 // Feature cards are stored as JSON; a string-indexed record keeps them
 // assignable to Prisma's InputJsonValue.
@@ -74,10 +105,16 @@ const sanitizeFeatureCards = (value: unknown): FeatureCard[] | undefined => {
     const title = String(c.title ?? "").trim();
     const description = String(c.description ?? "").trim();
     if (!title) {
-      throw new ApiError("Each feature card needs a title", HttpCode.BAD_REQUEST);
+      throw new ApiError(
+        "Each feature card needs a title",
+        HttpCode.BAD_REQUEST,
+      );
     }
     return {
-      icon: String(c.icon ?? "sparkles").trim().toLowerCase().slice(0, 24),
+      icon: String(c.icon ?? "sparkles")
+        .trim()
+        .toLowerCase()
+        .slice(0, 24),
       title: title.slice(0, 60),
       description: description.slice(0, 160),
     };
@@ -91,6 +128,10 @@ const sanitizeFeatureCards = (value: unknown): FeatureCard[] | undefined => {
  * content are platform models keyed by studioId, so they're queried directly by
  * id (they aren't auto-scoped by the tenant extension).
  */
+// References for a studio paying the platform (see startCharge).
+export const isStudioBillingReference = (reference: string) =>
+  reference.startsWith("ZURI-RENEW-") || reference.startsWith("ZURI-BILLING-");
+
 export class StudioService extends Connection {
   private notifications = new NotificationService();
 
@@ -129,13 +170,7 @@ export class StudioService extends Connection {
         accentColor: studio.branding?.accentColor ?? null,
         fontFamily: studio.branding?.fontFamily ?? null,
       },
-      content: {
-        heroHeadline: studio.content?.heroHeadline ?? null,
-        heroSubtext: studio.content?.heroSubtext ?? null,
-        aboutText: studio.content?.aboutText ?? null,
-        featureCards: studio.content?.featureCards ?? null,
-        showTestimonials: studio.content?.showTestimonials ?? true,
-      },
+      content: this.publicContent(studio.content),
       settings: {
         commerce: studio.settings?.commerce ?? false,
         loyalty: studio.settings?.loyalty ?? true,
@@ -187,16 +222,18 @@ export class StudioService extends Connection {
     if (accent !== undefined) data.accentColor = accent;
 
     if (input.fontFamily !== undefined) {
-      const font = String(input.fontFamily ?? "").trim().slice(0, 60);
+      const font = String(input.fontFamily ?? "")
+        .trim()
+        .slice(0, 60);
       data.fontFamily = font || null;
     }
 
     if (input.logoUrl) {
-      data.logoUrl = this.s3.assertOwnedMediaUrl(String(input.logoUrl), "studio");
-    } else if (
-      input.removeLogo === true ||
-      input.removeLogo === "true"
-    ) {
+      data.logoUrl = this.s3.assertOwnedMediaUrl(
+        String(input.logoUrl),
+        "studio",
+      );
+    } else if (input.removeLogo === true || input.removeLogo === "true") {
       data.logoUrl = null;
     }
 
@@ -222,7 +259,10 @@ export class StudioService extends Connection {
       verified: studio.customDomainVerified,
       // The DNS record the studio must add to prove ownership.
       txt: token
-        ? { name: `_zuri-verify.${studio.customDomain}`, value: `zuri-verify=${token}` }
+        ? {
+            name: `_zuri-verify.${studio.customDomain}`,
+            value: `zuri-verify=${token}`,
+          }
         : null,
     };
   }
@@ -248,7 +288,10 @@ export class StudioService extends Connection {
     const id = this.requireStudioId(studioId);
     const domain = normalizeDomain(rawDomain);
     if (!DOMAIN_RE.test(domain)) {
-      throw new ApiError("Enter a valid domain (e.g. book.mystudio.com)", HttpCode.BAD_REQUEST);
+      throw new ApiError(
+        "Enter a valid domain (e.g. book.mystudio.com)",
+        HttpCode.BAD_REQUEST,
+      );
     }
     const taken = await this.studio.findFirst({
       where: { customDomain: domain, id: { not: id } },
@@ -271,7 +314,10 @@ export class StudioService extends Connection {
       },
     });
     forgetStudioDomain(domain);
-    return { message: "Domain saved — add the DNS record, then verify", data: this.domainPayload(updated) };
+    return {
+      message: "Domain saved — add the DNS record, then verify",
+      data: this.domainPayload(updated),
+    };
   }
 
   public async verifyDomain(studioId: string | null | undefined) {
@@ -286,7 +332,9 @@ export class StudioService extends Connection {
     const expected = `zuri-verify=${studio.customDomainVerifyToken}`;
     let found = false;
     try {
-      const records = await dns.resolveTxt(`_zuri-verify.${studio.customDomain}`);
+      const records = await dns.resolveTxt(
+        `_zuri-verify.${studio.customDomain}`,
+      );
       found = records.some((chunks) => chunks.join("").includes(expected));
     } catch {
       found = false;
@@ -313,7 +361,8 @@ export class StudioService extends Connection {
   // Public: map a host to a studio slug (for a SPA served from a custom domain).
   public async resolveByDomain(host: string) {
     const studio = await resolveStudioByDomain(host);
-    if (!studio) throw new ApiError("No studio for this domain", HttpCode.NOT_FOUND);
+    if (!studio)
+      throw new ApiError("No studio for this domain", HttpCode.NOT_FOUND);
     return { message: "Resolved", data: { slug: studio.slug } };
   }
 
@@ -378,8 +427,44 @@ export class StudioService extends Connection {
     };
   }
 
+  /**
+   * Record a studio-to-platform charge (a renewal or a plan change) and hand
+   * it to Paystack. What it is for and what it costs are fixed here; applying
+   * it later uses only these stored values.
+   */
+  private async startCharge(
+    studioId: string,
+    kind: "RENEWAL" | "PLAN_CHANGE",
+    plan: Plan,
+    cadence: Cadence,
+  ) {
+    const amount = planPriceFor(plan, cadence, await loadBillingConfig());
+    const email = await this.ownerEmail(studioId);
+    const reference = `${kind === "RENEWAL" ? "ZURI-RENEW-" : "ZURI-BILLING-"}${shortId()}`;
+    await this.studioBillingCharge.create({
+      data: { reference, studioId, kind, plan, cadence, amount },
+    });
+    const init = await paystack.initialize({
+      email,
+      amountPesewas: toPesewas(amount),
+      reference,
+      callbackUrl: `${env.clientUrl}/admin/billing`,
+      metadata: {
+        kind: kind === "RENEWAL" ? "renewal" : "billing",
+        studioId,
+        plan,
+        cadence,
+      },
+    });
+    return {
+      reference,
+      accessCode: init.access_code,
+      publicKey: env.paystack.publicKey,
+    };
+  }
+
   // Start a plan/cadence change: charge the new plan's price once. On success
-  // the frontend calls applyBillingChange().
+  // the frontend calls applyBillingChange() (the webhook applies it too).
   public async startBillingChange(
     studioId: string | null | undefined,
     plan: string,
@@ -406,48 +491,164 @@ export class StudioService extends Connection {
     ) {
       throw new ApiError("You're already on this plan", HttpCode.BAD_REQUEST);
     }
-    const email = await this.ownerEmail(id);
-    const amountPesewas = pricePesewas(plan as Plan, cadence as Cadence);
-    if (!amountPesewas) {
-      throw new ApiError("Billing is not configured for that plan", HttpCode.BAD_GATEWAY);
-    }
-    const reference = `ZURI-BILLING-${shortId()}`;
-    const init = await paystack.initialize({
-      email,
-      amountPesewas,
-      reference,
-      callbackUrl: `${env.clientUrl}/admin/billing`,
-      metadata: { kind: "billing", studioId: id, plan, cadence },
-    });
-    return {
-      message: "Plan change started",
-      data: {
-        reference,
-        accessCode: init.access_code,
-        publicKey: env.paystack.publicKey,
-      },
-    };
+    const data = await this.startCharge(
+      id,
+      "PLAN_CHANGE",
+      plan as Plan,
+      cadence as Cadence,
+    );
+    return { message: "Plan change started", data };
   }
 
-  // Apply the change after payment succeeds: switch plan + feature flags and
-  // start a fresh billing period.
+  // Renew the current plan for another period (manual, before/after lapse).
+  public async startRenewal(studioId: string | null | undefined) {
+    const id = this.requireStudioId(studioId);
+    const studio = await this.studio.findUnique({
+      where: { id },
+      select: { plan: true, billingCadence: true, billingMode: true },
+    });
+    if (!studio) throw new ApiError("Studio not found", HttpCode.NOT_FOUND);
+    if (studio.billingMode === "REVENUE_SHARE") {
+      throw new ApiError(
+        "Your account bills per transaction — there's nothing to renew.",
+        HttpCode.BAD_REQUEST,
+      );
+    }
+    const data = await this.startCharge(
+      id,
+      "RENEWAL",
+      studio.plan as Plan,
+      studio.billingCadence as Cadence,
+    );
+    return { message: "Renewal started", data };
+  }
+
+  // The studio admin's return from checkout. The plan and cadence come from
+  // the charge recorded at start, never from the request.
   public async applyBillingChange(
     studioId: string | null | undefined,
     reference: string,
-    plan: string,
-    cadence: string,
   ) {
     const id = this.requireStudioId(studioId);
-    if (!reference.startsWith("ZURI-BILLING-")) {
-      throw new ApiError("Invalid reference", HttpCode.BAD_REQUEST);
-    }
-    if (!["STANDARD", "PREMIUM"].includes(plan)) {
-      throw new ApiError("Invalid plan", HttpCode.BAD_REQUEST);
-    }
-    const targetCadence: Cadence = cadence === "YEARLY" ? "YEARLY" : "MONTHLY";
-    await this.assertPaid(reference);
+    await this.applyBillingCharge(reference, {
+      studioId: id,
+      kind: "PLAN_CHANGE",
+    });
+    return this.getBilling(id);
+  }
 
-    const studio = await this.studio.findUnique({ where: { id } });
+  public async applyRenewal(
+    studioId: string | null | undefined,
+    reference: string,
+  ) {
+    const id = this.requireStudioId(studioId);
+    await this.applyBillingCharge(reference, { studioId: id, kind: "RENEWAL" });
+    return this.getBilling(id);
+  }
+
+  /**
+   * Apply a paid renewal or plan change, exactly once.
+   *
+   * Called from the studio admin's return from checkout, the Paystack webhook
+   * and the reconciliation sweep, so a studio that pays and closes the tab is
+   * still renewed. Before this, the plan came from the request (a Standard
+   * monthly payment could be applied as Premium yearly) and nothing stopped a
+   * paid reference being applied again and again.
+   */
+  public async applyBillingCharge(
+    reference: string,
+    expect: { studioId?: string; kind?: "RENEWAL" | "PLAN_CHANGE" } = {},
+  ): Promise<"applied" | "already_applied"> {
+    const charge = await this.studioBillingCharge.findUnique({
+      where: { reference },
+    });
+    if (
+      !charge ||
+      (expect.studioId && charge.studioId !== expect.studioId) ||
+      (expect.kind && charge.kind !== expect.kind)
+    ) {
+      throw new ApiError("Payment not found", HttpCode.NOT_FOUND);
+    }
+    if (charge.status === "APPLIED") return "already_applied";
+
+    let confirmed = false;
+    try {
+      const data = await paystack.verify(reference);
+      confirmed =
+        data.status === "success" &&
+        Number(data.amount) >= toPesewas(charge.amount);
+    } catch {
+      confirmed = false;
+    }
+    if (!confirmed) {
+      throw new ApiError("Payment not confirmed", HttpCode.BAD_REQUEST);
+    }
+
+    // Claim it: only one caller (admin return, webhook, sweep) gets past here.
+    const claimed = await this.studioBillingCharge.updateMany({
+      where: { id: charge.id, status: "PENDING" },
+      data: { status: "APPLIED", appliedAt: new Date() },
+    });
+    if (claimed.count === 0) return "already_applied";
+
+    try {
+      if (charge.kind === "RENEWAL") await this.renewFromCharge(charge);
+      else await this.changePlanFromCharge(charge);
+    } catch (error) {
+      // Nothing changed for the studio, so release the claim for a retry.
+      await this.studioBillingCharge.update({
+        where: { id: charge.id },
+        data: { status: "PENDING", appliedAt: null },
+      });
+      throw error;
+    }
+    return "applied";
+  }
+
+  private async renewFromCharge(charge: {
+    reference: string;
+    studioId: string;
+    cadence: Cadence;
+    amount: number;
+  }) {
+    const studio = await this.studio.findUnique({
+      where: { id: charge.studioId },
+      select: { currentPeriodEnd: true, status: true },
+    });
+    if (!studio) throw new ApiError("Studio not found", HttpCode.NOT_FOUND);
+    await this.studio.update({
+      where: { id: charge.studioId },
+      data: {
+        subscriptionStatus: "active",
+        currentPeriodEnd: extendPeriod(studio.currentPeriodEnd, charge.cadence),
+        ...(studio.status === "SUSPENDED" ? { status: "ACTIVE" } : {}),
+      },
+    });
+    await this.audit.record({
+      action: "payment.renewal.succeeded",
+      targetType: "Studio",
+      targetId: charge.studioId,
+      studioId: charge.studioId,
+      metadata: {
+        kind: "renewal",
+        reference: charge.reference,
+        cadence: charge.cadence,
+        amount: charge.amount,
+        currency: "GHS",
+      },
+    });
+  }
+
+  private async changePlanFromCharge(charge: {
+    reference: string;
+    studioId: string;
+    plan: Plan;
+    cadence: Cadence;
+    amount: number;
+  }) {
+    const studio = await this.studio.findUnique({
+      where: { id: charge.studioId },
+    });
     if (!studio) throw new ApiError("Studio not found", HttpCode.NOT_FOUND);
 
     // Leaving pay-as-you-earn: stop taking a per-transaction cut, including on
@@ -470,136 +671,37 @@ export class StudioService extends Connection {
 
     // A plan change starts a fresh period from now.
     await this.studio.update({
-      where: { id },
+      where: { id: charge.studioId },
       data: {
-        plan: plan as Plan,
-        billingCadence: targetCadence,
+        plan: charge.plan,
+        billingCadence: charge.cadence,
         subscriptionStatus: "active",
-        currentPeriodEnd: extendPeriod(null, targetCadence),
+        currentPeriodEnd: extendPeriod(null, charge.cadence),
         ...(fromRevenueShare
           ? { billingMode: "SUBSCRIPTION" as const, platformFeePercent: 0 }
           : {}),
       },
     });
-    const flags = planFlags(plan as Plan);
+    const flags = planFlags(charge.plan);
     await this.studioSettings.upsert({
-      where: { studioId: id },
+      where: { studioId: charge.studioId },
       update: flags,
-      create: { studioId: id, ...flags },
+      create: { studioId: charge.studioId, ...flags },
     });
     await this.audit.record({
       action: "payment.plan_change.succeeded",
       targetType: "Studio",
-      targetId: id,
-      studioId: id,
+      targetId: charge.studioId,
+      studioId: charge.studioId,
       metadata: {
         kind: "plan_change",
-        reference,
-        plan,
-        cadence: targetCadence,
-        amount: pricePesewas(plan as Plan, targetCadence) / 100,
+        reference: charge.reference,
+        plan: charge.plan,
+        cadence: charge.cadence,
+        amount: charge.amount,
         currency: "GHS",
       },
     });
-    return this.getBilling(id);
-  }
-
-  // Renew the current plan for another period (manual, before/after lapse).
-  public async startRenewal(studioId: string | null | undefined) {
-    const id = this.requireStudioId(studioId);
-    const studio = await this.studio.findUnique({
-      where: { id },
-      select: { plan: true, billingCadence: true, billingMode: true },
-    });
-    if (!studio) throw new ApiError("Studio not found", HttpCode.NOT_FOUND);
-    if (studio.billingMode === "REVENUE_SHARE") {
-      throw new ApiError(
-        "Your account bills per transaction — there's nothing to renew.",
-        HttpCode.BAD_REQUEST,
-      );
-    }
-    const email = await this.ownerEmail(id);
-    const amountPesewas = pricePesewas(
-      studio.plan as Plan,
-      studio.billingCadence as Cadence,
-    );
-    if (!amountPesewas) {
-      throw new ApiError("Billing is not configured for that plan", HttpCode.BAD_GATEWAY);
-    }
-    const reference = `ZURI-RENEW-${shortId()}`;
-    const init = await paystack.initialize({
-      email,
-      amountPesewas,
-      reference,
-      callbackUrl: `${env.clientUrl}/admin/billing`,
-      metadata: {
-        kind: "renewal",
-        studioId: id,
-        plan: studio.plan,
-        cadence: studio.billingCadence,
-      },
-    });
-    return {
-      message: "Renewal started",
-      data: {
-        reference,
-        accessCode: init.access_code,
-        publicKey: env.paystack.publicKey,
-      },
-    };
-  }
-
-  // Apply a renewal after payment succeeds: extend the period (keeping any
-  // unused days) and re-activate the studio if it had been suspended.
-  public async applyRenewal(
-    studioId: string | null | undefined,
-    reference: string,
-  ) {
-    const id = this.requireStudioId(studioId);
-    if (!reference.startsWith("ZURI-RENEW-")) {
-      throw new ApiError("Invalid reference", HttpCode.BAD_REQUEST);
-    }
-    await this.assertPaid(reference);
-    const studio = await this.studio.findUnique({
-      where: { id },
-      select: { billingCadence: true, currentPeriodEnd: true, status: true },
-    });
-    if (!studio) throw new ApiError("Studio not found", HttpCode.NOT_FOUND);
-    await this.studio.update({
-      where: { id },
-      data: {
-        subscriptionStatus: "active",
-        currentPeriodEnd: extendPeriod(
-          studio.currentPeriodEnd,
-          studio.billingCadence as Cadence,
-        ),
-        ...(studio.status === "SUSPENDED" ? { status: "ACTIVE" } : {}),
-      },
-    });
-    await this.audit.record({
-      action: "payment.renewal.succeeded",
-      targetType: "Studio",
-      targetId: id,
-      studioId: id,
-      metadata: {
-        kind: "renewal",
-        reference,
-        cadence: studio.billingCadence,
-        currency: "GHS",
-      },
-    });
-    return this.getBilling(id);
-  }
-
-  private async assertPaid(reference: string) {
-    let paid = false;
-    try {
-      const data = await paystack.verify(reference);
-      paid = data.status === "success";
-    } catch {
-      paid = false;
-    }
-    if (!paid) throw new ApiError("Payment not confirmed", HttpCode.BAD_REQUEST);
   }
 
   // ---- Admin: loyalty cap ----------------------------------------------
@@ -639,6 +741,36 @@ export class StudioService extends Connection {
 
   // ---- Admin: content ---------------------------------------------------
 
+  // Every editable landing field, with images rewritten to their delivery URL.
+  private publicContent(
+    content:
+      | ({ featureCards: unknown; showTestimonials: boolean } & Record<
+          ContentTextField | ContentImageField,
+          string | null
+        >)
+      | null
+      | undefined,
+  ) {
+    const text = Object.fromEntries(
+      (Object.keys(CONTENT_TEXT_LIMITS) as ContentTextField[]).map((f) => [
+        f,
+        content?.[f] ?? null,
+      ]),
+    ) as Record<ContentTextField, string | null>;
+    const images = Object.fromEntries(
+      CONTENT_IMAGE_FIELDS.map((f) => [
+        f,
+        this.s3.deliveryUrl(content?.[f] ?? null) ?? null,
+      ]),
+    ) as Record<ContentImageField, string | null>;
+    return {
+      ...text,
+      ...images,
+      featureCards: content?.featureCards ?? null,
+      showTestimonials: content?.showTestimonials ?? true,
+    };
+  }
+
   public async getContent(studioId: string | null | undefined) {
     const id = this.requireStudioId(studioId);
     const content = await this.studioContent.upsert({
@@ -646,7 +778,7 @@ export class StudioService extends Connection {
       update: {},
       create: { studioId: id },
     });
-    return { message: "Content retrieved", data: content };
+    return { message: "Content retrieved", data: this.publicContent(content) };
   }
 
   // ---- Admin: payout (Paystack subaccount for split settlement) ---------
@@ -717,7 +849,10 @@ export class StudioService extends Connection {
         accountNumber: number,
         bankCode,
       });
-      return { message: "Account resolved", data: { accountName: res.account_name } };
+      return {
+        message: "Account resolved",
+        data: { accountName: res.account_name },
+      };
     } catch (error) {
       throw new ApiError(
         error instanceof ApiError
@@ -738,7 +873,8 @@ export class StudioService extends Connection {
     },
   ) {
     const id = this.requireStudioId(studioId);
-    const type = String(input.type ?? "momo").trim() === "bank" ? "bank" : "momo";
+    const type =
+      String(input.type ?? "momo").trim() === "bank" ? "bank" : "momo";
     const provider = String(input.provider ?? "").trim(); // Paystack settlement code
     const accountNumber = String(input.accountNumber ?? "").trim();
     const accountName = String(input.accountName ?? "").trim();
@@ -825,35 +961,47 @@ export class StudioService extends Connection {
 
   public async updateContent(
     studioId: string | null | undefined,
-    input: {
-      heroHeadline?: unknown;
-      heroSubtext?: unknown;
-      aboutText?: unknown;
+    input: Partial<Record<ContentTextField | ContentImageField, unknown>> & {
       featureCards?: unknown;
       showTestimonials?: unknown;
     },
   ) {
     const id = this.requireStudioId(studioId);
 
-    const data: {
-      heroHeadline?: string | null;
-      heroSubtext?: string | null;
-      aboutText?: string | null;
+    const data: Partial<
+      Record<ContentTextField | ContentImageField, string | null>
+    > & {
       featureCards?: FeatureCard[];
       showTestimonials?: boolean;
     } = {};
 
-    const text = (v: unknown, max: number) => {
-      const s = String(v ?? "").trim();
-      return s ? s.slice(0, max) : null;
-    };
+    // Omitted = leave unchanged; blank = back to the default.
+    for (const [field, max] of Object.entries(CONTENT_TEXT_LIMITS) as [
+      ContentTextField,
+      number,
+    ][]) {
+      if (input[field] === undefined) continue;
+      const s = String(input[field] ?? "").trim();
+      data[field] = s ? s.slice(0, max) : null;
+    }
 
-    if (input.heroHeadline !== undefined)
-      data.heroHeadline = text(input.heroHeadline, 100);
-    if (input.heroSubtext !== undefined)
-      data.heroSubtext = text(input.heroSubtext, 300);
-    if (input.aboutText !== undefined)
-      data.aboutText = text(input.aboutText, 500);
+    // Images must be this studio's own uploads, so a page can't be pointed at
+    // someone else's media or an arbitrary host.
+    for (const field of CONTENT_IMAGE_FIELDS) {
+      const value = input[field];
+      if (value === undefined) continue;
+      if (value === null || value === "") {
+        data[field] = null;
+        continue;
+      }
+      if (typeof value !== "string") {
+        throw new ApiError(
+          `${field} must be an image URL`,
+          HttpCode.BAD_REQUEST,
+        );
+      }
+      data[field] = this.s3.assertOwnedMediaUrl(value, "studio");
+    }
 
     const cards = sanitizeFeatureCards(input.featureCards);
     if (cards !== undefined) data.featureCards = cards;
@@ -866,7 +1014,7 @@ export class StudioService extends Connection {
       update: data,
       create: { studioId: id, ...data },
     });
-    return { message: "Content updated", data: content };
+    return { message: "Content updated", data: this.publicContent(content) };
   }
 
   // Background sweep (see queue/workers/billingReminderWorker.ts, run on a
@@ -879,6 +1027,7 @@ export class StudioService extends Connection {
     return runAsSuperAdmin(async () => {
       const now = new Date();
       const soonCutoff = new Date(now.getTime() + 3 * 24 * 60 * 60 * 1000);
+      const billingConfig = await loadBillingConfig();
 
       const studios = await this.studio.findMany({
         where: {
@@ -911,7 +1060,7 @@ export class StudioService extends Connection {
 
         try {
           if (lapsed) {
-            const { subject, html } = subscriptionExpired(zuriBillingBrand, {
+            const { subject, html } = subscriptionExpired(platformBrand, {
               planName,
               expiredOn: studio.currentPeriodEnd.toLocaleDateString("en-GB", {
                 day: "numeric",
@@ -931,8 +1080,14 @@ export class StudioService extends Connection {
             });
             expired++;
           } else {
-            const amountDue = `GHS ${pricePesewas(studio.plan as Plan, studio.billingCadence as Cadence) / 100}`;
-            const { subject, html } = subscriptionExpiringSoon(zuriBillingBrand, {
+            const amountDue = ghs(
+              planPriceFor(
+                studio.plan as Plan,
+                studio.billingCadence as Cadence,
+                billingConfig,
+              ),
+            );
+            const { subject, html } = subscriptionExpiringSoon(platformBrand, {
               planName,
               renewsOn: studio.currentPeriodEnd.toLocaleDateString("en-GB", {
                 day: "numeric",
@@ -954,7 +1109,10 @@ export class StudioService extends Connection {
             expiringSoon++;
           }
         } catch (error) {
-          console.error(`Failed to send billing reminder for studio ${studio.id}:`, error);
+          console.error(
+            `Failed to send billing reminder for studio ${studio.id}:`,
+            error,
+          );
         }
       }
 

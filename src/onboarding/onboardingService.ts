@@ -12,24 +12,22 @@ import {
   validateStudioSlug,
   commissionFor,
   setupFeeFor,
+  subscriptionSetupFor,
+  planPriceFor,
 } from "../platform/platformService";
 import {
   Plan,
   Cadence,
-  pricePesewas,
+  toPesewas,
   addPeriod,
+  addMonths,
 } from "../billing/billingPlans";
 import { NotificationService } from "../notifications/notificationService";
 import { buildReceiptPdf } from "../notifications/receiptPdf";
 import { ghs, receiptNumber } from "../notifications/format";
 import { NotificationTemplate } from "../notifications/registry";
 import { studioCreated } from "../notifications/templates/studio";
-import { EmailBrand } from "../notifications/types";
-
-const zuriBrand: EmailBrand = {
-  kind: "zuri",
-  zuri: { name: "Zuri Studios", websiteUrl: env.clientUrl, supportEmail: env.senderEmail },
-};
+import { platformBrand } from "../notifications/brand";
 
 type BillingMode = "SUBSCRIPTION" | "REVENUE_SHARE";
 
@@ -104,10 +102,15 @@ export class OnboardingService extends Connection {
   }) {
     const name = String(input.name ?? "").trim();
     if (name.length < 2 || name.length > 60) {
-      throw new ApiError("Studio name must be 2-60 characters", HttpCode.BAD_REQUEST);
+      throw new ApiError(
+        "Studio name must be 2-60 characters",
+        HttpCode.BAD_REQUEST,
+      );
     }
     const slug = validateStudioSlug(String(input.slug ?? ""));
-    const ownerEmail = String(input.ownerEmail ?? "").trim().toLowerCase();
+    const ownerEmail = String(input.ownerEmail ?? "")
+      .trim()
+      .toLowerCase();
     if (!EMAIL_RE.test(ownerEmail)) {
       throw new ApiError("A valid email is required", HttpCode.BAD_REQUEST);
     }
@@ -137,13 +140,22 @@ export class OnboardingService extends Connection {
       throw new ApiError("That address is already taken", HttpCode.CONFLICT);
     }
 
-    // Amount charged now: the plan's period price (subscription) or the plan's
-    // one-time setup fee (revenue-share). A revenue-share setup fee of 0 means
-    // the studio is provisioned immediately with no payment.
+    // Amount charged now:
+    //  - revenue-share: the plan's one-time activation fee (0 = provisioned
+    //    immediately with no payment);
+    //  - subscription with a setup fee: the setup fee, which covers the first
+    //    `months` months in place of the first period;
+    //  - subscription without one: the first period's price.
+    const setup =
+      billingMode === "SUBSCRIPTION"
+        ? subscriptionSetupFor(plan, cadence, cfg)
+        : null;
     const amountPesewas =
       billingMode === "REVENUE_SHARE"
         ? Math.round(setupFeeFor(plan, cfg) * 100)
-        : pricePesewas(plan, cadence);
+        : setup
+          ? Math.round(setup.fee * 100)
+          : toPesewas(planPriceFor(plan, cadence, cfg));
 
     if (billingMode === "SUBSCRIPTION" && !amountPesewas) {
       throw new ApiError(
@@ -168,6 +180,10 @@ export class OnboardingService extends Connection {
         billingMode,
         reference,
         status: "PENDING",
+        // Recorded now, so finalize provisions exactly what was paid for even
+        // if the super admin changes the fees in between.
+        amountCharged: amountPesewas / 100,
+        ...(setup ? { coverageMonths: setup.months } : {}),
       },
     });
 
@@ -236,6 +252,17 @@ export class OnboardingService extends Connection {
       try {
         const data = await paystack.verify(reference);
         paid = data.status === "success";
+        // Never provision on "success" alone: confirm Paystack collected what
+        // this signup was charged (recorded at start).
+        if (paid && signup.amountCharged != null) {
+          const expected = Math.round(signup.amountCharged * 100);
+          if (Number(data.amount) < expected) {
+            console.error(
+              `Signup ${reference}: Paystack collected ${data.amount} pesewas, expected ${expected}`,
+            );
+            paid = false;
+          }
+        }
       } catch {
         paid = false;
       }
@@ -257,16 +284,25 @@ export class OnboardingService extends Connection {
         slug: signup.slug,
         ownerEmail: signup.ownerEmail,
         ownerPasswordHash: signup.ownerPasswordHash,
-        ...(signup.ownerFullName ? { ownerFullName: signup.ownerFullName } : {}),
+        ...(signup.ownerFullName
+          ? { ownerFullName: signup.ownerFullName }
+          : {}),
         plan,
         cadence,
         billingMode,
         // Revenue-share: platform takes the plan's commission per transaction and
         // there's no billing period. Subscription: 0% cut, a period is set.
         platformFeePercent: revenueShare ? commissionFor(plan, cfg) : 0,
+        // A setup fee covers its months; otherwise the first paid period.
+        // Either way the plan's normal price is due when this period ends.
         subscription: revenueShare
           ? { status: "revenue_share", currentPeriodEnd: null }
-          : { status: "active", currentPeriodEnd: addPeriod(new Date(), cadence) },
+          : {
+              status: "active",
+              currentPeriodEnd: signup.coverageMonths
+                ? addMonths(new Date(), signup.coverageMonths)
+                : addPeriod(new Date(), cadence),
+            },
       }),
     );
 
@@ -276,9 +312,11 @@ export class OnboardingService extends Connection {
     });
 
     // Per-studio payment audit for the signup charge (setup fee or first period).
-    const amount = revenueShare
-      ? setupFeeFor(plan, cfg)
-      : pricePesewas(plan, cadence) / 100;
+    const amount =
+      signup.amountCharged ??
+      (revenueShare
+        ? setupFeeFor(plan, cfg)
+        : planPriceFor(plan, cadence, cfg));
     await this.audit.record({
       actor: { email: signup.ownerEmail, role: "customer" },
       action: "payment.signup.succeeded",
@@ -292,6 +330,9 @@ export class OnboardingService extends Connection {
         cadence,
         billingMode,
         amount,
+        ...(signup.coverageMonths
+          ? { setupFeeCoversMonths: signup.coverageMonths }
+          : {}),
         currency: "GHS",
         ownerEmail: signup.ownerEmail,
       },
@@ -301,8 +342,8 @@ export class OnboardingService extends Connection {
       const websiteUrl = env.rootDomain
         ? `https://${studio.slug}.${env.rootDomain}`
         : `${env.clientUrl}/s/${studio.slug}`;
-      const { subject, html } = studioCreated(zuriBrand, {
-        ownerFirstName: (signup.ownerFullName?.split(" ")[0]) || "there",
+      const { subject, html } = studioCreated(platformBrand, {
+        ownerFirstName: signup.ownerFullName?.split(" ")[0] || "there",
         studioName: studio.name,
         planName: plan === "PREMIUM" ? "Premium" : "Standard",
         dashboardUrl: `${env.clientUrl}/admin/login`,
@@ -316,7 +357,10 @@ export class OnboardingService extends Connection {
         amount > 0
           ? buildReceiptPdf({
               studioName: "Zuri Studios",
-              title: revenueShare ? "Setup fee receipt" : "Subscription receipt",
+              title:
+                revenueShare || signup.coverageMonths
+                  ? "Setup fee receipt"
+                  : "Subscription receipt",
               receiptNumber: receiptNumber("RCP", studio.id),
               issuedAt: new Date(),
               heading: `${plan === "PREMIUM" ? "Premium" : "Standard"} plan — ${studio.name}`,
@@ -331,6 +375,14 @@ export class OnboardingService extends Connection {
                       ? "Yearly"
                       : "Monthly",
                 },
+                ...(signup.coverageMonths
+                  ? [
+                      {
+                        label: "Covers",
+                        value: `Your first ${signup.coverageMonths} months`,
+                      },
+                    ]
+                  : []),
                 { label: "Amount", value: ghs(amount), strong: true },
               ],
               amountPaid: ghs(amount),
