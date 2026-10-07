@@ -1,5 +1,7 @@
+import type { Worker } from "bullmq";
 import { isQueueEnabled, getRedisConnection } from "./connection";
 import {
+  emailQueue,
   reconcilePaymentsQueue,
   billingRemindersQueue,
   bookingRemindersQueue,
@@ -9,6 +11,8 @@ import { createEmailWorker } from "./workers/emailWorker";
 import { createReconcileWorker } from "./workers/reconcileWorker";
 import { createBillingReminderWorker } from "./workers/billingReminderWorker";
 import { createBookingReminderWorker } from "./workers/bookingReminderWorker";
+
+const workers: Worker[] = [];
 
 // Call once at boot (see app.ts). No-ops entirely when REDIS_URL isn't set —
 // see queue/README.md for what that means for email sending and the
@@ -35,10 +39,12 @@ export const bootstrapQueues = async (): Promise<void> => {
     return;
   }
 
-  createEmailWorker();
-  createReconcileWorker();
-  createBillingReminderWorker();
-  createBookingReminderWorker();
+  workers.push(
+    createEmailWorker(),
+    createReconcileWorker(),
+    createBillingReminderWorker(),
+    createBookingReminderWorker(),
+  );
 
   // Repeatable job: sweep for stale pending payments/orders every 15 minutes.
   // upsertJobScheduler is idempotent — safe to call on every boot/deploy
@@ -74,4 +80,19 @@ export const bootstrapQueues = async (): Promise<void> => {
   console.log(
     `Queues online: "${QUEUE_NAMES.email}" (background email), "${QUEUE_NAMES.reconcilePayments}" (every 15 min), "${QUEUE_NAMES.billingReminders}" (daily), and "${QUEUE_NAMES.bookingReminders}" (24h hourly, 1h every 15 min).`,
   );
+};
+
+/**
+ * Stop taking jobs and let the ones in flight finish (Worker.close waits for
+ * them), then release the queues and the shared Redis connection. Called on
+ * SIGTERM so a deploy doesn't kill an email send or a reconcile sweep halfway.
+ */
+export const shutdownQueues = async (): Promise<void> => {
+  await Promise.allSettled(workers.map((w) => w.close()));
+  await Promise.allSettled(
+    [emailQueue, reconcilePaymentsQueue, billingRemindersQueue, bookingRemindersQueue]
+      .filter((q) => q !== null)
+      .map((q) => q.close()),
+  );
+  await getRedisConnection()?.quit().catch(() => undefined);
 };

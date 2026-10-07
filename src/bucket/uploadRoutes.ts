@@ -2,7 +2,6 @@ import { Router, Request, Response, NextFunction } from "express";
 import { S3BucketService } from "./s3BucketService";
 import { authenticate } from "../middleware/auth";
 import { ApiError } from "../middleware/apiError";
-import { reenterTenant } from "../middleware/tenant";
 
 const router: Router = Router();
 const storage = new S3BucketService();
@@ -10,7 +9,7 @@ const scopes = new Set(["gallery", "services", "products", "appointments", "stud
 
 // Studio media is always uploaded with authenticated, short-lived part URLs.
 // Booking reference photos can also be uploaded by customer accounts.
-router.post("/multipart/initiate", authenticate, reenterTenant, async (req: Request, res: Response, next: NextFunction) => {
+router.post("/multipart/initiate", authenticate, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { category, fileName, contentType, size } = req.body ?? {};
     if (typeof category !== "string" || !scopes.has(category)) throw new ApiError("Invalid media category", 400);
@@ -31,7 +30,7 @@ router.post("/multipart/initiate", authenticate, reenterTenant, async (req: Requ
   } catch (error) { next(error); }
 });
 
-router.post("/multipart/complete", authenticate, reenterTenant, async (req: Request, res: Response, next: NextFunction) => {
+router.post("/multipart/complete", authenticate, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { key, uploadId, parts } = req.body ?? {};
     if (!Array.isArray(parts)) throw new ApiError("Upload parts are required", 400);
@@ -40,7 +39,7 @@ router.post("/multipart/complete", authenticate, reenterTenant, async (req: Requ
   } catch (error) { next(error); }
 });
 
-router.post("/multipart/abort", authenticate, reenterTenant, async (req: Request, res: Response, next: NextFunction) => {
+router.post("/multipart/abort", authenticate, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { key, uploadId } = req.body ?? {};
     await storage.abortMultipart(String(key ?? ""), String(uploadId ?? ""));

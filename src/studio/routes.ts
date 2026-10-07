@@ -1,7 +1,6 @@
 import { Router } from "express";
 import { StudioController } from "./studioController";
 import { authenticate, requireAdmin } from "../middleware/auth";
-import { reenterTenant } from "../middleware/tenant";
 
 const router: Router = Router();
 
@@ -22,7 +21,6 @@ router.put(
   "/branding",
   authenticate,
   requireAdmin,
-  reenterTenant,
   StudioController.updateBranding,
 );
 router.get("/content", authenticate, requireAdmin, StudioController.getContent);

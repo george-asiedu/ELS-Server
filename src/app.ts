@@ -10,7 +10,8 @@ import { env } from "./config/env.config";
 import { globalErrorHandler } from "./middleware/globalErrorHandler";
 import { resolveTenant } from "./middleware/tenant";
 import routes from "./routes/index";
-import { bootstrapQueues } from "./queue";
+import { bootstrapQueues, shutdownQueues } from "./queue";
+import { createTenantClient } from "./tenant/tenantClient";
 import { createHash } from "crypto";
 import { rateLimitStore } from "./middleware/rateLimitStore";
 import { ApiError } from "./middleware/apiError";
@@ -226,7 +227,7 @@ const port = env.port;
 if (!port)
   throw new Error("Port number is not defined in environment variables");
 
-app.listen(port, "0.0.0.0", () => {
+const server = app.listen(port, "0.0.0.0", () => {
   console.log(`Server is running on port ${port}`);
 });
 
@@ -236,3 +237,31 @@ app.listen(port, "0.0.0.0", () => {
 bootstrapQueues().catch((error) => {
   console.error("Failed to start queues:", error);
 });
+
+// Graceful shutdown. The host sends SIGTERM before replacing an instance on
+// every deploy: stop accepting connections, let in-flight requests and queue
+// jobs finish, then release the database pool. A hard deadline makes sure a
+// stuck request can't hold the old instance up forever.
+const SHUTDOWN_DEADLINE_MS = 25_000;
+let shuttingDown = false;
+const shutdown = (signal: string) => {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.log(`${signal} received — shutting down`);
+  setTimeout(() => {
+    console.error("Shutdown deadline passed — exiting");
+    process.exit(1);
+  }, SHUTDOWN_DEADLINE_MS).unref();
+
+  server.close(async () => {
+    await shutdownQueues().catch((error) =>
+      console.error("Error closing queues:", error),
+    );
+    await createTenantClient().raw.$disconnect().catch(() => undefined);
+    process.exit(0);
+  });
+  // Idle keep-alive sockets would otherwise hold server.close() open.
+  server.closeIdleConnections();
+};
+process.on("SIGTERM", () => shutdown("SIGTERM"));
+process.on("SIGINT", () => shutdown("SIGINT"));

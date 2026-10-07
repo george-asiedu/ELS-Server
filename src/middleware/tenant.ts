@@ -77,9 +77,11 @@ export const resolveTenant = async (
  * resume on a callback whose async context is not the tenant store, so the
  * controller it invokes runs OUTSIDE that store and the scoping extension
  * fails closed. `req.tenantContext` is a plain property that survives any such
- * hop, so we re-enter the store from it here. Mount this AFTER `authenticate`
- * (and after any body parser that consumes the stream) on every route that
- * reads or writes tenant-scoped data.
+ * hop, so we re-enter the store from it here. `authenticate` and
+ * `optionalAuth` finish by calling this, so authenticated routes are covered;
+ * mount it explicitly only after other middleware that awaits I/O (e.g. a
+ * body parser that consumes the stream) on a route that reads or writes
+ * tenant-scoped data.
  */
 export const reenterTenant = (
   req: Request,

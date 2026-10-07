@@ -5,6 +5,7 @@ import { ApiError } from "./apiError";
 import { HttpCode } from "../models/status_codes";
 import { AuthToken } from "../models/user";
 import { isActiveLoginSession } from "../auth/sessionService";
+import { reenterTenant } from "./tenant";
 
 interface AccessTokenPayload {
   sub: string;
@@ -61,7 +62,10 @@ export const authenticate = async (
     };
     req.authSessionId = decoded.jti;
 
-    return next();
+    // The session lookup above awaited I/O, so continue in the request's
+    // tenant context explicitly (see reenterTenant) — every authenticated
+    // route gets this, rather than each route having to remember it.
+    return reenterTenant(req, _res, next);
   } catch (error) {
     return next(error);
   }
@@ -144,9 +148,9 @@ export const optionalAuth = async (
       };
       req.authSessionId = decoded.jti;
     }
-    return next();
+    return reenterTenant(req, _res, next);
   } catch {
     // Ignore invalid tokens for optional auth
-    return next();
+    return reenterTenant(req, _res, next);
   }
 };

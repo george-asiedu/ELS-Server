@@ -1,7 +1,6 @@
 import { Router } from "express";
 import { AppointmentController } from "./appointmentController";
 import { authenticate, requireAdmin, requireCustomer } from "../middleware/auth";
-import { reenterTenant } from "../middleware/tenant";
 
 const router: Router = Router();
 
@@ -13,7 +12,6 @@ router.post(
   "/",
   authenticate,
   requireCustomer,
-  reenterTenant,
   AppointmentController.create,
 );
 
@@ -36,7 +34,6 @@ router.patch(
 router.patch(
   "/:id/reschedule",
   authenticate,
-  reenterTenant,
   AppointmentController.reschedule,
 );
 // Swap the booked service. Admin-only: it re-prices the booking and can
@@ -45,7 +42,6 @@ router.patch(
   "/:id/service",
   authenticate,
   requireAdmin,
-  reenterTenant,
   AppointmentController.changeService,
 );
 router.delete("/:id", authenticate, requireAdmin, AppointmentController.remove);

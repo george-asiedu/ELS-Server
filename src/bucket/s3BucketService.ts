@@ -16,18 +16,21 @@ export interface SafeFile {
   buffer: Buffer;
 }
 
-export class S3BucketService {
-  private s3: S3Client;
+// One S3Client per process. Each client owns an HTTP agent and connection
+// pool, and S3BucketService is constructed by many services (and on every
+// branded email), so building a client per instance leaked sockets.
+let sharedClient: S3Client | null = null;
+const s3Client = (): S3Client =>
+  (sharedClient ??= new S3Client({
+    region: env.aws.region,
+    credentials: {
+      accessKeyId: env.aws.accessKeyId,
+      secretAccessKey: env.aws.secretAccessKey,
+    },
+  }));
 
-  constructor() {
-    this.s3 = new S3Client({
-      region: env.aws.region,
-      credentials: {
-        accessKeyId: env.aws.accessKeyId,
-        secretAccessKey: env.aws.secretAccessKey,
-      },
-    });
-  }
+export class S3BucketService {
+  private s3: S3Client = s3Client();
   
   private publicUrl(key: string) {
     if (!env.aws.cloudFrontUrl) throw new ApiError("AWS_CLOUDFRONT_URL is not configured", 500);
