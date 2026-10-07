@@ -6,6 +6,7 @@ import {
 } from "../utils/cursorPagination";
 import { getTenantContext, runAsSuperAdmin } from "../tenant/context";
 import { ApiError } from "../middleware/apiError";
+import { toWhatsappNumber } from "../utils/whatsapp";
 import { parseDurationMinutes } from "./duration";
 import { parseTimeMinutes, sameTime, formatTimeHHMM } from "./time";
 import { AuditService } from "../audit/auditService";
@@ -172,6 +173,11 @@ export class AppointmentService extends Connection {
   private static readonly POINTS_PER_GHS = 10; // 10 points = GHS 1 off
 
   public async create(data: CreateAppointmentInput, userId?: string) {
+    // The studio confirms and follows up on WhatsApp, so the number has to be
+    // one a wa.me link can open.
+    if (!toWhatsappNumber(data.phone)) {
+      throw new ApiError("Enter a phone number like 024 555 0142", 400);
+    }
     const service = await this.service.findUnique({
       where: { id: data.serviceId },
     });

@@ -2,6 +2,7 @@ import { Connection } from "../db/dbConnection";
 import { ApiError } from "../middleware/apiError";
 import { HttpCode } from "../models/status_codes";
 import { getPasswordHash } from "../utils/helper";
+import { toWhatsappNumber, WHATSAPP_NUMBER_HINT } from "../utils/whatsapp";
 import {
   createLoginSession,
   revokeStudioLoginSessions,
@@ -198,15 +199,13 @@ export const saveSiteSettings = async (
     data.supportEmail = v;
   }
   if (input.supportWhatsapp !== undefined) {
-    // Stored as digits only: that's what a wa.me link needs.
-    const digits = String(input.supportWhatsapp ?? "").replace(/\D/g, "");
-    if (digits && (digits.length < 9 || digits.length > 15)) {
-      throw new ApiError(
-        "Enter the WhatsApp number with its country code, e.g. 233201234567",
-        HttpCode.BAD_REQUEST,
-      );
+    // Stored as international digits: that's what a wa.me link needs.
+    const raw = String(input.supportWhatsapp ?? "").trim();
+    const number = raw ? toWhatsappNumber(raw) : null;
+    if (raw && !number) {
+      throw new ApiError(WHATSAPP_NUMBER_HINT, HttpCode.BAD_REQUEST);
     }
-    data.supportWhatsapp = digits || null;
+    data.supportWhatsapp = number;
   }
   if (input.demoStudioSlug !== undefined) {
     const slug = text(input.demoStudioSlug, 63)?.toLowerCase() ?? null;

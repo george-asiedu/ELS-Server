@@ -12,7 +12,12 @@ const createAppointmentSchema: JSONSchemaType<CreateAppointmentInput> = {
   type: "object",
   properties: {
     fullName: { type: "string", minLength: 2, maxLength: 100 },
-    phone: { type: "string", minLength: 7, maxLength: 20 },
+    phone: {
+      type: "string",
+      minLength: 7,
+      maxLength: 20,
+      pattern: "^\\+?[0-9\\s().-]+$",
+    },
     email: { type: "string", nullable: true, maxLength: 120 },
     serviceId: { type: "string", minLength: 1 },
     appointmentDate: {
