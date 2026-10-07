@@ -8,6 +8,7 @@ import {
   storefrontFallbackBrand,
 } from "../notifications/brand";
 import { S3BucketService } from "../bucket/s3BucketService";
+import { TX_OPTIONS } from "./transactionOptions";
 
 const s3 = new S3BucketService();
 
@@ -157,7 +158,7 @@ export class Connection {
       // Prisma can't deserialize as a result column.
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${key}::text))`;
       return fn(tx);
-    });
+    }, TX_OPTIONS);
   }
 
   // The current studio's Paystack subaccount code (for split settlement), or

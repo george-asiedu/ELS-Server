@@ -1,5 +1,9 @@
 import jwt from "jsonwebtoken";
 import { createTenantClient } from "../tenant/tenantClient";
+import {
+  TX_OPTIONS,
+  isRetryableTransactionError,
+} from "../db/transactionOptions";
 import { loginToken } from "../utils/helper";
 import { Payload } from "../models/user";
 import { createHash } from "crypto";
@@ -98,7 +102,7 @@ export const createLoginSession = async (
         }
         return isNewDevice;
       },
-      { isolationLevel: "Serializable" },
+      { isolationLevel: "Serializable", ...TX_OPTIONS },
     );
 
   let isNewDevice: boolean | undefined;
@@ -107,13 +111,8 @@ export const createLoginSession = async (
       isNewDevice = await saveSession();
       break;
     } catch (error) {
-      const retryable =
-        typeof error === "object" &&
-        error !== null &&
-        "code" in error &&
-        error.code === "P2034";
-      if (!retryable || attempt === 2) throw error;
-      await new Promise((resolve) => setTimeout(resolve, 20 * (attempt + 1)));
+      if (!isRetryableTransactionError(error) || attempt === 2) throw error;
+      await new Promise((resolve) => setTimeout(resolve, 200 * (attempt + 1)));
     }
   }
   if (isNewDevice === undefined)

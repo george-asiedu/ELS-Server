@@ -37,8 +37,11 @@ export class S3BucketService {
   private s3: S3Client = s3Client();
 
   private publicUrl(key: string) {
-    if (!env.aws.cloudFrontUrl)
-      throw new ApiError("AWS_CLOUDFRONT_URL is not configured", 500);
+    if (!env.aws.cloudFrontUrl) {
+      // Logged with a reference by the error handler; the user sees plain words.
+      console.error("AWS_CLOUDFRONT_URL is not configured");
+      throw new ApiError("Photos can't be shown or uploaded right now.", 500);
+    }
     return `${env.aws.cloudFrontUrl}/${key.split("/").map(encodeURIComponent).join("/")}`;
   }
 
