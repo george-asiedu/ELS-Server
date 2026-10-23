@@ -27,6 +27,7 @@ router.post("/auth/logout", PlatformController.logout);
 
 router.get("/me", PlatformController.me);
 router.get("/analytics", PlatformController.analytics);
+router.get("/earnings", PlatformController.earnings);
 router.get("/billing-config", PlatformController.getBillingConfig);
 router.patch("/billing-config", PlatformController.updateBillingConfig);
 router.get("/site-settings", PlatformController.getSiteSettings);

@@ -74,6 +74,25 @@ export class PlatformController {
 
   // ---- Studios ----------------------------------------------------------
 
+  public static earnings = async (req: Request, res: Response) => {
+    const str = (v: unknown) => (typeof v === "string" && v ? v : undefined);
+    const date = (v: unknown) => {
+      const d = str(v) ? new Date(str(v)!) : undefined;
+      if (d && Number.isNaN(d.getTime()))
+        throw new ApiError("Invalid date", HttpCode.BAD_REQUEST);
+      return d;
+    };
+    const result = await platformService.listEarnings({
+      studioId: str(req.query.studioId),
+      purpose: str(req.query.purpose),
+      from: date(req.query.from),
+      to: date(req.query.to),
+      page: Number(req.query.page) || 1,
+      pageSize: Number(req.query.pageSize) || 20,
+    });
+    return res.status(200).json(result);
+  };
+
   public static analytics = async (_req: Request, res: Response) => {
     const result = await platformService.getAnalytics();
     return res.status(200).json(result);
