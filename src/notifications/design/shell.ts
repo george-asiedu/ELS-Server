@@ -36,8 +36,11 @@ const brandName = (brand: EmailBrand) =>
 // the studio's own brand colour when set, else the Zuri rose.
 export const brandColor = (brand: EmailBrand): string =>
   (brand.kind === "studio" && brand.studio.primaryColor) || "#BE185D";
+// The Zuri mark, served from the public site's /public folder. Email clients
+// need an absolute URL, and PNG rather than SVG.
+const ZURI_LOGO_URL = "https://zuristudios.com/zuri-mark-square.png";
 const brandLogo = (brand: EmailBrand) =>
-  brand.kind === "studio" ? brand.studio.logoUrl : null;
+  brand.kind === "studio" ? brand.studio.logoUrl : ZURI_LOGO_URL;
 const brandSiteUrl = (brand: EmailBrand) =>
   (brand.kind === "studio" ? brand.studio.websiteUrl : brand.zuri.websiteUrl) ||
   undefined;
