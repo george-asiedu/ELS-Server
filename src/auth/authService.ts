@@ -6,7 +6,6 @@ import {
   generateReferralCode,
 } from "../utils/helper";
 import { ApiError } from "../middleware/apiError";
-import { env } from "../config/env.config";
 import { randomBytes, createHash } from "crypto";
 import { getTenantContext } from "../tenant/context";
 import { NotificationService } from "../notifications/notificationService";
@@ -140,7 +139,10 @@ export class AuthService extends UserRepository {
           device: device?.userAgent || "Unknown browser or device",
           ipAddress: device?.ipAddress || "Unavailable",
           signedInAt: new Date().toISOString(),
-          recoveryUrl: `${env.clientUrl.replace(/\/$/, "")}/forgot-password`,
+          recoveryUrl: await this.linkToStudio(
+            "/forgot-password",
+            user.studioId,
+          ),
         });
         await notifications.send({
           template: NotificationTemplate.AUTH_LOGIN_ALERT,
@@ -187,7 +189,11 @@ export class AuthService extends UserRepository {
     const hashedToken = createHash("sha256").update(resetToken).digest("hex");
     const expiry = new Date(Date.now() + 60 * 60 * 1000);
     await this.setResetTokenForUser(user.id, hashedToken, expiry);
-    const resetUrl = `${env.clientUrl}/reset-password/${resetToken}`;
+    // The account belongs to this studio, so the reset happens on its site.
+    const resetUrl = await this.linkToStudio(
+      `/reset-password/${resetToken}`,
+      user.studioId,
+    );
 
     try {
       const brand = await this.studioEmailBrand(null, platformBrand);

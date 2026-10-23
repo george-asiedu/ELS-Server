@@ -7,9 +7,10 @@ import { resolveStudioBySlug } from "../tenant/studioResolver";
 
 // Derive a studio slug from the request: explicit header wins (the SPA sends it
 // based on the subdomain it's served from), then the real subdomain when a root
-// domain is configured, then the configured default (bridges the existing
-// single-tenant frontend during rollout).
-const studioSlugFromRequest = (req: Request): string => {
+// domain is configured. Null when the request names no studio. There is no
+// default studio: accounts belong to one studio (the same email can exist in
+// two), so guessing would sign people in to, or show them, the wrong studio.
+const studioSlugFromRequest = (req: Request): string | null => {
   const header = req.headers["x-studio-slug"];
   if (typeof header === "string" && header.trim()) {
     return header.trim().toLowerCase();
@@ -20,14 +21,17 @@ const studioSlugFromRequest = (req: Request): string => {
     if (sub && sub !== "www") return sub.toLowerCase();
   }
 
-  return env.defaultStudioSlug;
+  return null;
 };
 
 // Requests that operate outside any single studio (super-admin surface) or that
 // must resolve their studio internally (the Paystack webhook, which finds the
-// studio via the globally-unique payment reference).
+// studio via the globally-unique payment reference; the custom-domain lookup,
+// which is how a studio's own domain finds out which studio it is).
 const isPlatformPath = (path: string) =>
-  path.startsWith("/platform") || path.startsWith("/onboarding");
+  path.startsWith("/platform") ||
+  path.startsWith("/onboarding") ||
+  path === "/studio/resolve-domain";
 const isWebhookPath = (path: string) => path.endsWith("/webhook");
 
 /**
@@ -50,6 +54,12 @@ export const resolveTenant = async (
     }
 
     const slug = studioSlugFromRequest(req);
+    if (!slug) {
+      throw new ApiError(
+        "Choose a studio first: open the studio's own web address",
+        HttpCode.BAD_REQUEST,
+      );
+    }
     const studio = await resolveStudioBySlug(slug);
 
     if (!studio) {

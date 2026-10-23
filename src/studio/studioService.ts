@@ -1,4 +1,5 @@
 import { Connection } from "../db/dbConnection";
+import { studioLink } from "../utils/studioLink";
 import { S3BucketService } from "../bucket/s3BucketService";
 import { ApiError } from "../middleware/apiError";
 import { HttpCode } from "../models/status_codes";
@@ -448,7 +449,8 @@ export class StudioService extends Connection {
       email,
       amountPesewas: toPesewas(amount),
       reference,
-      callbackUrl: `${env.clientUrl}/admin/billing`,
+      // Back to the studio's own site, where its admin is signed in.
+      callbackUrl: await this.linkToStudio("/admin/billing", studioId),
       metadata: {
         kind: kind === "RENEWAL" ? "renewal" : "billing",
         studioId,
@@ -1041,6 +1043,7 @@ export class StudioService extends Connection {
           billingCadence: true,
           currentPeriodEnd: true,
           ownerUserId: true,
+          slug: true,
         },
       });
 
@@ -1067,7 +1070,7 @@ export class StudioService extends Connection {
                 month: "long",
                 year: "numeric",
               }),
-              reactivateUrl: `${env.clientUrl}/admin/billing`,
+              reactivateUrl: studioLink(studio.slug, "/admin/billing"),
             });
             await this.notifications.send({
               template: NotificationTemplate.SUBSCRIPTION_EXPIRED,
@@ -1095,7 +1098,7 @@ export class StudioService extends Connection {
                 year: "numeric",
               }),
               amountDue,
-              manageUrl: `${env.clientUrl}/admin/billing`,
+              manageUrl: studioLink(studio.slug, "/admin/billing"),
             });
             await this.notifications.send({
               template: NotificationTemplate.SUBSCRIPTION_EXPIRING_SOON,

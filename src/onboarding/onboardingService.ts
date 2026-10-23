@@ -1,4 +1,5 @@
 import { shortId } from "../utils/shortId";
+import { studioLink } from "../utils/studioLink";
 import { Connection } from "../db/dbConnection";
 import { ApiError } from "../middleware/apiError";
 import { HttpCode } from "../models/status_codes";
@@ -339,14 +340,12 @@ export class OnboardingService extends Connection {
     });
 
     try {
-      const websiteUrl = env.rootDomain
-        ? `https://${studio.slug}.${env.rootDomain}`
-        : `${env.clientUrl}/s/${studio.slug}`;
+      const websiteUrl = studioLink(studio.slug);
       const { subject, html } = studioCreated(platformBrand, {
         ownerFirstName: signup.ownerFullName?.split(" ")[0] || "there",
         studioName: studio.name,
         planName: plan === "PREMIUM" ? "Premium" : "Standard",
-        dashboardUrl: `${env.clientUrl}/admin/login`,
+        dashboardUrl: studioLink(studio.slug, "/admin/login"),
         storefrontUrl: websiteUrl,
       });
       // The signup charge is a real payment, so it gets a receipt like any

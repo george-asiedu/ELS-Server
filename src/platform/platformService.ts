@@ -981,7 +981,10 @@ export class PlatformService extends Connection {
       data: { resetToken: hashedToken, resetTokenExpiry: expiry },
     });
 
-    const resetUrl = `${env.clientUrl}/reset-password/${resetToken}`;
+    const resetUrl = await this.linkToStudio(
+      `/reset-password/${resetToken}`,
+      studioId,
+    );
     try {
       const brand = await this.studioEmailBrand(studioId, platformBrand);
       const { subject, html } = passwordResetRequested(brand, {
