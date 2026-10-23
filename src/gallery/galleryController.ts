@@ -39,6 +39,18 @@ export class GalleryController {
     return res.status(201).json(result);
   };
 
+  public static update = async (req: Request, res: Response) => {
+    const { id } = req.params;
+    if (!id) throw new ApiError("Gallery item ID is required", 400);
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const result = await galleryService.update(id, {
+      title: body.title,
+      category: body.category,
+      active: body.active,
+    });
+    return res.status(200).json(result);
+  };
+
   public static remove = async (req: Request, res: Response) => {
     const { id } = req.params;
     if (!id) throw new ApiError("Image ID is required", 400);
