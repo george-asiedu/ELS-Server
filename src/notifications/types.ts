@@ -27,7 +27,7 @@ export interface MoneyLine {
 export interface StudioBrandingInfo {
   name: string;
   logoUrl?: string | null;
-  primaryColor?: string | null; // hex, e.g. "#BE185D"
+  primaryColor?: string | null; // hex, e.g. "#FF3175"
   websiteUrl?: string | null;
   bookingUrl?: string | null;
   email?: string | null;
