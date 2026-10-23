@@ -20,6 +20,7 @@ import {
   toPesewas,
   extendPeriod,
   isLapsed,
+  subtractPeriod,
 } from "../billing/billingPlans";
 import {
   resolveStudioByDomain,
@@ -544,8 +545,63 @@ export class StudioService extends Connection {
     reference: string,
   ) {
     const id = this.requireStudioId(studioId);
-    await this.applyBillingCharge(reference, { studioId: id, kind: "RENEWAL" });
-    return this.getBilling(id);
+    // Read the period before applying, to know where the new one starts:
+    // today if the plan had lapsed, else the old end date (renewing early
+    // adds on, it doesn't cut the remaining time short).
+    const before = await this.studio.findUnique({
+      where: { id },
+      select: { currentPeriodEnd: true },
+    });
+    const result = await this.applyBillingCharge(reference, {
+      studioId: id,
+      kind: "RENEWAL",
+    });
+    const billing = await this.getBilling(id);
+    const charge = await this.studioBillingCharge.findUnique({
+      where: { reference },
+      select: {
+        plan: true,
+        cadence: true,
+        amount: true,
+        appliedAt: true,
+      },
+    });
+    const after = await this.studio.findUnique({
+      where: { id },
+      select: { currentPeriodEnd: true },
+    });
+    const periodEnd = after?.currentPeriodEnd ?? null;
+    const wasLapsed = isLapsed(before?.currentPeriodEnd);
+    // Applied here: the start is what extendPeriod built on. Applied earlier
+    // (the webhook got there first): step back one period from the end.
+    const periodStart =
+      result === "applied"
+        ? wasLapsed
+          ? (charge?.appliedAt ?? new Date())
+          : before!.currentPeriodEnd
+        : periodEnd && charge
+          ? subtractPeriod(periodEnd, charge.cadence)
+          : null;
+    return {
+      ...billing,
+      data: {
+        ...billing.data,
+        renewal: charge
+          ? {
+              reference,
+              plan: charge.plan,
+              cadence: charge.cadence,
+              amount: charge.amount,
+              currency: "GHS",
+              paidAt: charge.appliedAt,
+              periodStart,
+              periodEnd,
+              // Only knowable when this call applied it.
+              wasLapsed: result === "applied" ? wasLapsed : null,
+            }
+          : null,
+      },
+    };
   }
 
   /**
