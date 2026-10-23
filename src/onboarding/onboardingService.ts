@@ -426,6 +426,55 @@ export class OnboardingService extends Connection {
   public async status(reference: string) {
     // Poll = try to finalize (idempotent) so it works even if the webhook is
     // delayed or unreachable (e.g. local dev).
-    return this.finalize(reference);
+    const result = await this.finalize(reference);
+    if (result.data.status !== "PROVISIONED") return result;
+    return {
+      ...result,
+      data: { ...result.data, summary: await this.signupSummary(reference) },
+    };
+  }
+
+  /**
+   * What the new owner sees on the "your studio is live" screen. Anyone with
+   * the payment reference can read this, so it holds nothing private (no
+   * email, no account details): the studio, its plan and what was paid.
+   */
+  private async signupSummary(reference: string) {
+    const signup = await this.studioSignup.findUnique({ where: { reference } });
+    if (!signup?.studioId) return null;
+    const studio = await this.studio.findUnique({
+      where: { id: signup.studioId },
+      select: {
+        name: true,
+        slug: true,
+        plan: true,
+        billingCadence: true,
+        billingMode: true,
+        platformFeePercent: true,
+        currentPeriodEnd: true,
+        createdAt: true,
+      },
+    });
+    if (!studio) return null;
+    const subscription = studio.billingMode === "SUBSCRIPTION";
+    return {
+      reference,
+      studioName: studio.name,
+      slug: studio.slug,
+      websiteUrl: studioLink(studio.slug),
+      dashboardUrl: studioLink(studio.slug, "/admin/login"),
+      plan: studio.plan,
+      cadence: studio.billingCadence,
+      billingMode: studio.billingMode,
+      amountPaid: signup.amountCharged ?? null,
+      currency: "GHS",
+      paidAt: signup.updatedAt,
+      // Subscription: the setup fee covers the first period(s).
+      periodStart: subscription ? studio.createdAt : null,
+      periodEnd: subscription ? studio.currentPeriodEnd : null,
+      coverageMonths: subscription ? (signup.coverageMonths ?? null) : null,
+      // Pay-as-you-earn: the platform's cut of each customer payment.
+      commissionPercent: subscription ? null : studio.platformFeePercent,
+    };
   }
 }
