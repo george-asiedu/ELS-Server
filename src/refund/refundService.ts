@@ -1,5 +1,6 @@
 import { Connection, TenantTx } from "../db/dbConnection";
 import { ApiError } from "../middleware/apiError";
+import { HttpCode } from "../models/status_codes";
 import { paystack } from "../payment/paystackClient";
 import { AuditService } from "../audit/auditService";
 import { LedgerService } from "../ledger/ledgerService";
@@ -34,6 +35,22 @@ type RefundSource =
 const sourceLockKey = (source: RefundSource) =>
   `refund-source:${source.kind}:${source.id}`;
 
+/**
+ * Refunds are switched off. Customer payments are split into each studio's
+ * Paystack subaccount and paid out to the studio, but Paystack draws refunds
+ * from the platform's main balance, so every refund would cost the platform
+ * money the studio already has. Studios settle refunds with their customers
+ * directly. The refund code stays for if this changes (e.g. Paystack
+ * recovering refunds from subaccount payouts).
+ */
+export const REFUNDS_ENABLED = false;
+
+const refundsOff = () =>
+  new ApiError(
+    "Refunds aren't available in the app. Please settle any refund with the customer directly.",
+    HttpCode.FORBIDDEN,
+  );
+
 export class RefundService extends Connection {
   private audit = new AuditService();
   private ledger = new LedgerService();
@@ -52,6 +69,7 @@ export class RefundService extends Connection {
     actor: RefundActor,
     input: { amount?: number; reason?: string } = {},
   ) {
+    if (!REFUNDS_ENABLED) throw refundsOff();
     const payment = await this.payment.findUnique({
       where: { id: paymentId },
       include: {
@@ -169,6 +187,7 @@ export class RefundService extends Connection {
     actor: RefundActor,
     input: { amount?: number; reason?: string } = {},
   ) {
+    if (!REFUNDS_ENABLED) throw refundsOff();
     const order = await this.order.findUnique({ where: { id: orderId } });
     if (!order) throw new ApiError("Order not found", 404);
     if (order.status !== "PAID" && order.status !== "FULFILLED") {
