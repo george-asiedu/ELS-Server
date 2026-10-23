@@ -7,6 +7,7 @@ import { getQueueStatus } from "../queue/queueStatus";
 import { SchedulerController } from "../scheduler/schedulerController";
 import { PlatformActivityLogService } from "./platformActivityLog";
 import { LedgerController } from "../ledger/ledgerController";
+import { UserDirectoryController } from "../users/userDirectoryController";
 
 const activityLogs = new PlatformActivityLogService();
 
@@ -39,6 +40,12 @@ router.patch("/studios/:id/status", PlatformController.setStatus);
 router.delete("/studios/:id", PlatformController.deleteStudio);
 router.patch("/studios/:id/settings", PlatformController.updateSettings);
 router.post("/studios/:id/impersonate", PlatformController.impersonate);
+
+// Users across every studio (customers and studio admins).
+router.get("/users", UserDirectoryController.platformList);
+router.get("/users/:id", UserDirectoryController.platformDetail);
+router.patch("/users/:id", UserDirectoryController.platformUpdate);
+router.delete("/users/:id", UserDirectoryController.platformRemove);
 // Help a studio admin who can't sign in: emails THEM a reset link. There is no
 // endpoint that reveals a password — hashes are one-way.
 router.post(

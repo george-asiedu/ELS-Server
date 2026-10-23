@@ -453,8 +453,19 @@ export class PlatformService extends Connection {
     const usersByStudio = countBy(userCounts);
     const apptsByStudio = countBy(apptCounts);
 
-    // Revenue = paid booking payments + paid/fulfilled product orders, per studio.
-    const revenueByStudio = await this.revenueByStudio();
+    // What customers paid each studio (after refunds), all time and this
+    // month, and what each studio has paid the platform.
+    const now = new Date();
+    const thisMonth = {
+      from: new Date(now.getFullYear(), now.getMonth(), 1),
+      to: now,
+    };
+    const [allPay, monthPay] = await Promise.all([
+      this.customerPaymentsByStudio(),
+      this.customerPaymentsByStudio(thisMonth),
+    ]);
+    const earned = await this.platformEarningsByStudio(studios, allPay.total);
+    const r2 = (n: number | undefined) => Math.round((n ?? 0) * 100) / 100;
 
     return studios.map((s) => ({
       id: s.id,
@@ -471,62 +482,210 @@ export class PlatformService extends Connection {
         : null,
       userCount: usersByStudio.get(s.id) ?? 0,
       appointmentCount: apptsByStudio.get(s.id) ?? 0,
-      revenue: revenueByStudio.get(s.id) ?? 0,
+      revenue: r2(allPay.total.get(s.id)),
+      revenueThisMonth: r2(monthPay.total.get(s.id)),
+      paidToPlatform: r2(earned.total.get(s.id)),
+      billingMode: s.billingMode,
+      platformFeePercent: s.platformFeePercent,
       settings: s.settings,
       createdAt: s.createdAt,
     }));
   }
 
   // Paid GMV per studio (booking payments + product orders), rounded to 2dp.
-  private async revenueByStudio(): Promise<Map<string, number>> {
+  /**
+   * Money customers paid each studio (booking payments + paid product orders),
+   * after refunds, optionally within [from, to] by payment date.
+   */
+  private async customerPaymentsByStudio(range?: { from: Date; to: Date }) {
+    const paidAt = range ? { gte: range.from, lte: range.to } : undefined;
     const [payments, orders] = await Promise.all([
-      this.payment.groupBy({
-        by: ["studioId"],
-        where: { status: "PAID" },
-        _sum: { amount: true },
+      this.payment.findMany({
+        where: {
+          status: { in: ["PAID", "PARTIALLY_REFUNDED", "REFUNDED"] },
+          ...(paidAt ? { paidAt } : {}),
+        },
+        select: { studioId: true, amount: true, refundedAmount: true },
       }),
-      this.order.groupBy({
-        by: ["studioId"],
-        where: { status: { in: ["PAID", "FULFILLED"] } },
-        _sum: { total: true },
+      this.order.findMany({
+        where: {
+          status: { in: ["PAID", "FULFILLED"] },
+          ...(paidAt
+            ? { OR: [{ paidAt }, { paidAt: null, createdAt: paidAt }] }
+            : {}),
+        },
+        select: { studioId: true, total: true, refundedAmount: true },
       }),
     ]);
-    const m = new Map<string, number>();
+    const bookings = new Map<string, number>();
+    const products = new Map<string, number>();
     for (const p of payments) {
       if (p.studioId)
-        m.set(p.studioId, (m.get(p.studioId) ?? 0) + (p._sum.amount ?? 0));
+        bookings.set(
+          p.studioId,
+          (bookings.get(p.studioId) ?? 0) + p.amount - (p.refundedAmount ?? 0),
+        );
     }
     for (const o of orders) {
       if (o.studioId)
-        m.set(o.studioId, (m.get(o.studioId) ?? 0) + (o._sum.total ?? 0));
+        products.set(
+          o.studioId,
+          (products.get(o.studioId) ?? 0) + o.total - (o.refundedAmount ?? 0),
+        );
     }
-    for (const [k, v] of m) m.set(k, Math.round(v * 100) / 100);
-    return m;
+    const total = new Map<string, number>();
+    for (const [k, v] of [...bookings, ...products])
+      total.set(k, (total.get(k) ?? 0) + v);
+    return { total, bookings, products };
   }
 
-  // Platform-wide totals for the super-admin dashboard.
-  public async getAnalytics() {
-    const [studios, totalUsers] = await Promise.all([
-      this.studio.findMany({ select: { id: true, status: true } }),
-      this.user.count(),
+  /**
+   * What each studio paid the platform: its signup setup/activation fee,
+   * applied renewals and plan changes, and (pay-as-you-earn studios) the
+   * commission share of its customer payments. The commission is an estimate
+   * from the studio's rate: Paystack splits it at payment time.
+   */
+  private async platformEarningsByStudio(
+    studios: { id: string; billingMode: string; platformFeePercent: number }[],
+    customerTotals: Map<string, number>,
+    range?: { from: Date; to: Date },
+  ) {
+    const within = range ? { gte: range.from, lte: range.to } : undefined;
+    const [signups, charges] = await Promise.all([
+      this.studioSignup.findMany({
+        where: {
+          status: "PROVISIONED",
+          studioId: { not: null },
+          amountCharged: { gt: 0 },
+          ...(within ? { updatedAt: within } : {}),
+        },
+        select: { studioId: true, amountCharged: true },
+      }),
+      this.studioBillingCharge.findMany({
+        where: { status: "APPLIED", ...(within ? { appliedAt: within } : {}) },
+        select: { studioId: true, amount: true },
+      }),
     ]);
-    const revenueByStudio = await this.revenueByStudio();
-    let totalRevenue = 0;
-    for (const v of revenueByStudio.values()) totalRevenue += v;
+    const setupFees = new Map<string, number>();
+    const renewals = new Map<string, number>();
+    const commissions = new Map<string, number>();
+    for (const x of signups) {
+      if (x.studioId)
+        setupFees.set(
+          x.studioId,
+          (setupFees.get(x.studioId) ?? 0) + (x.amountCharged ?? 0),
+        );
+    }
+    for (const c of charges)
+      renewals.set(c.studioId, (renewals.get(c.studioId) ?? 0) + c.amount);
+    for (const st of studios) {
+      if (st.billingMode === "REVENUE_SHARE" && st.platformFeePercent > 0) {
+        commissions.set(
+          st.id,
+          ((customerTotals.get(st.id) ?? 0) * st.platformFeePercent) / 100,
+        );
+      }
+    }
+    const total = new Map<string, number>();
+    for (const [k, v] of [...setupFees, ...renewals, ...commissions])
+      total.set(k, (total.get(k) ?? 0) + v);
+    return { total, setupFees, renewals, commissions };
+  }
 
-    const active = studios.filter((s) => s.status === "ACTIVE").length;
-    const suspended = studios.filter((s) => s.status === "SUSPENDED").length;
-    const trial = studios.filter((s) => s.status === "TRIAL").length;
+  // Platform-wide figures for the super-admin dashboard. Two kinds of money,
+  // kept apart because they're easy to confuse: what customers paid studios,
+  // and what studios paid the platform.
+  public async getAnalytics() {
+    const now = new Date();
+    const thisMonth = {
+      from: new Date(now.getFullYear(), now.getMonth(), 1),
+      to: now,
+    };
+    const lastMonth = {
+      from: new Date(now.getFullYear(), now.getMonth() - 1, 1),
+      to: new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59, 999),
+    };
+
+    const [studios, userRoles, newUsers] = await Promise.all([
+      this.studio.findMany({
+        select: {
+          id: true,
+          status: true,
+          billingMode: true,
+          platformFeePercent: true,
+          createdAt: true,
+        },
+      }),
+      this.user.groupBy({ by: ["role"], _count: { _all: true } }),
+      this.user.count({
+        where: {
+          role: { in: ["CUSTOMER", "ADMIN"] },
+          createdAt: { gte: thisMonth.from },
+        },
+      }),
+    ]);
+
+    const [allPay, nowPay, prevPay] = await Promise.all([
+      this.customerPaymentsByStudio(),
+      this.customerPaymentsByStudio(thisMonth),
+      this.customerPaymentsByStudio(lastMonth),
+    ]);
+    const [allEarn, nowEarn, prevEarn] = await Promise.all([
+      this.platformEarningsByStudio(studios, allPay.total),
+      this.platformEarningsByStudio(studios, nowPay.total, thisMonth),
+      this.platformEarningsByStudio(studios, prevPay.total, lastMonth),
+    ]);
+
+    const sum = (m: Map<string, number>) => {
+      let t = 0;
+      for (const v of m.values()) t += v;
+      return Math.round(t * 100) / 100;
+    };
+    const roleCount = (r: string) =>
+      userRoles.find((u) => u.role === r)?._count._all ?? 0;
+    const customers = roleCount("CUSTOMER");
+    const admins = roleCount("ADMIN");
 
     return {
       message: "Platform analytics",
       data: {
+        // Kept for older screens.
         totalStudios: studios.length,
-        activeStudios: active,
-        suspendedStudios: suspended,
-        trialStudios: trial,
-        totalUsers,
-        totalRevenue: Math.round(totalRevenue * 100) / 100,
+        activeStudios: studios.filter((s) => s.status === "ACTIVE").length,
+        suspendedStudios: studios.filter((s) => s.status === "SUSPENDED")
+          .length,
+        trialStudios: studios.filter((s) => s.status === "TRIAL").length,
+        totalUsers: customers + admins,
+        totalRevenue: sum(allPay.total),
+
+        studios: {
+          total: studios.length,
+          active: studios.filter((s) => s.status === "ACTIVE").length,
+          suspended: studios.filter((s) => s.status === "SUSPENDED").length,
+          trial: studios.filter((s) => s.status === "TRIAL").length,
+          subscription: studios.filter((s) => s.billingMode === "SUBSCRIPTION")
+            .length,
+          revenueShare: studios.filter((s) => s.billingMode === "REVENUE_SHARE")
+            .length,
+          newThisMonth: studios.filter((s) => s.createdAt >= thisMonth.from)
+            .length,
+        },
+        users: { customers, studioAdmins: admins, newThisMonth: newUsers },
+        customerPayments: {
+          allTime: sum(allPay.total),
+          thisMonth: sum(nowPay.total),
+          lastMonth: sum(prevPay.total),
+          bookingsAllTime: sum(allPay.bookings),
+          ordersAllTime: sum(allPay.products),
+        },
+        platformEarnings: {
+          allTime: sum(allEarn.total),
+          thisMonth: sum(nowEarn.total),
+          lastMonth: sum(prevEarn.total),
+          setupFeesAllTime: sum(allEarn.setupFees),
+          renewalsAllTime: sum(allEarn.renewals),
+          commissionsAllTime: sum(allEarn.commissions),
+        },
       },
     };
   }
