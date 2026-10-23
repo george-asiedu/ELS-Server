@@ -28,7 +28,7 @@ export const subscriptionExpiringSoon = (
         (${esc(data.amountDue)}). Renew from your dashboard before then to avoid any interruption —
         plans don't renew automatically.
       </p>
-      ${button("Manage Subscription", data.manageUrl, "#DB0049")}`,
+      ${button("Manage Subscription", data.manageUrl, "#DB5079")}`,
   }),
 });
 
@@ -48,6 +48,6 @@ export const subscriptionExpired = (
         Your <strong>${esc(data.planName)}</strong> plan expired on <strong>${esc(data.expiredOn)}</strong> and your
         storefront may be unavailable to customers until you renew.
       </p>
-      ${button("Reactivate Subscription", data.reactivateUrl, "#DB0049")}`,
+      ${button("Reactivate Subscription", data.reactivateUrl, "#DB5079")}`,
   }),
 });
