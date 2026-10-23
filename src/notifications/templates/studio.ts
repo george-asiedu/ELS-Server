@@ -27,9 +27,9 @@ export const studioCreated = (
         <strong>${esc(data.studioName)}</strong> is live on Zuri Studios, on the ${esc(data.planName)} plan.
       </p>
       <p class="muted" style="margin: 0; font-family: Arial, sans-serif; font-size: 13px; color: #7A6A6E; text-align: center;">
-        Your storefront: <a class="accent" href="${esc(data.storefrontUrl)}" style="color: #DB5079;">${esc(data.storefrontUrl.replace(/^https?:\/\//, ""))}</a>
+        Your storefront: <a class="accent" href="${esc(data.storefrontUrl)}" style="color: #C23B65;">${esc(data.storefrontUrl.replace(/^https?:\/\//, ""))}</a>
       </p>
-      ${button("Open Studio Dashboard", data.dashboardUrl, "#DB5079")}`,
+      ${button("Open Studio Dashboard", data.dashboardUrl, "#C23B65")}`,
   }),
 });
 
@@ -47,7 +47,7 @@ export const studioAccountSuspended = (
       <p style="margin: 0; font-family: Arial, sans-serif; font-size: 15px; color: #2A1B1F; line-height: 1.6; text-align: center;">
         <strong>${esc(data.studioName)}</strong> has been suspended and its storefront is currently unavailable to
         customers. If you believe this is a mistake, or would like to resolve it, please contact us at
-        <a class="accent" href="mailto:${esc(data.supportEmail)}" style="color: #DB5079;">${esc(data.supportEmail)}</a>.
+        <a class="accent" href="mailto:${esc(data.supportEmail)}" style="color: #C23B65;">${esc(data.supportEmail)}</a>.
       </p>`,
   }),
 });

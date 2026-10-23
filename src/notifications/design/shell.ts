@@ -16,7 +16,7 @@ const MUTED = "#7A6A6E"; // muted mauve-grey — secondary text
 const BORDER = "#EDE3E5";
 const IVORY = "#FBF6F3"; // outer background
 const CARD = "#FFFFFF";
-const EMPHASIS = "#DB5079"; // rose — highlighted totals in money tables
+const EMPHASIS = "#C23B65"; // rose — highlighted totals in money tables
 
 // Escape any data we interpolate (customer names, notes, service names) —
 // this is our data, but some of it is free-text a customer typed, and we're
@@ -35,7 +35,7 @@ const brandName = (brand: EmailBrand) =>
 // The colour templates should use for CTA buttons/appointment-card accents:
 // the studio's own brand colour when set, else the Zuri cranberry pink.
 export const brandColor = (brand: EmailBrand): string =>
-  (brand.kind === "studio" && brand.studio.primaryColor) || "#DB5079";
+  (brand.kind === "studio" && brand.studio.primaryColor) || "#C23B65";
 // The Zuri mark, served from the public site's /public folder. Email clients
 // need an absolute URL, and PNG rather than SVG.
 const ZURI_LOGO_URL = "https://zuristudios.com/zuri-mark-square.png";
