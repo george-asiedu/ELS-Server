@@ -197,7 +197,10 @@ export class FeatureRequestService extends Connection {
       const { subject, html } = featureRequestStatusChanged(platformBrand, {
         title,
         status,
-        dashboardUrl: `${env.clientUrl}/admin/feature-requests`,
+        dashboardUrl: await this.linkToStudio(
+          "/admin/feature-requests",
+          studioId,
+        ),
       });
       await this.notifications.send({
         template: NotificationTemplate.FEATURE_REQUEST_STATUS_STUDIO,

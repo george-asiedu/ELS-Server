@@ -1,4 +1,5 @@
 import { createTenantClient, RawDb, TenantDb } from "../tenant/tenantClient";
+import { studioLink } from "../utils/studioLink";
 import { getTenantContext } from "../tenant/context";
 import { shortId, studioCode } from "../utils/shortId";
 import { env } from "../config/env.config";
@@ -237,9 +238,7 @@ export class Connection {
       }),
     ]);
     if (!studio) return null;
-    const websiteUrl = env.rootDomain
-      ? `https://${studio.slug}.${env.rootDomain}`
-      : `${env.clientUrl}/s/${studio.slug}`;
+    const websiteUrl = studioLink(studio.slug);
     return {
       name: studio.name,
       slug: studio.slug,
@@ -251,6 +250,30 @@ export class Connection {
       phone: contact?.phone ?? null,
       address: contact?.address ?? null,
     };
+  }
+
+  // The slug of `studioId`, or of the request's studio when omitted. For
+  // building links to that studio's site (see utils/studioLink).
+  protected async studioSlug(studioId?: string | null): Promise<string | null> {
+    const id = studioId ?? getTenantContext()?.studioId;
+    if (!id) return null;
+    const studio = await this.studio.findUnique({
+      where: { id },
+      select: { slug: true },
+    });
+    return studio?.slug ?? null;
+  }
+
+  // A link to a page of `studioId`'s site (the request's studio when omitted),
+  // falling back to the platform's address if the studio can't be found.
+  protected async linkToStudio(
+    path: string,
+    studioId?: string | null,
+  ): Promise<string> {
+    const slug = await this.studioSlug(studioId);
+    return slug
+      ? studioLink(slug, path)
+      : `${env.clientUrl.replace(/\/$/, "")}${path}`;
   }
 
   // The brand a notification email renders with: the studio's own identity

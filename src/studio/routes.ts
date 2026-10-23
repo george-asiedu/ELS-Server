@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { StudioController } from "./studioController";
 import { authenticate, requireAdmin } from "../middleware/auth";
+import { UserDirectoryController } from "../users/userDirectoryController";
 
 const router: Router = Router();
 
@@ -9,6 +10,24 @@ router.get("/", StudioController.config);
 
 // Public: resolve a custom domain (host) to a studio slug (SPA bootstrap).
 router.get("/resolve-domain", StudioController.resolveDomain);
+
+// Admin: this studio's customers and admins, read-only (editing and
+// deleting accounts is for the super admin).
+router.get(
+  "/users",
+  authenticate,
+  requireAdmin,
+  UserDirectoryController.studioList,
+);
+router.get(
+  "/users/:id",
+  authenticate,
+  requireAdmin,
+  UserDirectoryController.studioDetail,
+);
+
+// Admin: what customers paid and what Paystack has paid out to the studio.
+router.get("/money", authenticate, requireAdmin, StudioController.getMoney);
 
 // Admin: custom domain management.
 router.get("/domain", authenticate, requireAdmin, StudioController.getDomain);

@@ -11,7 +11,7 @@ import { parseDurationMinutes } from "./duration";
 import { parseTimeMinutes, sameTime, formatTimeHHMM } from "./time";
 import { AuditService } from "../audit/auditService";
 import { LedgerService } from "../ledger/ledgerService";
-import { RefundService } from "../refund/refundService";
+import { RefundService, REFUNDS_ENABLED } from "../refund/refundService";
 import { S3BucketService } from "../bucket/s3BucketService";
 import {
   AppointmentStatusInput,
@@ -972,11 +972,15 @@ export class AppointmentService extends Connection {
 
     let refunded = 0;
     let balanceDue = round(Math.max(0, newDue - netPaid));
+    // Paid more than the new service costs. With refunds off (see
+    // REFUNDS_ENABLED) the difference stays with the studio, and the admin is
+    // told to settle it with the customer directly.
+    const overpaid = settled && netPaid > newDue ? round(netPaid - newDue) : 0;
 
     // Overpaid because the new service is cheaper — give the difference back
     // through the ordinary refund path so it is recorded and receipted like
     // any other refund.
-    if (settled && netPaid > newDue) {
+    if (REFUNDS_ENABLED && settled && netPaid > newDue) {
       const over = round(netPaid - newDue);
       try {
         await this.refunds.refundPayment(payment!.id, actor, {
@@ -1015,6 +1019,7 @@ export class AppointmentService extends Connection {
         newDue,
         refunded,
         balanceDue,
+        overpaid,
       },
     });
 
@@ -1099,10 +1104,12 @@ export class AppointmentService extends Connection {
       message:
         refunded > 0
           ? `Service changed. ${ghs(refunded)} is being refunded.`
-          : balanceDue > 0
-            ? `Service changed. ${ghs(balanceDue)} is now due.`
-            : "Service changed.",
-      data: { appointment, newDue, netPaid, refunded, balanceDue },
+          : overpaid > 0
+            ? `Service changed. The customer paid ${ghs(overpaid)} more than the new service costs; settle that with them directly.`
+            : balanceDue > 0
+              ? `Service changed. ${ghs(balanceDue)} is now due.`
+              : "Service changed.",
+      data: { appointment, newDue, netPaid, refunded, balanceDue, overpaid },
     };
   }
 

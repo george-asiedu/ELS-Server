@@ -1,5 +1,6 @@
 import { Connection } from "../db/dbConnection";
 import { ApiError } from "../middleware/apiError";
+import { isLapsed } from "../billing/billingPlans";
 import { HttpCode } from "../models/status_codes";
 import { getPasswordHash } from "../utils/helper";
 import { toWhatsappNumber, WHATSAPP_NUMBER_HINT } from "../utils/whatsapp";
@@ -453,8 +454,19 @@ export class PlatformService extends Connection {
     const usersByStudio = countBy(userCounts);
     const apptsByStudio = countBy(apptCounts);
 
-    // Revenue = paid booking payments + paid/fulfilled product orders, per studio.
-    const revenueByStudio = await this.revenueByStudio();
+    // What customers paid each studio (after refunds), all time and this
+    // month, and what each studio has paid the platform.
+    const now = new Date();
+    const thisMonth = {
+      from: new Date(now.getFullYear(), now.getMonth(), 1),
+      to: now,
+    };
+    const [allPay, monthPay] = await Promise.all([
+      this.customerPaymentsByStudio(),
+      this.customerPaymentsByStudio(thisMonth),
+    ]);
+    const earned = await this.platformEarningsByStudio(studios, allPay.total);
+    const r2 = (n: number | undefined) => Math.round((n ?? 0) * 100) / 100;
 
     return studios.map((s) => ({
       id: s.id,
@@ -471,62 +483,499 @@ export class PlatformService extends Connection {
         : null,
       userCount: usersByStudio.get(s.id) ?? 0,
       appointmentCount: apptsByStudio.get(s.id) ?? 0,
-      revenue: revenueByStudio.get(s.id) ?? 0,
+      revenue: r2(allPay.total.get(s.id)),
+      revenueThisMonth: r2(monthPay.total.get(s.id)),
+      paidToPlatform: r2(earned.total.get(s.id)),
+      billingMode: s.billingMode,
+      platformFeePercent: s.platformFeePercent,
       settings: s.settings,
       createdAt: s.createdAt,
     }));
   }
 
   // Paid GMV per studio (booking payments + product orders), rounded to 2dp.
-  private async revenueByStudio(): Promise<Map<string, number>> {
+  /**
+   * Money customers paid each studio (booking payments + paid product orders),
+   * after refunds, optionally within [from, to] by payment date.
+   */
+  private async customerPaymentsByStudio(range?: { from: Date; to: Date }) {
+    const paidAt = range ? { gte: range.from, lte: range.to } : undefined;
     const [payments, orders] = await Promise.all([
-      this.payment.groupBy({
-        by: ["studioId"],
-        where: { status: "PAID" },
-        _sum: { amount: true },
+      this.payment.findMany({
+        where: {
+          status: { in: ["PAID", "PARTIALLY_REFUNDED", "REFUNDED"] },
+          ...(paidAt ? { paidAt } : {}),
+        },
+        select: { studioId: true, amount: true, refundedAmount: true },
       }),
-      this.order.groupBy({
-        by: ["studioId"],
-        where: { status: { in: ["PAID", "FULFILLED"] } },
-        _sum: { total: true },
+      this.order.findMany({
+        where: {
+          status: { in: ["PAID", "FULFILLED"] },
+          ...(paidAt
+            ? { OR: [{ paidAt }, { paidAt: null, createdAt: paidAt }] }
+            : {}),
+        },
+        select: { studioId: true, total: true, refundedAmount: true },
       }),
     ]);
-    const m = new Map<string, number>();
+    const bookings = new Map<string, number>();
+    const products = new Map<string, number>();
     for (const p of payments) {
       if (p.studioId)
-        m.set(p.studioId, (m.get(p.studioId) ?? 0) + (p._sum.amount ?? 0));
+        bookings.set(
+          p.studioId,
+          (bookings.get(p.studioId) ?? 0) + p.amount - (p.refundedAmount ?? 0),
+        );
     }
     for (const o of orders) {
       if (o.studioId)
-        m.set(o.studioId, (m.get(o.studioId) ?? 0) + (o._sum.total ?? 0));
+        products.set(
+          o.studioId,
+          (products.get(o.studioId) ?? 0) + o.total - (o.refundedAmount ?? 0),
+        );
     }
-    for (const [k, v] of m) m.set(k, Math.round(v * 100) / 100);
-    return m;
+    const total = new Map<string, number>();
+    for (const [k, v] of [...bookings, ...products])
+      total.set(k, (total.get(k) ?? 0) + v);
+    return { total, bookings, products };
   }
 
-  // Platform-wide totals for the super-admin dashboard.
-  public async getAnalytics() {
-    const [studios, totalUsers] = await Promise.all([
-      this.studio.findMany({ select: { id: true, status: true } }),
-      this.user.count(),
+  /**
+   * What each studio paid the platform: its signup setup/activation fee,
+   * applied renewals and plan changes, and (pay-as-you-earn studios) the
+   * commission share of its customer payments. The commission is an estimate
+   * from the studio's rate: Paystack splits it at payment time.
+   */
+  private async platformEarningsByStudio(
+    studios: { id: string; billingMode: string; platformFeePercent: number }[],
+    customerTotals: Map<string, number>,
+    range?: { from: Date; to: Date },
+  ) {
+    const within = range ? { gte: range.from, lte: range.to } : undefined;
+    const [signups, charges] = await Promise.all([
+      this.studioSignup.findMany({
+        where: {
+          status: "PROVISIONED",
+          studioId: { not: null },
+          amountCharged: { gt: 0 },
+          ...(within ? { updatedAt: within } : {}),
+        },
+        select: { studioId: true, amountCharged: true },
+      }),
+      this.studioBillingCharge.findMany({
+        where: { status: "APPLIED", ...(within ? { appliedAt: within } : {}) },
+        select: { studioId: true, amount: true },
+      }),
     ]);
-    const revenueByStudio = await this.revenueByStudio();
-    let totalRevenue = 0;
-    for (const v of revenueByStudio.values()) totalRevenue += v;
+    const setupFees = new Map<string, number>();
+    const renewals = new Map<string, number>();
+    const commissions = new Map<string, number>();
+    for (const x of signups) {
+      if (x.studioId)
+        setupFees.set(
+          x.studioId,
+          (setupFees.get(x.studioId) ?? 0) + (x.amountCharged ?? 0),
+        );
+    }
+    for (const c of charges)
+      renewals.set(c.studioId, (renewals.get(c.studioId) ?? 0) + c.amount);
+    for (const st of studios) {
+      if (st.billingMode === "REVENUE_SHARE" && st.platformFeePercent > 0) {
+        commissions.set(
+          st.id,
+          ((customerTotals.get(st.id) ?? 0) * st.platformFeePercent) / 100,
+        );
+      }
+    }
+    const total = new Map<string, number>();
+    for (const [k, v] of [...setupFees, ...renewals, ...commissions])
+      total.set(k, (total.get(k) ?? 0) + v);
+    return { total, setupFees, renewals, commissions };
+  }
 
-    const active = studios.filter((s) => s.status === "ACTIVE").length;
-    const suspended = studios.filter((s) => s.status === "SUSPENDED").length;
-    const trial = studios.filter((s) => s.status === "TRIAL").length;
+  /**
+   * Every payment the platform has earned, one row each, newest first: signup
+   * setup/activation fees, applied renewals and plan changes, and (estimated)
+   * commission per pay-as-you-earn studio per month. This is where "Your
+   * earnings" comes from, row by row.
+   */
+  public async platformEarningEntries(
+    opts: {
+      studioId?: string | undefined;
+      from?: Date | undefined;
+      to?: Date | undefined;
+    } = {},
+  ) {
+    const within =
+      opts.from || opts.to
+        ? {
+            ...(opts.from ? { gte: opts.from } : {}),
+            ...(opts.to ? { lte: opts.to } : {}),
+          }
+        : undefined;
+    const studioFilter = opts.studioId ? { studioId: opts.studioId } : {};
+    const [studios, signups, charges] = await Promise.all([
+      this.studio.findMany({
+        where: opts.studioId ? { id: opts.studioId } : {},
+        select: {
+          id: true,
+          name: true,
+          slug: true,
+          billingMode: true,
+          platformFeePercent: true,
+        },
+      }),
+      this.studioSignup.findMany({
+        where: {
+          status: "PROVISIONED",
+          studioId: opts.studioId ? opts.studioId : { not: null },
+          amountCharged: { gt: 0 },
+          ...(within ? { updatedAt: within } : {}),
+        },
+        select: {
+          id: true,
+          studioId: true,
+          reference: true,
+          plan: true,
+          cadence: true,
+          billingMode: true,
+          amountCharged: true,
+          coverageMonths: true,
+          updatedAt: true,
+        },
+      }),
+      this.studioBillingCharge.findMany({
+        where: {
+          status: "APPLIED",
+          ...studioFilter,
+          ...(within ? { appliedAt: within } : {}),
+        },
+        select: {
+          id: true,
+          studioId: true,
+          reference: true,
+          kind: true,
+          plan: true,
+          cadence: true,
+          amount: true,
+          appliedAt: true,
+          createdAt: true,
+        },
+      }),
+    ]);
+    const studioBy = new Map(studios.map((st) => [st.id, st]));
+    const planLabel = (plan: string, cadence: string) =>
+      `${plan === "PREMIUM" ? "Premium" : "Standard"} ${cadence === "YEARLY" ? "yearly" : "monthly"}`;
+
+    type Entry = {
+      id: string;
+      date: Date;
+      studio: { id: string; name: string; slug: string } | null;
+      purpose:
+        | "SETUP_FEE"
+        | "ACTIVATION_FEE"
+        | "RENEWAL"
+        | "PLAN_CHANGE"
+        | "COMMISSION";
+      description: string;
+      amount: number;
+      reference: string | null;
+      plan: string | null;
+      cadence: string | null;
+      estimated: boolean;
+      detail: Record<string, string | number | null>;
+    };
+    const entries: Entry[] = [];
+    const studioRef = (id: string | null) => {
+      const st = id ? studioBy.get(id) : undefined;
+      return st ? { id: st.id, name: st.name, slug: st.slug } : null;
+    };
+
+    for (const x of signups) {
+      const sub = x.billingMode === "SUBSCRIPTION";
+      entries.push({
+        id: `signup:${x.id}`,
+        date: x.updatedAt,
+        studio: studioRef(x.studioId),
+        purpose: sub ? "SETUP_FEE" : "ACTIVATION_FEE",
+        description: sub
+          ? `Setup fee at signup · ${planLabel(x.plan, x.cadence)}${x.coverageMonths ? ` · covers ${x.coverageMonths} months` : ""}`
+          : `Activation fee at signup · ${x.plan === "PREMIUM" ? "Premium" : "Standard"} pay as you earn`,
+        amount: x.amountCharged ?? 0,
+        reference: x.reference,
+        plan: x.plan,
+        cadence: sub ? x.cadence : null,
+        estimated: false,
+        detail: { coverageMonths: x.coverageMonths ?? null },
+      });
+    }
+    for (const c of charges) {
+      entries.push({
+        id: `charge:${c.id}`,
+        date: c.appliedAt ?? c.createdAt,
+        studio: studioRef(c.studioId),
+        purpose: c.kind === "RENEWAL" ? "RENEWAL" : "PLAN_CHANGE",
+        description:
+          c.kind === "RENEWAL"
+            ? `Renewal · ${planLabel(c.plan, c.cadence)}`
+            : `Plan change to ${planLabel(c.plan, c.cadence)}`,
+        amount: c.amount,
+        reference: c.reference,
+        plan: c.plan,
+        cadence: c.cadence,
+        estimated: false,
+        detail: {},
+      });
+    }
+
+    // Commission: Paystack splits it at payment time, so it's estimated from
+    // each pay-as-you-earn studio's rate and its customer payments, per month.
+    const shared = studios.filter(
+      (st) => st.billingMode === "REVENUE_SHARE" && st.platformFeePercent > 0,
+    );
+    if (shared.length) {
+      const ids = shared.map((st) => st.id);
+      const paidAt = within;
+      const [payments, orders] = await Promise.all([
+        this.payment.findMany({
+          where: {
+            studioId: { in: ids },
+            status: { in: ["PAID", "PARTIALLY_REFUNDED", "REFUNDED"] },
+            paidAt: paidAt ?? { not: null },
+          },
+          select: {
+            studioId: true,
+            amount: true,
+            refundedAmount: true,
+            paidAt: true,
+          },
+        }),
+        this.order.findMany({
+          where: {
+            studioId: { in: ids },
+            status: { in: ["PAID", "FULFILLED"] },
+            ...(paidAt
+              ? { OR: [{ paidAt }, { paidAt: null, createdAt: paidAt }] }
+              : {}),
+          },
+          select: {
+            studioId: true,
+            total: true,
+            refundedAmount: true,
+            paidAt: true,
+            createdAt: true,
+          },
+        }),
+      ]);
+      const buckets = new Map<
+        string,
+        { studioId: string; month: Date; sales: number }
+      >();
+      const add = (studioId: string | null, when: Date | null, v: number) => {
+        if (!studioId || !when) return;
+        const month = new Date(when.getFullYear(), when.getMonth(), 1);
+        const key = `${studioId}:${month.toISOString()}`;
+        const b = buckets.get(key) ?? { studioId, month, sales: 0 };
+        b.sales += v;
+        buckets.set(key, b);
+      };
+      for (const p of payments)
+        add(p.studioId, p.paidAt, p.amount - (p.refundedAmount ?? 0));
+      for (const o of orders)
+        add(
+          o.studioId,
+          o.paidAt ?? o.createdAt,
+          o.total - (o.refundedAmount ?? 0),
+        );
+      for (const b of buckets.values()) {
+        const st = studioBy.get(b.studioId)!;
+        const amount =
+          Math.round(((b.sales * st.platformFeePercent) / 100) * 100) / 100;
+        if (amount <= 0) continue;
+        const monthLabel = b.month.toLocaleDateString("en-GB", {
+          month: "long",
+          year: "numeric",
+        });
+        const lastDay = new Date(
+          b.month.getFullYear(),
+          b.month.getMonth() + 1,
+          0,
+          23,
+          59,
+          59,
+        );
+        entries.push({
+          id: `commission:${b.studioId}:${b.month.toISOString().slice(0, 7)}`,
+          date: lastDay > new Date() ? new Date() : lastDay,
+          studio: studioRef(b.studioId),
+          purpose: "COMMISSION",
+          description: `Commission ${st.platformFeePercent}% on customer payments · ${monthLabel}`,
+          amount,
+          reference: null,
+          plan: null,
+          cadence: null,
+          estimated: true,
+          detail: {
+            month: monthLabel,
+            customerPayments: Math.round(b.sales * 100) / 100,
+            ratePercent: st.platformFeePercent,
+          },
+        });
+      }
+    }
+
+    entries.sort((a, b) => b.date.getTime() - a.date.getTime());
+    return entries;
+  }
+
+  /** The earnings rows, paged, with totals by purpose and by studio. */
+  public async listEarnings(q: {
+    studioId?: string | undefined;
+    purpose?: string | undefined;
+    from?: Date | undefined;
+    to?: Date | undefined;
+    page?: number | undefined;
+    pageSize?: number | undefined;
+  }) {
+    const all = await this.platformEarningEntries({
+      studioId: q.studioId,
+      from: q.from,
+      to: q.to,
+    });
+    const rows = q.purpose ? all.filter((e) => e.purpose === q.purpose) : all;
+    const pageSize = Math.min(Math.max(Number(q.pageSize) || 20, 1), 100);
+    const page = Math.max(Number(q.page) || 1, 1);
+    const r2 = (n: number) => Math.round(n * 100) / 100;
+
+    const byPurpose: Record<string, number> = {};
+    const byStudio = new Map<
+      string,
+      { studio: Entry["studio"]; amount: number; payments: number }
+    >();
+    type Entry = (typeof rows)[number];
+    for (const e of rows) {
+      byPurpose[e.purpose] = r2((byPurpose[e.purpose] ?? 0) + e.amount);
+      const key = e.studio?.id ?? "unknown";
+      const cur = byStudio.get(key) ?? {
+        studio: e.studio,
+        amount: 0,
+        payments: 0,
+      };
+      cur.amount = r2(cur.amount + e.amount);
+      cur.payments += 1;
+      byStudio.set(key, cur);
+    }
+    return {
+      message: "Earnings",
+      data: rows.slice((page - 1) * pageSize, page * pageSize),
+      summary: {
+        total: r2(rows.reduce((t, e) => t + e.amount, 0)),
+        byPurpose,
+        byStudio: [...byStudio.values()].sort((a, b) => b.amount - a.amount),
+      },
+      pagination: {
+        page,
+        pageSize,
+        total: rows.length,
+        pages: Math.max(1, Math.ceil(rows.length / pageSize)),
+      },
+    };
+  }
+
+  // Platform-wide figures for the super-admin dashboard. Two kinds of money,
+  // kept apart because they're easy to confuse: what customers paid studios,
+  // and what studios paid the platform.
+  public async getAnalytics() {
+    const now = new Date();
+    const thisMonth = {
+      from: new Date(now.getFullYear(), now.getMonth(), 1),
+      to: now,
+    };
+    const lastMonth = {
+      from: new Date(now.getFullYear(), now.getMonth() - 1, 1),
+      to: new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59, 999),
+    };
+
+    const [studios, userRoles, newUsers] = await Promise.all([
+      this.studio.findMany({
+        select: {
+          id: true,
+          status: true,
+          billingMode: true,
+          platformFeePercent: true,
+          createdAt: true,
+        },
+      }),
+      this.user.groupBy({ by: ["role"], _count: { _all: true } }),
+      this.user.count({
+        where: {
+          role: { in: ["CUSTOMER", "ADMIN"] },
+          createdAt: { gte: thisMonth.from },
+        },
+      }),
+    ]);
+
+    const [allPay, nowPay, prevPay] = await Promise.all([
+      this.customerPaymentsByStudio(),
+      this.customerPaymentsByStudio(thisMonth),
+      this.customerPaymentsByStudio(lastMonth),
+    ]);
+    const [allEarn, nowEarn, prevEarn] = await Promise.all([
+      this.platformEarningsByStudio(studios, allPay.total),
+      this.platformEarningsByStudio(studios, nowPay.total, thisMonth),
+      this.platformEarningsByStudio(studios, prevPay.total, lastMonth),
+    ]);
+
+    const sum = (m: Map<string, number>) => {
+      let t = 0;
+      for (const v of m.values()) t += v;
+      return Math.round(t * 100) / 100;
+    };
+    const roleCount = (r: string) =>
+      userRoles.find((u) => u.role === r)?._count._all ?? 0;
+    const customers = roleCount("CUSTOMER");
+    const admins = roleCount("ADMIN");
 
     return {
       message: "Platform analytics",
       data: {
+        // Kept for older screens.
         totalStudios: studios.length,
-        activeStudios: active,
-        suspendedStudios: suspended,
-        trialStudios: trial,
-        totalUsers,
-        totalRevenue: Math.round(totalRevenue * 100) / 100,
+        activeStudios: studios.filter((s) => s.status === "ACTIVE").length,
+        suspendedStudios: studios.filter((s) => s.status === "SUSPENDED")
+          .length,
+        trialStudios: studios.filter((s) => s.status === "TRIAL").length,
+        totalUsers: customers + admins,
+        totalRevenue: sum(allPay.total),
+
+        studios: {
+          total: studios.length,
+          active: studios.filter((s) => s.status === "ACTIVE").length,
+          suspended: studios.filter((s) => s.status === "SUSPENDED").length,
+          trial: studios.filter((s) => s.status === "TRIAL").length,
+          subscription: studios.filter((s) => s.billingMode === "SUBSCRIPTION")
+            .length,
+          revenueShare: studios.filter((s) => s.billingMode === "REVENUE_SHARE")
+            .length,
+          newThisMonth: studios.filter((s) => s.createdAt >= thisMonth.from)
+            .length,
+        },
+        users: { customers, studioAdmins: admins, newThisMonth: newUsers },
+        customerPayments: {
+          allTime: sum(allPay.total),
+          thisMonth: sum(nowPay.total),
+          lastMonth: sum(prevPay.total),
+          bookingsAllTime: sum(allPay.bookings),
+          ordersAllTime: sum(allPay.products),
+        },
+        platformEarnings: {
+          allTime: sum(allEarn.total),
+          thisMonth: sum(nowEarn.total),
+          lastMonth: sum(prevEarn.total),
+          setupFeesAllTime: sum(allEarn.setupFees),
+          renewalsAllTime: sum(allEarn.renewals),
+          commissionsAllTime: sum(allEarn.commissions),
+        },
       },
     };
   }
@@ -555,10 +1004,61 @@ export class PlatformService extends Connection {
         this.order.count({ where: { studioId: id } }),
       ]);
 
+    // Plan, period and what this studio has paid the platform.
+    const [signup, earnings] = await Promise.all([
+      this.studioSignup.findFirst({
+        where: { studioId: id, status: "PROVISIONED" },
+        orderBy: { createdAt: "desc" },
+        select: {
+          reference: true,
+          amountCharged: true,
+          coverageMonths: true,
+          updatedAt: true,
+        },
+      }),
+      this.platformEarningEntries({ studioId: id }),
+    ]);
+    const subscription = studio.billingMode === "SUBSCRIPTION";
+    const end = studio.currentPeriodEnd;
+    const lapsed = subscription ? isLapsed(end) : false;
+    const lastPayment =
+      earnings.find((e) => e.purpose !== "COMMISSION") ?? null;
+    const billing = {
+      mode: studio.billingMode,
+      plan: studio.plan,
+      cadence: studio.billingCadence,
+      status: subscription ? (lapsed ? "lapsed" : "active") : "revenue_share",
+      commissionPercent: subscription ? null : studio.platformFeePercent,
+      currentPeriodEnd: end,
+      // When the paid period began: the last renewal/plan change, else signup.
+      currentPeriodStart: subscription
+        ? (earnings.find(
+            (e) => e.purpose === "RENEWAL" || e.purpose === "PLAN_CHANGE",
+          )?.date ?? studio.createdAt)
+        : null,
+      daysLeft:
+        subscription && end
+          ? Math.ceil((end.getTime() - Date.now()) / 86_400_000)
+          : null,
+      signup: signup
+        ? {
+            reference: signup.reference,
+            amount: signup.amountCharged ?? 0,
+            coverageMonths: signup.coverageMonths,
+            date: signup.updatedAt,
+          }
+        : null,
+      lastPayment,
+      totalPaid:
+        Math.round(earnings.reduce((t, e) => t + e.amount, 0) * 100) / 100,
+      payments: earnings,
+    };
+
     return {
       ...studio,
       owner,
       counts: { userCount, appointmentCount, serviceCount, orderCount },
+      billing,
     };
   }
 
@@ -981,7 +1481,10 @@ export class PlatformService extends Connection {
       data: { resetToken: hashedToken, resetTokenExpiry: expiry },
     });
 
-    const resetUrl = `${env.clientUrl}/reset-password/${resetToken}`;
+    const resetUrl = await this.linkToStudio(
+      `/reset-password/${resetToken}`,
+      studioId,
+    );
     try {
       const brand = await this.studioEmailBrand(studioId, platformBrand);
       const { subject, html } = passwordResetRequested(brand, {

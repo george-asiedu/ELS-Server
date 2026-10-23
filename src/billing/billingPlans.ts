@@ -18,6 +18,14 @@ export const addPeriod = (from: Date, cadence: Cadence): Date => {
   return d;
 };
 
+/** One billing period before `to` (the start of a period ending at `to`). */
+export const subtractPeriod = (to: Date, cadence: Cadence): Date => {
+  const d = new Date(to);
+  if (cadence === "YEARLY") d.setFullYear(d.getFullYear() - 1);
+  else d.setMonth(d.getMonth() - 1);
+  return d;
+};
+
 // `months` calendar months after `from` (a setup fee's covered period).
 export const addMonths = (from: Date, months: number): Date => {
   const d = new Date(from);

@@ -56,6 +56,17 @@ export interface PaystackBank {
   type: string;
 }
 
+export interface PaystackSettlement {
+  id: number;
+  status: string; // "success" | "processing" | "pending" | "failed"
+  currency: string;
+  total_amount: number;
+  effective_amount?: number;
+  total_fees?: number;
+  settlement_date: string | null;
+  createdAt: string;
+}
+
 const authHeaders = () => ({
   Authorization: `Bearer ${env.paystack.secretKey}`,
   "Content-Type": "application/json",
@@ -222,6 +233,20 @@ export const paystack = {
       `/bank/resolve?account_number=${encodeURIComponent(
         args.accountNumber,
       )}&bank_code=${encodeURIComponent(args.bankCode)}`,
+    );
+  },
+
+  /**
+   * Payouts Paystack has made (or is about to make) from a subaccount to the
+   * studio's own bank or Mobile Money account. Amounts are in pesewas, after
+   * Paystack's fees.
+   */
+  async listSettlements(
+    subaccount: string,
+    perPage = 50,
+  ): Promise<PaystackSettlement[]> {
+    return call<PaystackSettlement[]>(
+      `/settlement?subaccount=${encodeURIComponent(subaccount)}&perPage=${perPage}`,
     );
   },
 

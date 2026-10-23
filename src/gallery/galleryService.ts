@@ -114,6 +114,54 @@ export class GalleryService extends Connection {
     return { message: `${label} uploaded successfully`, data: created };
   }
 
+  /**
+   * Edit an item's title, category, or whether the public sees it. The media
+   * itself isn't replaced here: delete and re-upload for that.
+   */
+  public async update(
+    id: string,
+    input: { title?: unknown; category?: unknown; active?: unknown },
+  ) {
+    const existing = await this.gallery.findUnique({ where: { id } });
+    if (!existing) {
+      throw new ApiError("Gallery item not found", 404);
+    }
+    const data: { title?: string | null; category?: string; active?: boolean } =
+      {};
+    if (input.title !== undefined) {
+      if (input.title !== null && typeof input.title !== "string") {
+        throw new ApiError("title must be text", 400);
+      }
+      const title = input.title?.trim() || null;
+      if (title && title.length > 120) {
+        throw new ApiError("Keep the title under 120 characters", 400);
+      }
+      data.title = title;
+    }
+    if (input.category !== undefined) {
+      if (typeof input.category !== "string" || !input.category) {
+        throw new ApiError("Choose a category", 400);
+      }
+      const exists = await this.category.findFirst({
+        where: { slug: input.category },
+      });
+      if (!exists) {
+        throw new ApiError("Selected category does not exist", 400);
+      }
+      data.category = input.category;
+    }
+    if (input.active !== undefined) {
+      if (typeof input.active !== "boolean") {
+        throw new ApiError("active must be true or false", 400);
+      }
+      data.active = input.active;
+    }
+    const updated = await this.gallery.update({ where: { id }, data });
+    updated.imageUrl =
+      this.s3.deliveryUrl(updated.imageUrl) ?? updated.imageUrl;
+    return { message: "Gallery item updated", data: updated };
+  }
+
   public async remove(id: string) {
     const existing = await this.gallery.findUnique({ where: { id } });
     if (!existing) {
