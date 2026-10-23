@@ -26,6 +26,9 @@ router.get(
   UserDirectoryController.studioDetail,
 );
 
+// Admin: what customers paid and what Paystack has paid out to the studio.
+router.get("/money", authenticate, requireAdmin, StudioController.getMoney);
+
 // Admin: custom domain management.
 router.get("/domain", authenticate, requireAdmin, StudioController.getDomain);
 router.put("/domain", authenticate, requireAdmin, StudioController.setDomain);

@@ -94,6 +94,11 @@ export class StudioController {
     return res.status(200).json(result);
   };
 
+  public static getMoney = async (req: Request, res: Response) => {
+    const result = await studioService.getMoney(req.studioId);
+    return res.status(200).json(result);
+  };
+
   public static getLoyalty = async (req: Request, res: Response) => {
     const result = await studioService.getLoyalty(req.studioId);
     return res.status(200).json(result);

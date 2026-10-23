@@ -839,6 +839,157 @@ export class StudioService extends Connection {
     return { message: "Content retrieved", data: this.publicContent(content) };
   }
 
+  // ---- Admin: the studio's money ----------------------------------------
+
+  /**
+   * Where the studio's money stands, for its dashboard: what customers paid
+   * (after refunds), and what Paystack has paid out to the studio's own bank
+   * or Mobile Money account and still has on the way. Customer payments go
+   * into the studio's Paystack subaccount, never to the platform, so the
+   * payout figures come straight from Paystack.
+   */
+  public async getMoney(studioId: string | null | undefined) {
+    const id = this.requireStudioId(studioId);
+    const studio = await this.studio.findUnique({
+      where: { id },
+      select: {
+        paystackSubaccountCode: true,
+        platformFeePercent: true,
+        billingMode: true,
+        payoutType: true,
+        payoutProvider: true,
+        payoutAccountNumber: true,
+        payoutAccountName: true,
+      },
+    });
+    if (!studio) throw new ApiError("Studio not found", HttpCode.NOT_FOUND);
+
+    const now = new Date();
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+    // The same stretch of last month, for a fair "vs last month".
+    const prevStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    const prevEnd = new Date(now);
+    prevEnd.setMonth(now.getMonth() - 1);
+    const [payments, orders] = await Promise.all([
+      this.payment.findMany({
+        where: { status: { in: ["PAID", "PARTIALLY_REFUNDED", "REFUNDED"] } },
+        select: { amount: true, refundedAmount: true, paidAt: true },
+      }),
+      this.order.findMany({
+        where: { status: { in: ["PAID", "FULFILLED"] } },
+        select: {
+          total: true,
+          refundedAmount: true,
+          paidAt: true,
+          createdAt: true,
+        },
+      }),
+    ]);
+    let allTime = 0;
+    let thisMonth = 0;
+    let lastMonthSoFar = 0;
+    let refunded = 0;
+    const inPrev = (d: Date | null) =>
+      Boolean(d && d >= prevStart && d <= prevEnd);
+    for (const p of payments) {
+      const net = p.amount - (p.refundedAmount ?? 0);
+      refunded += p.refundedAmount ?? 0;
+      allTime += net;
+      if (p.paidAt && p.paidAt >= monthStart) thisMonth += net;
+      if (inPrev(p.paidAt)) lastMonthSoFar += net;
+    }
+    for (const o of orders) {
+      const net = o.total - (o.refundedAmount ?? 0);
+      refunded += o.refundedAmount ?? 0;
+      allTime += net;
+      if ((o.paidAt ?? o.createdAt) >= monthStart) thisMonth += net;
+      if (inPrev(o.paidAt ?? o.createdAt)) lastMonthSoFar += net;
+    }
+    const r2 = (n: number) => Math.round(n * 100) / 100;
+
+    // Payouts, from Paystack. Optional: the rest of the card still works if
+    // Paystack can't be reached or there's no payout account yet.
+    let payouts: {
+      paidOut: number;
+      onTheWay: number;
+      last: { amount: number; date: string | null } | null;
+      next: { amount: number; date: string | null } | null;
+      recent: {
+        id: number;
+        amount: number;
+        fees: number;
+        status: string;
+        date: string | null;
+      }[];
+    } | null = null;
+    let payoutsError: string | null = null;
+    if (studio.paystackSubaccountCode) {
+      try {
+        const list = await paystack.listSettlements(
+          studio.paystackSubaccountCode,
+        );
+        const amt = (x: { effective_amount?: number; total_amount: number }) =>
+          r2((x.effective_amount ?? x.total_amount) / 100);
+        const done = list.filter((x) => x.status === "success");
+        const waiting = list.filter(
+          (x) => x.status === "pending" || x.status === "processing",
+        );
+        const byDate = (a: {
+          settlement_date: string | null;
+          createdAt: string;
+        }) => new Date(a.settlement_date ?? a.createdAt).getTime();
+        const last = [...done].sort((a, b) => byDate(b) - byDate(a))[0];
+        const next = [...waiting].sort((a, b) => byDate(a) - byDate(b))[0];
+        payouts = {
+          paidOut: r2(done.reduce((t, x) => t + amt(x), 0)),
+          onTheWay: r2(waiting.reduce((t, x) => t + amt(x), 0)),
+          last: last ? { amount: amt(last), date: last.settlement_date } : null,
+          next: next ? { amount: amt(next), date: next.settlement_date } : null,
+          recent: list.slice(0, 5).map((x) => ({
+            id: x.id,
+            amount: amt(x),
+            fees: r2((x.total_fees ?? 0) / 100),
+            status: x.status,
+            date: x.settlement_date ?? x.createdAt,
+          })),
+        };
+      } catch (error) {
+        payoutsError =
+          error instanceof Error ? error.message : "Couldn't reach Paystack";
+      }
+    }
+
+    const masked = studio.payoutAccountNumber
+      ? `•••• ${studio.payoutAccountNumber.slice(-4)}`
+      : null;
+    return {
+      message: "Money",
+      data: {
+        received: {
+          thisMonth: r2(thisMonth),
+          lastMonthSoFar: r2(lastMonthSoFar),
+          allTime: r2(allTime),
+          refunded: r2(refunded),
+        },
+        payoutAccount: studio.paystackSubaccountCode
+          ? {
+              type: studio.payoutType,
+              provider: studio.payoutProvider,
+              name: studio.payoutAccountName,
+              number: masked,
+            }
+          : null,
+        payouts,
+        payoutsError,
+        // Pay-as-you-earn studios: the platform's share of each payment.
+        commissionPercent:
+          studio.billingMode === "REVENUE_SHARE"
+            ? studio.platformFeePercent
+            : null,
+      },
+    };
+  }
+
   // ---- Admin: payout (Paystack subaccount for split settlement) ---------
 
   public async getPayout(studioId: string | null | undefined) {
