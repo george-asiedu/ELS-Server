@@ -4,18 +4,43 @@ import { ApiError } from "../middleware/apiError";
 import { env } from "../config/env.config";
 import { paystack, PaystackVerifyData } from "./paystackClient";
 import { OrderService } from "../order/orderService";
-import { OnboardingService, isSignupReference } from "../onboarding/onboardingService";
+import {
+  OnboardingService,
+  isSignupReference,
+} from "../onboarding/onboardingService";
 import { forgetStudioSlug } from "../tenant/studioResolver";
 import { AuditService } from "../audit/auditService";
+import { LedgerService } from "../ledger/ledgerService";
+import { RefundService } from "../refund/refundService";
+import {
+  StudioService,
+  isStudioBillingReference,
+} from "../studio/studioService";
+import { S3BucketService } from "../bucket/s3BucketService";
 import { safeClientOrigin } from "../utils/helper";
 import { runAsSuperAdmin } from "../tenant/context";
 import { NotificationService } from "../notifications/notificationService";
 import { NotificationTemplate } from "../notifications/registry";
-import { paymentSuccess, paymentFailed } from "../notifications/templates/payment";
-import { EmailBrand, MoneyLine } from "../notifications/types";
-import { ghs } from "../notifications/format";
+import {
+  paymentSuccess,
+  paymentFailed,
+} from "../notifications/templates/payment";
+import { MoneyLine } from "../notifications/types";
+import {
+  ghs,
+  receiptDate,
+  receiptDayOnly,
+  receiptNumber,
+} from "../notifications/format";
+import { buildReceiptPdf } from "../notifications/receiptPdf";
+import { receiptMethodLabel } from "../notifications/design/shell";
 
 type PaymentType = "FULL" | "PARTIAL";
+
+// Statuses a payment reaches only after money was collected. A refund moves a
+// payment between these, never back to PAID, and nothing here may move out of
+// them on the strength of a replayed verify or webhook.
+const COLLECTED_STATUSES = ["PAID", "REFUNDED", "PARTIALLY_REFUNDED"];
 
 const appointmentInclude = {
   appointment: {
@@ -30,6 +55,9 @@ interface PaymentWithAppointment {
   type: string;
   reference: string | null;
   studioId: string | null;
+  channel?: string | null;
+  transactionId?: string | null;
+  paidAt?: Date | null;
   appointment: {
     email: string | null;
     fullName: string;
@@ -44,6 +72,9 @@ export class PaymentService extends Connection {
   private orders = new OrderService();
   private onboarding = new OnboardingService();
   private audit = new AuditService();
+  private ledger = new LedgerService();
+  private refunds = new RefundService();
+  private studioBilling = new StudioService(new S3BucketService());
 
   private async settings() {
     const existing = await this.paymentSettings.findFirst();
@@ -88,7 +119,8 @@ export class PaymentService extends Connection {
 
     const amountDue =
       (appointment.totalPrice ?? 0) - (appointment.discountAmount ?? 0);
-    if (amountDue <= 0) throw new ApiError("Nothing to pay for this booking", 400);
+    if (amountDue <= 0)
+      throw new ApiError("Nothing to pay for this booking", 400);
 
     const charge =
       type === "PARTIAL"
@@ -122,6 +154,24 @@ export class PaymentService extends Connection {
         reference,
         currency: "GHS",
       },
+    });
+
+    // Record the attempt against its own immutable reference BEFORE handing it
+    // to Paystack. The Payment row's `reference` still rotates on retry, but the
+    // attempt row does not — so if this checkout is abandoned and a later one
+    // replaces the reference, a webhook for THIS reference can still resolve it.
+    const payment = await this.payment.findUnique({
+      where: { appointmentId },
+      select: { id: true },
+    });
+    await this.ledger.openAttempt({
+      reference,
+      expectedAmount: charge,
+      currency: "GHS",
+      ...(payment ? { paymentId: payment.id } : {}),
+      appointmentId,
+      customerEmail: email,
+      customerName: appointment.fullName,
     });
 
     return { reference, charge, email, appointmentId, type };
@@ -255,7 +305,9 @@ export class PaymentService extends Connection {
     const status =
       paystackStatus === "success"
         ? "success"
-        : ["failed", "abandoned", "reversed", "timeout"].includes(paystackStatus)
+        : ["failed", "abandoned", "reversed", "timeout"].includes(
+              paystackStatus,
+            )
           ? "failed"
           : "pending";
 
@@ -278,7 +330,7 @@ export class PaymentService extends Connection {
       // left to verify, so these are marked FAILED directly (no API call).
       const deadCutoff = new Date(now - 3 * 24 * 60 * 60 * 1000);
 
-      const [stalePayments, staleOrders] = await Promise.all([
+      const [stalePayments, staleOrders, staleAttempts] = await Promise.all([
         this.payment.findMany({
           where: {
             status: "PENDING",
@@ -295,12 +347,23 @@ export class PaymentService extends Connection {
           },
           select: { reference: true },
         }),
+        // Attempts are the only place an abandoned-then-retried reference still
+        // exists: the Payment/Order row has moved on to the newer reference, so
+        // the two queries above cannot see it. Sweeping these is what recovers a
+        // customer who paid on a checkout they had already walked away from.
+        this.paymentAttempt.findMany({
+          where: {
+            status: "PENDING",
+            createdAt: { lt: graceCutoff, gt: deadCutoff },
+          },
+          select: { reference: true },
+        }),
       ]);
 
       // A combined booking+products charge shares one reference across a
       // Payment and an Order — dedupe so we verify each transaction once.
       const references = new Set(
-        [...stalePayments, ...staleOrders]
+        [...stalePayments, ...staleOrders, ...staleAttempts]
           .map((r) => r.reference)
           .filter((r): r is string => !!r),
       );
@@ -324,32 +387,74 @@ export class PaymentService extends Connection {
 
       // Anything past the dead cutoff gets marked FAILED without calling
       // Paystack — the transaction window has closed on their side too.
-      const [expiredPayments, expiredOrders] = await Promise.all([
-        this.payment.updateMany({
-          where: { status: "PENDING", reference: { not: null }, createdAt: { lte: deadCutoff } },
-          data: { status: "FAILED" },
-        }),
-        this.order.updateMany({
-          where: {
-            status: "PENDING_PAYMENT",
-            reference: { not: null },
-            createdAt: { lte: deadCutoff },
-          },
-          data: { status: "CANCELLED" },
-        }),
-      ]);
+      const [expiredPayments, expiredOrders, expiredAttempts] =
+        await Promise.all([
+          this.payment.updateMany({
+            where: {
+              status: "PENDING",
+              reference: { not: null },
+              createdAt: { lte: deadCutoff },
+            },
+            data: { status: "FAILED" },
+          }),
+          this.order.updateMany({
+            where: {
+              status: "PENDING_PAYMENT",
+              reference: { not: null },
+              createdAt: { lte: deadCutoff },
+            },
+            data: { status: "CANCELLED" },
+          }),
+          this.paymentAttempt.updateMany({
+            where: { status: "PENDING", createdAt: { lte: deadCutoff } },
+            data: {
+              status: "ABANDONED",
+              failureReason: "Transaction window closed",
+            },
+          }),
+        ]);
 
       const result = {
         checked: references.size,
         recovered,
         failed,
         expired: expiredPayments.count + expiredOrders.count,
+        expiredAttempts: expiredAttempts.count,
+        billingChecked: 0,
+        billingApplied: 0,
         errors,
       };
 
+      // Renewals and plan changes paid at Paystack but never applied (the
+      // webhook was missed and the admin never came back to the page).
+      const staleCharges = await this.studioBillingCharge.findMany({
+        where: {
+          status: "PENDING",
+          createdAt: { lt: graceCutoff, gt: deadCutoff },
+        },
+        select: { reference: true },
+      });
+      result.billingChecked = staleCharges.length;
+      for (const { reference } of staleCharges) {
+        try {
+          if (
+            (await this.studioBilling.applyBillingCharge(reference)) ===
+            "applied"
+          ) {
+            result.billingApplied++;
+          }
+        } catch {
+          // Not paid (yet): the normal case for an abandoned checkout.
+        }
+      }
+
       // Only log a run that actually found/changed something — a clean sweep
       // every 15 minutes would otherwise flood the platform activity log.
-      if (result.checked > 0 || result.expired > 0) {
+      if (
+        result.checked > 0 ||
+        result.expired > 0 ||
+        result.billingApplied > 0
+      ) {
         await this.audit.record({
           actor: { email: "system", role: "cron" },
           action: "payments.reconciled",
@@ -368,24 +473,180 @@ export class PaymentService extends Connection {
     reference: string,
     data: PaystackVerifyData,
   ) {
-    const payment = await this.payment.findUnique({
+    // Resolve the payment two ways. The direct lookup handles the normal case;
+    // the attempt lookup is the safety net for a reference that has since been
+    // rotated off the Payment row by a retry (an abandoned checkout the customer
+    // later completed on their phone). Without it that money is orphaned.
+    const attempt = await this.ledger.findAttempt(reference);
+    let payment = await this.payment.findUnique({
       where: { reference },
       include: appointmentInclude,
     });
+    if (!payment && attempt?.paymentId) {
+      payment = await this.payment.findUnique({
+        where: { id: attempt.paymentId },
+        include: appointmentInclude,
+      });
+    }
     if (!payment) return null;
 
     const succeeded = data.status === "success";
 
-    if (succeeded && payment.status !== "PAID") {
-      const updated = await this.payment.update({
-        where: { id: payment.id },
+    // What THIS reference was supposed to collect. Falls back to the row's
+    // current amount for attempts predating the attempt table.
+    const expectedAmount = attempt?.expectedAmount ?? payment.amount;
+    const expectedCurrency = attempt?.currency ?? payment.currency ?? "GHS";
+
+    if (succeeded) {
+      // Never trust `status: "success"` alone — confirm Paystack charged the
+      // amount and currency we asked for before crediting anything.
+      const check = this.ledger.assertAmountMatches(
+        expectedAmount,
+        expectedCurrency,
+        data,
+      );
+      if (!check.ok) {
+        await this.ledger.settleAttempt(reference, data, {
+          status: "FAILED",
+          failureReason: check.reason,
+        });
+        await this.audit.record({
+          actor: {
+            email: payment.appointment?.email ?? "system",
+            role: "system",
+          },
+          action: "payment.booking.amount_mismatch",
+          targetType: "Payment",
+          targetId: payment.id,
+          studioId: payment.studioId ?? undefined,
+          metadata: {
+            reference,
+            reason: check.reason,
+            expectedAmount,
+            reportedAmountPesewas: data.amount,
+            transactionId: String(data.id),
+          },
+        });
+        await this.ledger.post({
+          studioId: payment.studioId,
+          type: "BOOKING_PAYMENT",
+          direction: "CREDIT",
+          status: "FAILED",
+          amount: Number(data.amount ?? 0) / 100,
+          currency: expectedCurrency,
+          dedupeKey: `booking:mismatch:${reference}`,
+          reference,
+          transactionId: String(data.id),
+          channel: data.channel ?? null,
+          description: `Rejected booking payment (${check.reason})`,
+          customerName: payment.appointment?.fullName ?? null,
+          customerEmail: payment.appointment?.email ?? null,
+          paymentId: payment.id,
+          appointmentId: payment.appointmentId,
+          ...(attempt ? { paymentAttemptId: attempt.id } : {}),
+        });
+        throw new ApiError(
+          "This payment could not be confirmed. Our team has been notified and " +
+            "will be in touch — you have not been charged for this booking.",
+          400,
+        );
+      }
+
+      // The booking is already settled by a DIFFERENT reference: this is a
+      // genuine second charge, not a replay. Record it as money received that
+      // needs refunding rather than silently discarding it.
+      if (
+        COLLECTED_STATUSES.includes(payment.status) &&
+        payment.reference !== reference
+      ) {
+        await this.ledger.settleAttempt(reference, data, { status: "SUCCESS" });
+        await this.audit.record({
+          actor: {
+            email: payment.appointment?.email ?? "system",
+            role: "system",
+          },
+          action: "payment.booking.duplicate_charge",
+          targetType: "Payment",
+          targetId: payment.id,
+          studioId: payment.studioId ?? undefined,
+          metadata: {
+            reference,
+            settledReference: payment.reference,
+            amount: expectedAmount,
+            transactionId: String(data.id),
+            note: "Customer charged twice for one booking — refund required.",
+          },
+        });
+        await this.ledger.post({
+          studioId: payment.studioId,
+          type: "BOOKING_PAYMENT",
+          direction: "CREDIT",
+          status: "SUCCESS",
+          amount: expectedAmount,
+          currency: expectedCurrency,
+          dedupeKey: `booking:duplicate:${reference}`,
+          reference,
+          transactionId: String(data.id),
+          channel: data.channel ?? null,
+          description: "Duplicate booking payment — refund required",
+          customerName: payment.appointment?.fullName ?? null,
+          customerEmail: payment.appointment?.email ?? null,
+          paymentId: payment.id,
+          appointmentId: payment.appointmentId,
+          occurredAt: data.paid_at ? new Date(data.paid_at) : null,
+          ...(attempt ? { paymentAttemptId: attempt.id } : {}),
+        });
+        return payment;
+      }
+    }
+
+    if (succeeded && !COLLECTED_STATUSES.includes(payment.status)) {
+      // The webhook, the reconcile sweep and the customer's own verify can all
+      // arrive at once. Claim the PENDING/FAILED → PAID transition with a
+      // conditional update so exactly one of them finalizes; the others fall
+      // through and return the row as it now stands.
+      const claimed = await this.payment.updateMany({
+        where: { id: payment.id, status: { in: ["PENDING", "FAILED"] } },
         data: {
           status: "PAID",
           transactionId: String(data.id),
           channel: data.channel ?? null,
           paidAt: data.paid_at ? new Date(data.paid_at) : new Date(),
         },
+      });
+      if (claimed.count === 0) {
+        return this.payment.findUnique({
+          where: { id: payment.id },
+          include: appointmentInclude,
+        });
+      }
+      const updated = await this.payment.findUniqueOrThrow({
+        where: { id: payment.id },
         include: appointmentInclude,
+      });
+      await this.ledger.settleAttempt(reference, data, { status: "SUCCESS" });
+      await this.ledger.post({
+        studioId: updated.studioId,
+        type: "BOOKING_PAYMENT",
+        direction: "CREDIT",
+        status: "SUCCESS",
+        amount: updated.amount,
+        currency: updated.currency ?? "GHS",
+        dedupeKey: `booking:paid:${reference}`,
+        reference,
+        transactionId: String(data.id),
+        channel: data.channel ?? null,
+        description: `${updated.type === "PARTIAL" ? "Deposit" : "Payment"} for ${
+          updated.appointment?.service?.name ?? "a service"
+        }`,
+        customerName: updated.appointment?.fullName ?? null,
+        customerEmail: updated.appointment?.email ?? null,
+        paymentId: updated.id,
+        appointmentId: updated.appointmentId,
+        actorEmail: updated.appointment?.email ?? null,
+        actorRole: "customer",
+        occurredAt: data.paid_at ? new Date(data.paid_at) : null,
+        ...(attempt ? { paymentAttemptId: attempt.id } : {}),
       });
       await this.sendReceipt(updated);
       await this.auditPayment("payment.booking.succeeded", updated, data);
@@ -393,10 +654,46 @@ export class PaymentService extends Connection {
     }
 
     if (!succeeded && payment.status === "PENDING") {
-      const failed = await this.payment.update({
-        where: { id: payment.id },
+      // Same race as above: only one caller may record the failure (and send
+      // the failure email), and never over a success that landed meanwhile.
+      const claimed = await this.payment.updateMany({
+        where: { id: payment.id, status: "PENDING" },
         data: { status: "FAILED" },
+      });
+      if (claimed.count === 0) {
+        return this.payment.findUnique({
+          where: { id: payment.id },
+          include: appointmentInclude,
+        });
+      }
+      const failed = await this.payment.findUniqueOrThrow({
+        where: { id: payment.id },
         include: appointmentInclude,
+      });
+      await this.ledger.settleAttempt(reference, data, {
+        status: data.status === "abandoned" ? "ABANDONED" : "FAILED",
+        failureReason: `Paystack reported "${data.status}"`,
+      });
+      await this.ledger.post({
+        studioId: failed.studioId,
+        type: "BOOKING_PAYMENT",
+        direction: "CREDIT",
+        status: data.status === "abandoned" ? "ABANDONED" : "FAILED",
+        amount: failed.amount,
+        currency: failed.currency ?? "GHS",
+        dedupeKey: `booking:failed:${reference}`,
+        reference,
+        channel: data.channel ?? null,
+        description: `Failed payment for ${
+          failed.appointment?.service?.name ?? "a service"
+        }`,
+        customerName: failed.appointment?.fullName ?? null,
+        customerEmail: failed.appointment?.email ?? null,
+        paymentId: failed.id,
+        appointmentId: failed.appointmentId,
+        actorEmail: failed.appointment?.email ?? null,
+        actorRole: "customer",
+        ...(attempt ? { paymentAttemptId: attempt.id } : {}),
       });
       await this.auditPayment("payment.booking.failed", failed, data);
       await this.sendPaymentFailedNotification(failed);
@@ -456,22 +753,7 @@ export class PaymentService extends Connection {
     });
   }
 
-  // `studioIdOverride` is required when called from outside the studio's own
-  // request context (e.g. the reconciliation cron, which runs in the
-  // super-admin context — see currentStudioBranding's doc comment).
-  private async brandForNotification(studioIdOverride?: string | null): Promise<EmailBrand> {
-    const studio = await this.currentStudioBranding(studioIdOverride ?? undefined);
-    return studio
-      ? { kind: "studio", studio }
-      : {
-          kind: "zuri",
-          zuri: { name: "Zuri Studios", websiteUrl: "https://zuristudios.com", supportEmail: "hello@zuristudios.com" },
-        };
-  }
-
-  private async sendReceipt(
-    payment: PaymentWithAppointment & { id: string },
-  ) {
+  private async sendReceipt(payment: PaymentWithAppointment & { id: string }) {
     const appt = payment.appointment;
     if (!appt?.email) return;
     try {
@@ -479,18 +761,79 @@ export class PaymentService extends Connection {
       const isPartial = payment.type === "PARTIAL";
       const lines: MoneyLine[] = [
         { label: "Total", value: ghs(payment.totalAmount) },
-        { label: isPartial ? "Deposit paid" : "Amount paid", value: ghs(payment.amount) },
-        ...(balance > 0 ? [{ label: "Balance due at studio", value: ghs(balance), muted: true }] : []),
+        {
+          label: isPartial ? "Deposit paid" : "Amount paid",
+          value: ghs(payment.amount),
+        },
+        ...(balance > 0
+          ? [
+              {
+                label: "Balance due at studio",
+                value: ghs(balance),
+                muted: true,
+              },
+            ]
+          : []),
       ];
-      const brand = await this.brandForNotification(payment.studioId);
+      const brand = await this.studioEmailBrand(payment.studioId);
+      const paidTo =
+        brand.kind === "studio" ? brand.studio.name : brand.zuri.name;
+      const paidToEmail =
+        brand.kind === "studio" ? brand.studio.email : brand.zuri.supportEmail;
       const { subject, html } = paymentSuccess(brand, {
         customerFirstName: appt.fullName.split(" ")[0] || appt.fullName,
         serviceName: appt.service?.name ?? "your service",
         reference: payment.reference ?? payment.id,
         isPartial,
         lines,
-        ...(brand.kind === "studio" && brand.studio.bookingUrl ? { viewUrl: brand.studio.bookingUrl } : {}),
+        receipt: {
+          receiptNumber: receiptNumber("RCP", payment.id),
+          paidOn: receiptDate(payment.paidAt ?? null),
+          method: payment.channel ?? null,
+          reference: payment.reference ?? payment.id,
+          transactionId: payment.transactionId ?? null,
+          paidTo,
+          paidToEmail: paidToEmail ?? null,
+          amountPaid: ghs(payment.amount),
+          balanceDue: balance > 0 ? ghs(balance) : null,
+        },
+        ...(brand.kind === "studio" && brand.studio.bookingUrl
+          ? { viewUrl: brand.studio.bookingUrl }
+          : {}),
       });
+      // The receipt travels as a PDF attachment; the email body only points at
+      // it. Generated per-send rather than stored, so it always reflects the
+      // payment as it stands.
+      const pdf = buildReceiptPdf({
+        studioName: paidTo,
+        primaryColor:
+          brand.kind === "studio" ? brand.studio.primaryColor : null,
+        title: isPartial ? "Deposit receipt" : "Payment receipt",
+        receiptNumber: receiptNumber("RCP", payment.id),
+        issuedAt: payment.paidAt ?? new Date(),
+        heading: appt.service?.name ?? "Your service",
+        lines: [
+          { label: "Customer", value: appt.fullName },
+          {
+            label: "Appointment",
+            value: `${receiptDayOnly(appt.appointmentDate)} · ${appt.appointmentTime}`,
+          },
+          { label: "Total", value: ghs(payment.totalAmount) },
+          {
+            label: isPartial ? "Deposit paid" : "Amount paid",
+            value: ghs(payment.amount),
+            strong: true,
+          },
+        ],
+        amountPaid: ghs(payment.amount),
+        balanceDue: balance > 0 ? ghs(balance) : null,
+        reference: payment.reference ?? payment.id,
+        transactionId: payment.transactionId ?? null,
+        paymentMethod: receiptMethodLabel(payment.channel ?? null),
+        paidToEmail: paidToEmail ?? null,
+        status: balance > 0 ? "PARTIALLY_PAID" : "PAID",
+      });
+
       await this.notifications.send({
         template: NotificationTemplate.PAYMENT_SUCCESS,
         to: appt.email,
@@ -499,6 +842,13 @@ export class PaymentService extends Connection {
         studioId: payment.studioId,
         entityType: "Payment",
         entityId: payment.id,
+        attachments: [
+          {
+            filename: pdf.filename,
+            content: pdf.base64,
+            contentType: "application/pdf",
+          },
+        ],
       });
     } catch (error) {
       console.error("Failed to send payment receipt email:", error);
@@ -511,13 +861,15 @@ export class PaymentService extends Connection {
     const appt = payment.appointment;
     if (!appt?.email) return;
     try {
-      const brand = await this.brandForNotification(payment.studioId);
+      const brand = await this.studioEmailBrand(payment.studioId);
       const { subject, html } = paymentFailed(brand, {
         customerFirstName: appt.fullName.split(" ")[0] || appt.fullName,
         serviceName: appt.service?.name ?? "your service",
         amountAttempted: ghs(payment.amount),
         reference: payment.reference ?? payment.id,
-        ...(brand.kind === "studio" && brand.studio.bookingUrl ? { retryUrl: brand.studio.bookingUrl } : {}),
+        ...(brand.kind === "studio" && brand.studio.bookingUrl
+          ? { retryUrl: brand.studio.bookingUrl }
+          : {}),
       });
       await this.notifications.send({
         template: NotificationTemplate.PAYMENT_FAILED,
@@ -544,11 +896,24 @@ export class PaymentService extends Connection {
       .createHmac("sha512", env.paystack.secretKey)
       .update(rawBody)
       .digest("hex");
-    if (!signature || hash !== signature) {
+    // Constant-time compare, so the signature can't be recovered byte by byte
+    // from response timing.
+    const expected = Buffer.from(hash, "utf8");
+    const received = Buffer.from(signature ?? "", "utf8");
+    if (
+      expected.length !== received.length ||
+      !crypto.timingSafeEqual(expected, received)
+    ) {
       throw new ApiError("Invalid webhook signature", 401);
     }
 
-    const event = JSON.parse(rawBody.toString("utf8"));
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let event: any;
+    try {
+      event = JSON.parse(rawBody.toString("utf8"));
+    } catch {
+      throw new ApiError("Invalid webhook payload", 400);
+    }
     const type: string = event?.event ?? "";
     const data = event?.data ?? {};
 
@@ -558,6 +923,10 @@ export class PaymentService extends Connection {
         if (isSignupReference(reference)) {
           // A studio-subscription first payment → provision the studio.
           await this.onboarding.finalize(reference);
+        } else if (isStudioBillingReference(reference)) {
+          // A studio's renewal or plan change. Applying it here means a studio
+          // that paid and closed the tab is still renewed.
+          await this.studioBilling.applyBillingCharge(reference);
         } else {
           // Appointment payments, product orders, and combined booking+product
           // charges (which share a reference) — finalize both; each is a no-op
@@ -566,7 +935,37 @@ export class PaymentService extends Connection {
           await this.processVerification(reference, vd);
           await this.orders.finalizeByReference(reference, vd);
         }
-      } else if (type.startsWith("subscription.") || type.startsWith("invoice.")) {
+      } else if (type.startsWith("refund.")) {
+        // Paystack confirms a refund asynchronously. Resolve by OUR reference
+        // when they echo it, else by their own refund id — a refund created
+        // through the dashboard rather than the API won't carry ours.
+        const ourRef: string | undefined =
+          data?.merchant_note_reference ??
+          data?.transaction_reference ??
+          undefined;
+        const providerId = data?.id ? String(data.id) : null;
+        const row = ourRef
+          ? await this.refunds.findByReference(ourRef)
+          : providerId
+            ? await this.refunds.findByProviderId(providerId)
+            : null;
+        if (row) {
+          if (type === "refund.processed" || type === "refund.processing") {
+            if (type === "refund.processed") {
+              await this.refunds.settle(row.reference, "PROCESSED");
+            }
+          } else if (type === "refund.failed") {
+            await this.refunds.settle(
+              row.reference,
+              "FAILED",
+              data?.reason ?? data?.message ?? null,
+            );
+          }
+        }
+      } else if (
+        type.startsWith("subscription.") ||
+        type.startsWith("invoice.")
+      ) {
         await this.handleBillingEvent(type, data);
       }
     } catch (error) {
@@ -600,7 +999,8 @@ export class PaymentService extends Connection {
       return;
     }
 
-    const subCode = data?.subscription_code ?? data?.subscription?.subscription_code;
+    const subCode =
+      data?.subscription_code ?? data?.subscription?.subscription_code;
     const studio = subCode
       ? await this.studio.findFirst({ where: { subscriptionCode: subCode } })
       : null;
@@ -622,12 +1022,54 @@ export class PaymentService extends Connection {
         where: { id: studio.id },
         data: { subscriptionStatus: "past_due" },
       });
+      const failedRef = String(
+        data?.reference ?? data?.invoice_code ?? data?.id ?? "",
+      );
+      if (failedRef) {
+        const amt = Number(data?.amount ?? 0);
+        await this.ledger.post({
+          studioId: studio.id,
+          type: "SUBSCRIPTION_PAYMENT",
+          direction: "DEBIT",
+          status: "FAILED",
+          amount: Number.isFinite(amt) ? amt / 100 : 0,
+          currency: String(data?.currency ?? "GHS").toUpperCase(),
+          dedupeKey: `subscription:failed:${failedRef}`,
+          reference: failedRef,
+          description: "Subscription renewal failed",
+          actorRole: "studio",
+        });
+      }
     } else if (type === "invoice.update" || type === "invoice.create") {
       // Renewal invoice — if paid, keep active and reactivate a suspended studio.
       if (data?.paid === true || data?.status === "success") {
         const nextPay = data?.subscription?.next_payment_date
           ? new Date(data.subscription.next_payment_date)
           : null;
+
+        // A renewal the studio paid us — money out from the studio's point of
+        // view, so it lands on the ledger as a DEBIT. Dedupe on the invoice
+        // reference so a replayed invoice.update cannot post it twice.
+        const invoiceRef = String(
+          data?.reference ?? data?.invoice_code ?? data?.id ?? "",
+        );
+        if (invoiceRef) {
+          const paidPesewas = Number(data?.amount ?? 0);
+          await this.ledger.post({
+            studioId: studio.id,
+            type: "SUBSCRIPTION_PAYMENT",
+            direction: "DEBIT",
+            status: "SUCCESS",
+            amount: Number.isFinite(paidPesewas) ? paidPesewas / 100 : 0,
+            currency: String(data?.currency ?? "GHS").toUpperCase(),
+            dedupeKey: `subscription:paid:${invoiceRef}`,
+            reference: invoiceRef,
+            description: "Subscription renewal",
+            actorEmail: data?.customer?.email ?? null,
+            actorRole: "studio",
+            occurredAt: data?.paid_at ? new Date(data.paid_at) : null,
+          });
+        }
         await this.studio.update({
           where: { id: studio.id },
           data: {

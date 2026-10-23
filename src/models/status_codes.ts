@@ -7,5 +7,6 @@ export enum HttpCode {
   CONFLICT = 409,
   NO_CONTENT = 204,
   BAD_GATEWAY = 502,
+  SERVICE_UNAVAILABLE = 503,
   PAYLOAD_TOO_LARGE = 413,
 }

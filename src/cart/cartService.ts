@@ -37,7 +37,9 @@ export class CartService extends Connection {
       where: { userId },
       include: itemsInclude,
     });
-    cart?.items.forEach((item) => { item.product.imageUrl = this.s3.deliveryUrl(item.product.imageUrl); });
+    cart?.items.forEach((item) => {
+      item.product.imageUrl = this.s3.deliveryUrl(item.product.imageUrl);
+    });
     return { message: "Cart retrieved successfully", data: cart };
   }
 

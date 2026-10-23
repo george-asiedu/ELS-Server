@@ -9,6 +9,11 @@ router.get("/", PlatformReviewController.listApproved);
 
 // Studio admin — submit and review their own testimonials.
 router.post("/", authenticate, requireAdmin, PlatformReviewController.create);
-router.get("/mine", authenticate, requireAdmin, PlatformReviewController.listMine);
+router.get(
+  "/mine",
+  authenticate,
+  requireAdmin,
+  PlatformReviewController.listMine,
+);
 
 export default router;

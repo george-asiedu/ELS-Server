@@ -1,4 +1,4 @@
-import { Request, Response, NextFunction } from "express";
+import { Request, Response } from "express";
 import { ProductService } from "./productService";
 import { ApiError } from "../middleware/apiError";
 import { CreateProductInput, UpdateProductInput } from "./productService";
@@ -34,97 +34,53 @@ const parseBody = (body: Record<string, unknown>): UpdateProductInput => {
   if (active !== undefined) out.active = active;
   const popular = toBool(body.popular);
   if (popular !== undefined) out.popular = popular;
-  if (body.imageUrl !== undefined) out.imageUrl = body.imageUrl === null || body.imageUrl === "" ? null : String(body.imageUrl);
+  if (body.imageUrl !== undefined)
+    out.imageUrl =
+      body.imageUrl === null || body.imageUrl === ""
+        ? null
+        : String(body.imageUrl);
   return out;
 };
 
 export class ProductController {
-  public static list = async (
-    req: Request,
-    res: Response,
-    next: NextFunction,
-  ) => {
-    try {
-      const page = parseCursorPage(req.query.cursor, req.query.limit);
-      return res.status(200).json(await productService.listActive(page));
-    } catch (error) {
-      return next(error);
-    }
+  public static list = async (req: Request, res: Response) => {
+    const page = parseCursorPage(req.query.cursor, req.query.limit);
+    return res.status(200).json(await productService.listActive(page));
   };
 
-  public static listAll = async (
-    req: Request,
-    res: Response,
-    next: NextFunction,
-  ) => {
-    try {
-      const page = parseCursorPage(req.query.cursor, req.query.limit);
-      return res.status(200).json(await productService.listAll(page));
-    } catch (error) {
-      return next(error);
-    }
+  public static listAll = async (req: Request, res: Response) => {
+    const page = parseCursorPage(req.query.cursor, req.query.limit);
+    return res.status(200).json(await productService.listAll(page));
   };
 
-  public static getOne = async (
-    req: Request,
-    res: Response,
-    next: NextFunction,
-  ) => {
-    try {
-      const { id } = req.params;
-      if (!id) throw new ApiError("Product ID is required", 400);
-      return res.status(200).json(await productService.getById(id));
-    } catch (error) {
-      return next(error);
-    }
+  public static getOne = async (req: Request, res: Response) => {
+    const { id } = req.params;
+    if (!id) throw new ApiError("Product ID is required", 400);
+    return res.status(200).json(await productService.getById(id));
   };
 
-  public static create = async (
-    req: Request,
-    res: Response,
-    next: NextFunction,
-  ) => {
-    try {
-      const parsed = parseBody(req.body ?? {});
-      if (!parsed.name) throw new ApiError("Product name is required", 400);
-      if (parsed.price === undefined)
-        throw new ApiError("A valid price is required", 400);
-      if (!parsed.category)
-        throw new ApiError("A product category is required", 400);
-      const result = await productService.create(parsed as CreateProductInput);
-      return res.status(201).json(result);
-    } catch (error) {
-      return next(error);
-    }
+  public static create = async (req: Request, res: Response) => {
+    const parsed = parseBody(req.body ?? {});
+    if (!parsed.name) throw new ApiError("Product name is required", 400);
+    if (parsed.price === undefined)
+      throw new ApiError("A valid price is required", 400);
+    if (!parsed.category)
+      throw new ApiError("A product category is required", 400);
+    const result = await productService.create(parsed as CreateProductInput);
+    return res.status(201).json(result);
   };
 
-  public static update = async (
-    req: Request,
-    res: Response,
-    next: NextFunction,
-  ) => {
-    try {
-      const { id } = req.params;
-      if (!id) throw new ApiError("Product ID is required", 400);
-      const parsed = parseBody(req.body ?? {});
-      const result = await productService.update(id, parsed);
-      return res.status(200).json(result);
-    } catch (error) {
-      return next(error);
-    }
+  public static update = async (req: Request, res: Response) => {
+    const { id } = req.params;
+    if (!id) throw new ApiError("Product ID is required", 400);
+    const parsed = parseBody(req.body ?? {});
+    const result = await productService.update(id, parsed);
+    return res.status(200).json(result);
   };
 
-  public static remove = async (
-    req: Request,
-    res: Response,
-    next: NextFunction,
-  ) => {
-    try {
-      const { id } = req.params;
-      if (!id) throw new ApiError("Product ID is required", 400);
-      return res.status(200).json(await productService.remove(id));
-    } catch (error) {
-      return next(error);
-    }
+  public static remove = async (req: Request, res: Response) => {
+    const { id } = req.params;
+    if (!id) throw new ApiError("Product ID is required", 400);
+    return res.status(200).json(await productService.remove(id));
   };
 }

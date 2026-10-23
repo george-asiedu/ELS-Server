@@ -13,13 +13,34 @@
 import "dotenv/config";
 
 const SECRET = process.env.PAYSTACK_SECRET_KEY;
-const ghs = (v: string | undefined, def: number) => Math.round((Number(v) || def) * 100);
+const ghs = (v: string | undefined, def: number) =>
+  Math.round((Number(v) || def) * 100);
 
 const PLANS = [
-  { key: "STANDARD_MONTHLY", name: "Zuri Standard (Monthly)", interval: "monthly", amount: ghs(process.env.PLAN_STANDARD_MONTHLY, 150) },
-  { key: "STANDARD_YEARLY", name: "Zuri Standard (Yearly)", interval: "annually", amount: ghs(process.env.PLAN_STANDARD_YEARLY, 1500) },
-  { key: "PREMIUM_MONTHLY", name: "Zuri Premium (Monthly)", interval: "monthly", amount: ghs(process.env.PLAN_PREMIUM_MONTHLY, 350) },
-  { key: "PREMIUM_YEARLY", name: "Zuri Premium (Yearly)", interval: "annually", amount: ghs(process.env.PLAN_PREMIUM_YEARLY, 3500) },
+  {
+    key: "STANDARD_MONTHLY",
+    name: "Zuri Standard (Monthly)",
+    interval: "monthly",
+    amount: ghs(process.env.PLAN_STANDARD_MONTHLY, 150),
+  },
+  {
+    key: "STANDARD_YEARLY",
+    name: "Zuri Standard (Yearly)",
+    interval: "annually",
+    amount: ghs(process.env.PLAN_STANDARD_YEARLY, 1500),
+  },
+  {
+    key: "PREMIUM_MONTHLY",
+    name: "Zuri Premium (Monthly)",
+    interval: "monthly",
+    amount: ghs(process.env.PLAN_PREMIUM_MONTHLY, 350),
+  },
+  {
+    key: "PREMIUM_YEARLY",
+    name: "Zuri Premium (Yearly)",
+    interval: "annually",
+    amount: ghs(process.env.PLAN_PREMIUM_YEARLY, 3500),
+  },
 ];
 
 async function main() {

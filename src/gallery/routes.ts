@@ -1,7 +1,6 @@
 import { Router } from "express";
 import { GalleryController } from "./galleryController";
 import { authenticate, requireAdmin } from "../middleware/auth";
-import { reenterTenant } from "../middleware/tenant";
 
 const router: Router = Router();
 
@@ -10,7 +9,8 @@ router.get("/", GalleryController.list);
 
 // Admin
 router.get("/all", authenticate, requireAdmin, GalleryController.listAll);
-router.post("/", authenticate, requireAdmin, reenterTenant, GalleryController.create);
+router.post("/", authenticate, requireAdmin, GalleryController.create);
+router.patch("/:id", authenticate, requireAdmin, GalleryController.update);
 router.delete("/:id", authenticate, requireAdmin, GalleryController.remove);
 
 export default router;

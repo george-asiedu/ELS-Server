@@ -96,8 +96,12 @@ async function main() {
   }
 
   // 4. Seed feature flags from the existing single-tenant settings.
-  const commerce = await prisma.commerceSettings.findFirst({ where: { studioId } });
-  const payment = await prisma.paymentSettings.findFirst({ where: { studioId } });
+  const commerce = await prisma.commerceSettings.findFirst({
+    where: { studioId },
+  });
+  const payment = await prisma.paymentSettings.findFirst({
+    where: { studioId },
+  });
   await prisma.studioSettings.upsert({
     where: { studioId },
     update: {},

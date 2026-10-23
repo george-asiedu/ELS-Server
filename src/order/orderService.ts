@@ -1,16 +1,27 @@
 import { randomUUID } from "crypto";
 import { Connection } from "../db/dbConnection";
-import { CursorPage, cursorPageArgs, cursorPageResult } from "../utils/cursorPagination";
+import {
+  CursorPage,
+  cursorPageArgs,
+  cursorPageResult,
+} from "../utils/cursorPagination";
 import { ApiError } from "../middleware/apiError";
 import { env } from "../config/env.config";
 import { paystack, PaystackVerifyData } from "../payment/paystackClient";
 import { AuditService } from "../audit/auditService";
+import { LedgerService } from "../ledger/ledgerService";
 import { safeClientOrigin } from "../utils/helper";
 import { NotificationService } from "../notifications/notificationService";
 import { NotificationTemplate } from "../notifications/registry";
-import { orderConfirmed, orderPaymentFailed, orderFulfilled } from "../notifications/templates/shop";
-import { EmailBrand, MoneyLine } from "../notifications/types";
-import { ghs } from "../notifications/format";
+import {
+  orderConfirmed,
+  orderPaymentFailed,
+  orderFulfilled,
+} from "../notifications/templates/shop";
+import { MoneyLine } from "../notifications/types";
+import { ghs, receiptDate, receiptNumber } from "../notifications/format";
+import { buildReceiptPdf } from "../notifications/receiptPdf";
+import { receiptMethodLabel } from "../notifications/design/shell";
 
 type FulfillmentType = "PICKUP" | "DELIVERY";
 
@@ -60,16 +71,7 @@ const effectivePrice = (p: { price: number; promoPrice: number | null }) =>
 export class OrderService extends Connection {
   private notifications = new NotificationService();
   private audit = new AuditService();
-
-  private async brandForNotification(studioIdOverride?: string | null): Promise<EmailBrand> {
-    const studio = await this.currentStudioBranding(studioIdOverride ?? undefined);
-    return studio
-      ? { kind: "studio", studio }
-      : {
-          kind: "zuri",
-          zuri: { name: "Zuri Studios", websiteUrl: "https://zuristudios.com", supportEmail: "hello@zuristudios.com" },
-        };
-  }
+  private ledger = new LedgerService();
 
   private static readonly POINTS_PER_GHS = 10; // 10 pts = GHS 1
   private static readonly REFERRAL_ORDER_BONUS = 50;
@@ -104,7 +106,9 @@ export class OrderService extends Connection {
     const items: LineItem[] = [];
     for (const spec of specs) {
       const qty = Math.max(1, Math.floor(spec.quantity || 1));
-      const p = await this.product.findUnique({ where: { id: spec.productId } });
+      const p = await this.product.findUnique({
+        where: { id: spec.productId },
+      });
       if (!p || !p.active) {
         throw new ApiError("A selected product is no longer available", 400);
       }
@@ -185,7 +189,8 @@ export class OrderService extends Connection {
     const deliveryFee = fulfillment === "DELIVERY" ? settings.deliveryFee : 0;
     const total =
       Math.round((subtotal - discountAmount + deliveryFee) * 100) / 100;
-    if (total <= 0) throw new ApiError("Order total must be greater than 0", 400);
+    if (total <= 0)
+      throw new ApiError("Order total must be greater than 0", 400);
 
     const reference = await this.makeReference("ORD");
     const orderNumber = await this.genOrderNumber();
@@ -209,7 +214,9 @@ export class OrderService extends Connection {
         deliveryPhone:
           fulfillment === "DELIVERY" ? params.deliveryPhone!.trim() : null,
         referralCode: params.referralCode?.trim() || null,
-        ...(params.appointmentId ? { appointmentId: params.appointmentId } : {}),
+        ...(params.appointmentId
+          ? { appointmentId: params.appointmentId }
+          : {}),
         reference,
         items: {
           create: params.lineItems.map((li) => ({
@@ -239,6 +246,14 @@ export class OrderService extends Connection {
         },
       });
     }
+
+    await this.ledger.openAttempt({
+      reference,
+      expectedAmount: total,
+      orderId: order.id,
+      customerEmail: params.contact.email,
+      customerName: params.contact.name ?? null,
+    });
 
     const subaccount = await this.currentStudioSubaccount();
     const init = await paystack.initialize({
@@ -285,7 +300,11 @@ export class OrderService extends Connection {
 
     return this.createAndInitialize({
       userId,
-      contact: { name: profile?.fullName ?? null, email, phone: profile?.phone ?? null },
+      contact: {
+        name: profile?.fullName ?? null,
+        email,
+        phone: profile?.phone ?? null,
+      },
       lineItems,
       fulfillment: input.fulfillment,
       deliveryAddress: input.deliveryAddress,
@@ -443,6 +462,23 @@ export class OrderService extends Connection {
       include: orderInclude,
     });
 
+    // One reference covers BOTH the service payment and the product order, so
+    // the attempt links to both — either finalizer must be able to resolve it —
+    // and its expected amount is the combined total Paystack will charge.
+    const combinedPayment = await this.payment.findUnique({
+      where: { appointmentId: appt.id },
+      select: { id: true },
+    });
+    await this.ledger.openAttempt({
+      reference,
+      expectedAmount: combined,
+      orderId: order.id,
+      appointmentId: appt.id,
+      ...(combinedPayment ? { paymentId: combinedPayment.id } : {}),
+      customerEmail: email,
+      customerName: order.customerName ?? null,
+    });
+
     const subaccount = await this.currentStudioSubaccount();
     const init = await paystack.initialize({
       email,
@@ -478,7 +514,10 @@ export class OrderService extends Connection {
       include: orderInclude,
       ...cursorPageArgs(page),
     });
-    return { message: "Orders retrieved successfully", ...cursorPageResult(orders, page) };
+    return {
+      message: "Orders retrieved successfully",
+      ...cursorPageResult(orders, page),
+    };
   }
 
   public async listAll(page: CursorPage) {
@@ -492,7 +531,10 @@ export class OrderService extends Connection {
         },
       },
     });
-    return { message: "Orders retrieved successfully", ...cursorPageResult(orders, page) };
+    return {
+      message: "Orders retrieved successfully",
+      ...cursorPageResult(orders, page),
+    };
   }
 
   public async updateStatus(id: string, status: string) {
@@ -541,11 +583,13 @@ export class OrderService extends Connection {
 
     if (status === "FULFILLED" && order.customerEmail) {
       try {
-        const brand = await this.brandForNotification(order.studioId);
+        const brand = await this.studioEmailBrand(order.studioId);
         const { subject, html } = orderFulfilled(brand, {
           orderNumber: order.orderNumber,
           fulfillment: order.fulfillment as "PICKUP" | "DELIVERY",
-          ...(brand.kind === "studio" && brand.studio.websiteUrl ? { viewUrl: brand.studio.websiteUrl } : {}),
+          ...(brand.kind === "studio" && brand.studio.websiteUrl
+            ? { viewUrl: brand.studio.websiteUrl }
+            : {}),
         });
         await this.notifications.send({
           template: NotificationTemplate.SHOP_ORDER_FULFILLED,
@@ -592,12 +636,25 @@ export class OrderService extends Connection {
       amountPesewas: Math.round(order.total * 100),
       reference,
       callbackUrl: `${safeClientOrigin(origin)}/order/callback`,
-      metadata: { orderId: order.id, orderNumber: order.orderNumber, kind: "order" },
+      metadata: {
+        orderId: order.id,
+        orderNumber: order.orderNumber,
+        kind: "order",
+      },
       subaccount,
     });
     await this.order.update({
       where: { id: order.id },
       data: { reference },
+    });
+    // The Order row's reference has just been rotated; the attempt preserves the
+    // old one so a late completion of the previous checkout is still resolvable.
+    await this.ledger.openAttempt({
+      reference,
+      expectedAmount: order.total,
+      orderId: order.id,
+      customerEmail: email,
+      customerName: order.customerName ?? null,
     });
     await this.audit.record({
       actor: { email, role: "customer" },
@@ -629,17 +686,133 @@ export class OrderService extends Connection {
     reference: string,
     data: PaystackVerifyData,
   ) {
-    const order = await this.order.findUnique({
+    // Same two-step resolution as bookings: the attempt row keeps a reference
+    // that `repay` has since rotated off the Order, so a late completion of an
+    // abandoned checkout still finds its order instead of being dropped.
+    const attempt = await this.ledger.findAttempt(reference);
+    let order = await this.order.findUnique({
       where: { reference },
       include: orderInclude,
     });
+    if (!order && attempt?.orderId) {
+      order = await this.order.findUnique({
+        where: { id: attempt.orderId },
+        include: orderInclude,
+      });
+    }
     if (!order) return null;
 
     const succeeded = data.status === "success";
+
+    if (succeeded) {
+      // Confirm Paystack charged what we asked before releasing stock/loyalty.
+      const expectedAmount = attempt?.expectedAmount ?? order.total;
+      const check = this.ledger.assertAmountMatches(
+        expectedAmount,
+        attempt?.currency ?? "GHS",
+        data,
+      );
+      if (!check.ok) {
+        await this.ledger.settleAttempt(reference, data, {
+          status: "FAILED",
+          failureReason: check.reason,
+        });
+        await this.audit.record({
+          actor: { email: order.customerEmail ?? "system", role: "system" },
+          action: "payment.order.amount_mismatch",
+          targetType: "Order",
+          targetId: order.id,
+          studioId: order.studioId ?? undefined,
+          metadata: {
+            reference,
+            reason: check.reason,
+            expectedAmount,
+            reportedAmountPesewas: data.amount,
+            orderNumber: order.orderNumber,
+          },
+        });
+        await this.ledger.post({
+          studioId: order.studioId,
+          type: "ORDER_PAYMENT",
+          direction: "CREDIT",
+          status: "FAILED",
+          amount: Number(data.amount ?? 0) / 100,
+          dedupeKey: `order:mismatch:${reference}`,
+          reference,
+          transactionId: String(data.id),
+          description: `Rejected order ${order.orderNumber} (${check.reason})`,
+          customerName: order.customerName ?? null,
+          customerEmail: order.customerEmail ?? null,
+          orderId: order.id,
+          ...(attempt ? { paymentAttemptId: attempt.id } : {}),
+        });
+        throw new ApiError(
+          "This payment could not be confirmed. Our team has been notified and " +
+            "will be in touch about your order.",
+          400,
+        );
+      }
+
+      // Already settled by a different reference — a real second charge.
+      if (order.status === "PAID" && order.reference !== reference) {
+        await this.ledger.settleAttempt(reference, data, { status: "SUCCESS" });
+        await this.audit.record({
+          actor: { email: order.customerEmail ?? "system", role: "system" },
+          action: "payment.order.duplicate_charge",
+          targetType: "Order",
+          targetId: order.id,
+          studioId: order.studioId ?? undefined,
+          metadata: {
+            reference,
+            settledReference: order.reference,
+            orderNumber: order.orderNumber,
+            amount: expectedAmount,
+            note: "Customer charged twice for one order — refund required.",
+          },
+        });
+        await this.ledger.post({
+          studioId: order.studioId,
+          type: "ORDER_PAYMENT",
+          direction: "CREDIT",
+          status: "SUCCESS",
+          amount: expectedAmount,
+          dedupeKey: `order:duplicate:${reference}`,
+          reference,
+          transactionId: String(data.id),
+          description: `Duplicate payment for order ${order.orderNumber} — refund required`,
+          customerName: order.customerName ?? null,
+          customerEmail: order.customerEmail ?? null,
+          orderId: order.id,
+          occurredAt: data.paid_at ? new Date(data.paid_at) : null,
+          ...(attempt ? { paymentAttemptId: attempt.id } : {}),
+        });
+        return order;
+      }
+    }
     if (!succeeded || order.status !== "PENDING_PAYMENT") {
       // Record a definitive failure (not a still-pending/abandoned check) so the
       // studio + platform have a trail of failed order payments.
       if (data.status === "failed" && order.status === "PENDING_PAYMENT") {
+        await this.ledger.settleAttempt(reference, data, {
+          status: "FAILED",
+          failureReason: `Paystack reported "${data.status}"`,
+        });
+        await this.ledger.post({
+          studioId: order.studioId,
+          type: "ORDER_PAYMENT",
+          direction: "CREDIT",
+          status: "FAILED",
+          amount: order.total,
+          dedupeKey: `order:failed:${reference}`,
+          reference,
+          description: `Failed payment for order ${order.orderNumber}`,
+          customerName: order.customerName ?? null,
+          customerEmail: order.customerEmail ?? null,
+          orderId: order.id,
+          actorEmail: order.customerEmail ?? null,
+          actorRole: "customer",
+          ...(attempt ? { paymentAttemptId: attempt.id } : {}),
+        });
         await this.audit.record({
           actor: { email: order.customerEmail ?? "system", role: "customer" },
           action: "payment.order.failed",
@@ -659,11 +832,13 @@ export class OrderService extends Connection {
         });
         if (order.customerEmail) {
           try {
-            const brand = await this.brandForNotification(order.studioId);
+            const brand = await this.studioEmailBrand(order.studioId);
             const { subject, html } = orderPaymentFailed(brand, {
               orderNumber: order.orderNumber,
               amountAttempted: ghs(order.total),
-              ...(brand.kind === "studio" && brand.studio.websiteUrl ? { retryUrl: brand.studio.websiteUrl } : {}),
+              ...(brand.kind === "studio" && brand.studio.websiteUrl
+                ? { retryUrl: brand.studio.websiteUrl }
+                : {}),
             });
             await this.notifications.send({
               template: NotificationTemplate.SHOP_ORDER_PAYMENT_FAILED,
@@ -682,15 +857,48 @@ export class OrderService extends Connection {
       return order;
     }
 
-    const paid = await this.order.update({
-      where: { id: order.id },
+    // The webhook, reconcile sweep and customer verify can race here. Only the
+    // caller that flips PENDING_PAYMENT → PAID runs the side effects below
+    // (stock, loyalty, cart, receipt); the rest return the order as it stands.
+    const claimed = await this.order.updateMany({
+      where: { id: order.id, status: "PENDING_PAYMENT" },
       data: {
         status: "PAID",
         transactionId: String(data.id),
         channel: data.channel ?? null,
         paidAt: data.paid_at ? new Date(data.paid_at) : new Date(),
       },
+    });
+    if (claimed.count === 0) {
+      return this.order.findUnique({
+        where: { id: order.id },
+        include: orderInclude,
+      });
+    }
+    const paid = await this.order.findUniqueOrThrow({
+      where: { id: order.id },
       include: orderInclude,
+    });
+
+    await this.ledger.settleAttempt(reference, data, { status: "SUCCESS" });
+    await this.ledger.post({
+      studioId: paid.studioId,
+      type: "ORDER_PAYMENT",
+      direction: "CREDIT",
+      status: "SUCCESS",
+      amount: paid.total,
+      dedupeKey: `order:paid:${reference}`,
+      reference,
+      transactionId: String(data.id),
+      channel: data.channel ?? null,
+      description: `Order ${paid.orderNumber}`,
+      customerName: paid.customerName ?? null,
+      customerEmail: paid.customerEmail ?? null,
+      orderId: paid.id,
+      actorEmail: paid.customerEmail ?? null,
+      actorRole: "customer",
+      occurredAt: data.paid_at ? new Date(data.paid_at) : null,
+      ...(attempt ? { paymentAttemptId: attempt.id } : {}),
     });
 
     // Per-studio payment audit trail (best-effort).
@@ -716,16 +924,27 @@ export class OrderService extends Connection {
       },
     });
 
-    // Decrement stock (never below zero).
+    // Decrement stock (never below zero). Done in the database rather than
+    // read-then-write, so concurrent orders for one product can't overwrite
+    // each other's decrement.
     for (const item of paid.items) {
       if (!item.productId) continue;
-      const product = await this.product.findUnique({
-        where: { id: item.productId },
+      const decremented = await this.product.updateMany({
+        where: {
+          id: item.productId,
+          trackStock: true,
+          stock: { gte: item.quantity },
+        },
+        data: { stock: { decrement: item.quantity } },
       });
-      if (product?.trackStock) {
-        await this.product.update({
-          where: { id: product.id },
-          data: { stock: Math.max(0, product.stock - item.quantity) },
+      if (decremented.count === 0) {
+        await this.product.updateMany({
+          where: {
+            id: item.productId,
+            trackStock: true,
+            stock: { lt: item.quantity },
+          },
+          data: { stock: 0 },
         });
       }
     }
@@ -761,18 +980,38 @@ export class OrderService extends Connection {
     }
 
     // Referral reward — 50 pts to the code owner, once per buyer (by email).
-    await this.awardReferralReward(paid.referralCode, paid.customerEmail, order.userId);
+    await this.awardReferralReward(
+      paid.referralCode,
+      paid.customerEmail,
+      order.userId,
+    );
 
     // Receipt email (best-effort).
     if (paid.customerEmail) {
       try {
-        const brand = await this.brandForNotification(paid.studioId);
+        const brand = await this.studioEmailBrand(paid.studioId);
         const lines: MoneyLine[] = [
           { label: "Subtotal", value: ghs(paid.subtotal) },
-          ...(paid.discountAmount > 0 ? [{ label: "Discount", value: `-${ghs(paid.discountAmount)}`, muted: true }] : []),
-          ...(paid.deliveryFee > 0 ? [{ label: "Delivery", value: ghs(paid.deliveryFee) }] : []),
+          ...(paid.discountAmount > 0
+            ? [
+                {
+                  label: "Discount",
+                  value: `-${ghs(paid.discountAmount)}`,
+                  muted: true,
+                },
+              ]
+            : []),
+          ...(paid.deliveryFee > 0
+            ? [{ label: "Delivery", value: ghs(paid.deliveryFee) }]
+            : []),
           { label: "Total", value: ghs(paid.total), emphasis: true },
         ];
+        const paidTo =
+          brand.kind === "studio" ? brand.studio.name : brand.zuri.name;
+        const paidToEmail =
+          brand.kind === "studio"
+            ? brand.studio.email
+            : brand.zuri.supportEmail;
         const { subject, html } = orderConfirmed(brand, {
           orderNumber: paid.orderNumber,
           items: paid.items.map((i) => ({
@@ -781,9 +1020,64 @@ export class OrderService extends Connection {
             total: ghs(i.unitPrice * i.quantity),
           })),
           lines,
+          receipt: {
+            receiptNumber: receiptNumber("RCP", paid.id),
+            paidOn: receiptDate(paid.paidAt ?? null),
+            method: paid.channel ?? null,
+            reference: paid.reference ?? paid.orderNumber,
+            transactionId: paid.transactionId ?? null,
+            paidTo,
+            paidToEmail: paidToEmail ?? null,
+            amountPaid: ghs(paid.total),
+            balanceDue: null,
+          },
           fulfillment: paid.fulfillment as "PICKUP" | "DELIVERY",
-          ...(brand.kind === "studio" && brand.studio.websiteUrl ? { viewUrl: brand.studio.websiteUrl } : {}),
+          ...(brand.kind === "studio" && brand.studio.websiteUrl
+            ? { viewUrl: brand.studio.websiteUrl }
+            : {}),
         });
+        // PDF receipt, itemised, attached to the confirmation.
+        const pdf = buildReceiptPdf({
+          studioName: paidTo,
+          primaryColor:
+            brand.kind === "studio" ? brand.studio.primaryColor : null,
+          title: "Order receipt",
+          receiptNumber: receiptNumber("RCP", paid.id),
+          issuedAt: paid.paidAt ?? new Date(),
+          heading: `Order ${paid.orderNumber}`,
+          lines: [
+            ...(paid.customerName
+              ? [{ label: "Customer", value: paid.customerName }]
+              : []),
+            ...paid.items.map((i) => ({
+              label: `${i.name} × ${i.quantity}`,
+              value: ghs(i.unitPrice * i.quantity),
+            })),
+            { label: "Subtotal", value: ghs(paid.subtotal) },
+            ...(paid.discountAmount > 0
+              ? [{ label: "Discount", value: `-${ghs(paid.discountAmount)}` }]
+              : []),
+            ...(paid.deliveryFee > 0
+              ? [{ label: "Delivery", value: ghs(paid.deliveryFee) }]
+              : []),
+            { label: "Total", value: ghs(paid.total), strong: true },
+            {
+              label: "Fulfilment",
+              value:
+                paid.fulfillment === "DELIVERY"
+                  ? "Delivery"
+                  : "Pickup at studio",
+            },
+          ],
+          amountPaid: ghs(paid.total),
+          balanceDue: null,
+          reference: paid.reference ?? paid.orderNumber,
+          transactionId: paid.transactionId ?? null,
+          paymentMethod: receiptMethodLabel(paid.channel ?? null),
+          paidToEmail: paidToEmail ?? null,
+          status: "PAID",
+        });
+
         await this.notifications.send({
           template: NotificationTemplate.SHOP_ORDER_CONFIRMED,
           to: paid.customerEmail,
@@ -792,6 +1086,13 @@ export class OrderService extends Connection {
           studioId: paid.studioId,
           entityType: "Order",
           entityId: paid.id,
+          attachments: [
+            {
+              filename: pdf.filename,
+              content: pdf.base64,
+              contentType: "application/pdf",
+            },
+          ],
         });
       } catch (error) {
         console.error("Failed to send order receipt email:", error);
@@ -823,7 +1124,10 @@ export class OrderService extends Connection {
     // Dedup: once per (code, buyer email).
     try {
       await this.referralOrderReward.create({
-        data: { referralCodeId: referral.id, buyerEmail: buyerEmail.toLowerCase() },
+        data: {
+          referralCodeId: referral.id,
+          buyerEmail: buyerEmail.toLowerCase(),
+        },
       });
     } catch {
       return; // already rewarded for this buyer + code

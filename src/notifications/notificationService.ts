@@ -2,6 +2,7 @@ import { Connection } from "../db/dbConnection";
 import { emailQueue } from "../queue/queues";
 import { sendEmailNow } from "../email/emailService";
 import { NotificationTemplateKey } from "./registry";
+import type { EmailAttachment } from "../email/emailService";
 
 export interface SendNotificationArgs {
   template: NotificationTemplateKey;
@@ -16,6 +17,9 @@ export interface SendNotificationArgs {
   // resend of the same event a no-op instead of a duplicate email — see the
   // unique constraint on NotificationLog.
   entityId: string;
+  // Files to attach (a receipt PDF). Passed straight through to the transport,
+  // and persisted in the queue job when a queue is configured.
+  attachments?: EmailAttachment[];
 }
 
 /**
@@ -45,25 +49,49 @@ export class NotificationService extends Connection {
     if (existing) return; // already notified for this exact event — no-op
 
     const queued = Boolean(emailQueue);
-    const log = await this.notificationLog.create({
-      data: {
-        studioId: args.studioId ?? null,
-        template: args.template,
-        recipient: args.to,
-        entityType: args.entityType ?? null,
-        entityId: args.entityId,
-        status: "QUEUED",
-      },
-    });
+    let log: { id: string };
+    try {
+      log = await this.notificationLog.create({
+        data: {
+          studioId: args.studioId ?? null,
+          template: args.template,
+          recipient: args.to,
+          entityType: args.entityType ?? null,
+          entityId: args.entityId,
+          status: "QUEUED",
+        },
+        select: { id: true },
+      });
+    } catch (error) {
+      // A concurrent send for the same event won the unique constraint
+      // between the lookup above and this insert — it's sending, so this is
+      // the same no-op as finding it already logged.
+      if ((error as { code?: string }).code === "P2002") return;
+      throw error;
+    }
 
     try {
       if (emailQueue) {
-        await emailQueue.add("send", { to: args.to, subject: args.subject, html: args.html });
+        await emailQueue.add("send", {
+          to: args.to,
+          subject: args.subject,
+          html: args.html,
+          ...(args.attachments?.length
+            ? { attachments: args.attachments }
+            : {}),
+        });
         // Stays "QUEUED" — the worker does the actual send; we don't have a
         // "delivered" signal without Plunk webhooks (documented as a
         // follow-up in notifications/README.md).
       } else {
-        await sendEmailNow({ to: args.to, subject: args.subject, html: args.html });
+        await sendEmailNow({
+          to: args.to,
+          subject: args.subject,
+          html: args.html,
+          ...(args.attachments?.length
+            ? { attachments: args.attachments }
+            : {}),
+        });
         await this.notificationLog.update({
           where: { id: log.id },
           data: { status: "SENT", sentAt: new Date() },

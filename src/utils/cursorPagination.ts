@@ -44,7 +44,7 @@ export const cursorPageResult = <T extends { id: string }>(
     pagination: {
       limit: page.limit,
       hasMore,
-      nextCursor: hasMore ? data[data.length - 1]?.id ?? null : null,
+      nextCursor: hasMore ? (data[data.length - 1]?.id ?? null) : null,
     },
   };
 };

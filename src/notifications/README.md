@@ -23,7 +23,7 @@ So the architecture is:
 
 ## Architecture
 
-```
+```text
 notifications/
   types.ts        EmailBrand (studio | zuri), MoneyLine, branding shapes
   format.ts        ghs() — pre-format currency; the shell can't do math

@@ -1,9 +1,10 @@
-import { PrismaClient } from "../generated/prisma-client/client";
+import { createTenantClient } from "./tenantClient";
 
-// A dedicated raw client for looking up studios (Studio is not a scoped model,
-// so it needs no tenant context). Small in-memory cache keeps this off the hot
-// path — a slug is resolved to a studio at most once per TTL window.
-const client = new PrismaClient({} as never);
+// Studio lookups go through the shared raw client (Studio is not a scoped
+// model, so it needs no tenant context) — a second PrismaClient here would open
+// a second connection pool. Small in-memory cache keeps this off the hot path —
+// a slug is resolved to a studio at most once per TTL window.
+const { raw: client } = createTenantClient();
 
 export interface ResolvedStudio {
   id: string;
@@ -36,7 +37,10 @@ export const resolveStudioBySlug = async (
 export const forgetStudioSlug = (slug: string) => cache.delete(slug);
 
 // ---- Custom domain resolution (verified domains only) ----
-const domainCache = new Map<string, { value: ResolvedStudio | null; at: number }>();
+const domainCache = new Map<
+  string,
+  { value: ResolvedStudio | null; at: number }
+>();
 
 export const resolveStudioByDomain = async (
   host: string,

@@ -2,7 +2,11 @@ import { Connection } from "../db/dbConnection";
 import { ApiError } from "../middleware/apiError";
 import { CreateServiceInput, UpdateServiceInput } from "./serviceModels";
 import { S3BucketService } from "../bucket/s3BucketService";
-import { CursorPage, cursorPageArgs, cursorPageResult } from "../utils/cursorPagination";
+import {
+  CursorPage,
+  cursorPageArgs,
+  cursorPageResult,
+} from "../utils/cursorPagination";
 
 export class ServiceService extends Connection {
   private s3 = new S3BucketService();
@@ -18,8 +22,13 @@ export class ServiceService extends Connection {
       orderBy: [{ category: "asc" }, { name: "asc" }, { id: "asc" }],
       ...cursorPageArgs(page),
     });
-    services.forEach((item) => { item.imageUrl = this.s3.deliveryUrl(item.imageUrl); });
-    return { message: "Services retrieved successfully", ...cursorPageResult(services, page) };
+    services.forEach((item) => {
+      item.imageUrl = this.s3.deliveryUrl(item.imageUrl);
+    });
+    return {
+      message: "Services retrieved successfully",
+      ...cursorPageResult(services, page),
+    };
   }
 
   private async assertCategoryExists(slug: string) {
@@ -34,8 +43,13 @@ export class ServiceService extends Connection {
       orderBy: [{ category: "asc" }, { name: "asc" }, { id: "asc" }],
       ...cursorPageArgs(page),
     });
-    services.forEach((item) => { item.imageUrl = this.s3.deliveryUrl(item.imageUrl); });
-    return { message: "Services retrieved successfully", ...cursorPageResult(services, page) };
+    services.forEach((item) => {
+      item.imageUrl = this.s3.deliveryUrl(item.imageUrl);
+    });
+    return {
+      message: "Services retrieved successfully",
+      ...cursorPageResult(services, page),
+    };
   }
 
   public async getById(id: string) {
@@ -49,7 +63,9 @@ export class ServiceService extends Connection {
 
   public async create(data: CreateServiceInput) {
     await this.assertCategoryExists(data.category);
-    const imageUrl = data.imageUrl ? this.s3.assertOwnedMediaUrl(data.imageUrl, "services") : undefined;
+    const imageUrl = data.imageUrl
+      ? this.s3.assertOwnedMediaUrl(data.imageUrl, "services")
+      : undefined;
     const service = await this.service.create({
       data: {
         name: data.name,
@@ -74,7 +90,9 @@ export class ServiceService extends Connection {
     if (data.category !== undefined) {
       await this.assertCategoryExists(data.category);
     }
-    const imageUrl = data.imageUrl ? this.s3.assertOwnedMediaUrl(data.imageUrl, "services") : data.imageUrl;
+    const imageUrl = data.imageUrl
+      ? this.s3.assertOwnedMediaUrl(data.imageUrl, "services")
+      : data.imageUrl;
 
     const service = await this.service.update({
       where: { id },
@@ -85,7 +103,9 @@ export class ServiceService extends Connection {
           ? { description: data.description }
           : {}),
         ...(data.price !== undefined ? { price: data.price } : {}),
-        ...(data.promoPrice !== undefined ? { promoPrice: data.promoPrice } : {}),
+        ...(data.promoPrice !== undefined
+          ? { promoPrice: data.promoPrice }
+          : {}),
         ...(data.duration !== undefined ? { duration: data.duration } : {}),
         ...(data.popular !== undefined ? { popular: data.popular } : {}),
         ...(data.active !== undefined ? { active: data.active } : {}),

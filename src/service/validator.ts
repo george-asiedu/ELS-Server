@@ -23,7 +23,7 @@ const createServiceSchema: JSONSchemaType<CreateServiceInput> = {
   errorMessage: {
     properties: {
       name: "Name is required",
-      category: "Category must be NAILS or LASHES",
+      category: "Category is required",
       price: "Price must be a positive number",
       duration: "Duration is required",
     },

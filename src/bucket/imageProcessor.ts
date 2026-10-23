@@ -34,7 +34,12 @@ export const processImage = async (
   try {
     const image = sharp(file.buffer, { failOn: "error" });
     const metadata = await image.metadata();
-    if (!metadata.format || !["jpeg", "png", "webp", "gif", "avif", "jfif", "jpg", "pjpeg"].includes(metadata.format)) {
+    if (
+      !metadata.format ||
+      !["jpeg", "png", "webp", "gif", "avif", "jfif", "jpg", "pjpeg"].includes(
+        metadata.format,
+      )
+    ) {
       throw new ApiError("Unsupported image format", 400);
     }
     if (metadata.format === "gif") return file;

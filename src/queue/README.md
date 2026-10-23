@@ -1,86 +1,70 @@
-# Background jobs (BullMQ + Redis)
+# Background work
 
-Two things run through here:
+Two mechanisms, deliberately different:
 
-1. **Email sending** — every transactional email (booking confirmations, payment
-   receipts, order receipts, password resets) is queued instead of sent inline,
-   with automatic retries.
-2. **Payment reconciliation** — a job that runs every 15 minutes and catches
-   Paystack payments/orders that never got a final status because a webhook was
-   lost or the customer closed the tab before the client-side verify ran.
+1. **Email sending** goes through a BullMQ queue in Redis (this folder), so a
+   failed send is retried with backoff instead of lost.
+2. **Recurring jobs** (payment reconciliation, booking reminders,
+   subscription reminders) run from the database-backed scheduler in
+   `src/scheduler`. They use no Redis at all, and the super admin can switch
+   each one on or off, or run it now, from the platform console (Jobs).
 
-## Setup
+## Email queue setup
 
-Set `REDIS_URL` in `.env` (and on Render) to turn this on:
+Set `REDIS_URL` in `.env` (and on Render) to turn the queue on:
 
-```
+```sh
 REDIS_URL=redis://default:<password>@<host>:<port>
 ```
 
-Free options that work fine at this scale:
-- **Upstash** (upstash.com) — serverless Redis, generous free tier, gives you a
-  `rediss://...` URL directly.
-- **Render Key Value** — a managed Redis instance in the same region as the web
-  service (lowest latency); add it from the Render dashboard and copy its
-  internal connection string.
-
-**Nothing is required to keep working without Redis.** If `REDIS_URL` is unset:
-- Emails send synchronously inline, exactly like before this existed.
-- The reconciliation sweep simply doesn't run (the webhook + client-side verify
-  are still the primary paths — this is a safety net, not the only path to a
-  correct payment status).
-
+Without `REDIS_URL` emails send inline, exactly as before the queue existed.
 The app logs which mode it's in at boot.
 
-## How it's wired
+## What uses Redis, and how much
 
-- `connection.ts` — the shared ioredis connection, built lazily from `REDIS_URL`.
-- `queues.ts` — the two `Queue` instances (`email`, `reconcile-payments`), each
-  `null` when Redis isn't configured.
-- `workers/emailWorker.ts` / `workers/reconcileWorker.ts` — the job processors.
-- `index.ts` (`bootstrapQueues`) — called once from `app.ts` at boot: pings
-  Redis, starts both workers, and schedules the reconciliation job
-  (`upsertJobScheduler`, idempotent — safe to call on every deploy).
-- `queueStatus.ts` — read-only status for the super-admin console
-  (`GET /api/platform/queues`): job counts + the last few failures for each
-  queue, so a stuck email or a reconciliation error is visible without a full
-  dashboard.
+Hosted Redis (Upstash and similar) bills per command, so idle traffic matters
+as much as real traffic. Measured against a local Redis with no API traffic:
 
-Both queues currently run **in the same Node process as the API** — simplest
-option, and plenty for this scale (a handful of emails per booking/order, one
-sweep every 15 minutes). If email volume or the sweep ever needs to scale
-independently of the API, split it out:
+| Setup | Idle requests / minute | Per 30-day month |
+| --- | --- | --- |
+| Before: 4 BullMQ workers (email + 3 cron queues) | ~68 | ~2.9 million |
+| Now: email worker only | ~2.5 | ~110 thousand |
 
-```jsonc
-// package.json
-"worker": "ts-node src/queue/startStandalone.ts"
-```
+Why it was high: a queue with a recurring schedule always holds its next run
+as a delayed job, and BullMQ caps an idle worker's wait at 10 seconds while a
+delayed job exists. Each cron worker therefore polled ~6 times a minute (plus a
+script each time), and every worker also ran a stalled-job check every 30
+seconds. The email worker now waits up to 60s between polls (a new job wakes it
+immediately) and checks for stalled jobs every 5 minutes.
 
-```ts
-// src/queue/startStandalone.ts (not created yet — add when needed)
-import { bootstrapQueues } from "./index";
-bootstrapQueues();
-```
+What still costs Redis commands, roughly:
 
-...and deploy that as a separate Render **Background Worker** service pointed
-at the same `REDIS_URL` and `DATABASE_URL`. Remove the `bootstrapQueues()` call
-from `app.ts` at that point so jobs aren't processed in two places.
+- **Each queued email**: ~10–15 commands to add, process and complete it.
+- **Rate limits on sensitive routes** (login, signup, password recovery,
+  payments, orders, refunds): one command per request to those routes. The
+  general per-IP API limit is kept in process memory instead, since it runs on
+  every request.
+- **The platform console's email-queue panel**: a few commands per refresh.
 
-## Full dashboard (optional, not wired up)
+## Scheduler
 
-`bull-board` is already a dependency but isn't mounted — its current major
-version (v2) is deprecated and has known quirks hosting its router on a
-sub-path (like `/api/platform/queues`) behind a reverse proxy, which wasn't
-worth the risk for a first cut. The lightweight JSON status endpoint covers the
-"is something stuck?" question. If a full retry/inspect UI is wanted later,
-migrate to the maintained `@bull-board/express` + `@bull-board/api` packages
-instead of the installed `bull-board`.
+See `src/scheduler/jobs.ts` for the job list and schedules (UTC) and
+`src/scheduler/scheduler.ts` for how runs are claimed. Each job has a row in
+`scheduled_jobs`; a run is claimed with a conditional update on that row, so
+it runs once per slot even across several API instances.
 
-## Adding a new background job
+The scheduler runs when `SCHEDULER_ENABLED=true`, which is the default only in
+production — so a laptop pointed at a shared database doesn't start sending
+reminder emails.
 
-1. Add a `Queue<YourJobData>` in `queues.ts` (guarded by `isQueueEnabled()`,
-   same pattern as the two existing ones).
-2. Add a `workers/yourWorker.ts` that processes it.
-3. Start the worker in `bootstrapQueues()`.
-4. For a recurring job, call `queue.upsertJobScheduler(id, { pattern: cron },
-   { name, data })` — cron syntax, e.g. `"0 3 * * *"` for daily at 3am.
+### Adding a recurring job
+
+Add an entry to `JOBS` in `src/scheduler/jobs.ts` with a key, label,
+description, schedule (`periodMinutes` + `offsetMinutes`) and `run` function.
+Its row is created on the next boot; its first run is the next scheduled slot.
+
+## Splitting email work into its own process
+
+The email worker runs in the API process. If volume ever needs it, deploy a
+separate Render Background Worker that calls `bootstrapQueues()` with the same
+`REDIS_URL`/`DATABASE_URL`, and remove the call from `app.ts`.

@@ -30,6 +30,17 @@ export interface PaystackVerifyData {
   paid_at: string | null;
 }
 
+// POST /refund. Paystack queues the reversal and reports the outcome later via
+// the refund.processed / refund.failed webhook, so `status` here is the state
+// at creation time — usually "pending", never proof the money is back.
+export interface PaystackRefundData {
+  id: number;
+  status: string; // "pending" | "processed" | "failed"
+  amount: number; // pesewas actually being refunded
+  currency: string;
+  transaction: { id: number; reference: string };
+}
+
 // Mobile-money charge lifecycle status from POST /charge and /charge/submit_otp.
 export interface PaystackChargeData {
   status: string; // "send_otp" | "pay_offline" | "pending" | "success" | "failed" | "timeout"
@@ -45,12 +56,22 @@ export interface PaystackBank {
   type: string;
 }
 
+export interface PaystackSettlement {
+  id: number;
+  status: string; // "success" | "processing" | "pending" | "failed"
+  currency: string;
+  total_amount: number;
+  effective_amount?: number;
+  total_fees?: number;
+  settlement_date: string | null;
+  createdAt: string;
+}
+
 const authHeaders = () => ({
   Authorization: `Bearer ${env.paystack.secretKey}`,
   "Content-Type": "application/json",
 });
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 const call = async <T>(path: string, init?: RequestInit): Promise<T> => {
   const res = await fetch(`${PAYSTACK_BASE}${path}`, {
     ...init,
@@ -87,6 +108,28 @@ export const paystack = {
     return call<PaystackVerifyData>(
       `/transaction/verify/${encodeURIComponent(reference)}`,
     );
+  },
+
+  /**
+   * Reverse all or part of a settled transaction.
+   *
+   * `amountPesewas` omitted refunds the full amount. Paystack refuses an amount
+   * greater than what remains refundable, so an over-refund fails at their end
+   * as well as ours.
+   */
+  async refund(args: {
+    transactionReference: string;
+    amountPesewas?: number;
+    reason?: string;
+  }): Promise<PaystackRefundData> {
+    return call<PaystackRefundData>("/refund", {
+      method: "POST",
+      body: JSON.stringify({
+        transaction: args.transactionReference,
+        ...(args.amountPesewas ? { amount: args.amountPesewas } : {}),
+        ...(args.reason ? { merchant_note: args.reason } : {}),
+      }),
+    });
   },
 
   // Start a subscription payment: initializing a transaction with a `plan` code
@@ -146,12 +189,16 @@ export const paystack = {
     });
   },
 
-  async getSubscription(
-    code: string,
-  ): Promise<{ subscription_code: string; email_token: string; status: string }> {
-    return call<{ subscription_code: string; email_token: string; status: string }>(
-      `/subscription/${encodeURIComponent(code)}`,
-    );
+  async getSubscription(code: string): Promise<{
+    subscription_code: string;
+    email_token: string;
+    status: string;
+  }> {
+    return call<{
+      subscription_code: string;
+      email_token: string;
+      status: string;
+    }>(`/subscription/${encodeURIComponent(code)}`);
   },
 
   // Cancel a subscription (used when a studio switches plan/cadence).
@@ -168,9 +215,7 @@ export const paystack = {
   // ---- Subaccounts (per-studio split settlement) ----
 
   async listMobileMoneyBanks(): Promise<PaystackBank[]> {
-    return call<PaystackBank[]>(
-      "/bank?currency=GHS&type=mobile_money",
-    );
+    return call<PaystackBank[]>("/bank?currency=GHS&type=mobile_money");
   },
 
   // Regular banks for GHS settlement (excludes mobile money).
@@ -188,6 +233,20 @@ export const paystack = {
       `/bank/resolve?account_number=${encodeURIComponent(
         args.accountNumber,
       )}&bank_code=${encodeURIComponent(args.bankCode)}`,
+    );
+  },
+
+  /**
+   * Payouts Paystack has made (or is about to make) from a subaccount to the
+   * studio's own bank or Mobile Money account. Amounts are in pesewas, after
+   * Paystack's fees.
+   */
+  async listSettlements(
+    subaccount: string,
+    perPage = 50,
+  ): Promise<PaystackSettlement[]> {
+    return call<PaystackSettlement[]>(
+      `/settlement?subaccount=${encodeURIComponent(subaccount)}&perPage=${perPage}`,
     );
   },
 
@@ -230,9 +289,7 @@ export const paystack = {
           ...(args.settlementBank
             ? { settlement_bank: args.settlementBank }
             : {}),
-          ...(args.accountNumber
-            ? { account_number: args.accountNumber }
-            : {}),
+          ...(args.accountNumber ? { account_number: args.accountNumber } : {}),
           ...(args.percentageCharge !== undefined
             ? { percentage_charge: args.percentageCharge }
             : {}),

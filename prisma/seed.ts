@@ -7,11 +7,14 @@ const prisma = new PrismaClient();
 
 const ADMIN_EMAIL = process.env.SEED_ADMIN_EMAIL || "admin@elsbeauty.com";
 const ADMIN_PASSWORD = process.env.SEED_ADMIN_PASSWORD || "Admin@1234";
-const CUSTOMER_EMAIL = process.env.SEED_CUSTOMER_EMAIL || "customer@elsbeauty.com";
+const CUSTOMER_EMAIL =
+  process.env.SEED_CUSTOMER_EMAIL || "customer@elsbeauty.com";
 const CUSTOMER_PASSWORD = process.env.SEED_CUSTOMER_PASSWORD || "Customer@1234";
 // Platform super admin (operates the /platform console; has no studio).
-const SUPER_ADMIN_EMAIL = process.env.SEED_SUPER_ADMIN_EMAIL || "superadmin@elsbeauty.com";
-const SUPER_ADMIN_PASSWORD = process.env.SEED_SUPER_ADMIN_PASSWORD || "Super@1234";
+const SUPER_ADMIN_EMAIL =
+  process.env.SEED_SUPER_ADMIN_EMAIL || "superadmin@elsbeauty.com";
+const SUPER_ADMIN_PASSWORD =
+  process.env.SEED_SUPER_ADMIN_PASSWORD || "Super@1234";
 
 const STUDIO_SLUG = process.env.DEFAULT_STUDIO_SLUG || "els";
 const STUDIO_NAME = process.env.DEFAULT_STUDIO_NAME || "El's Beauty Studio";
@@ -39,29 +42,140 @@ async function ensureStudio(): Promise<string> {
     update: {},
     create: { studioId: studio.id, showTestimonials: true },
   });
-  console.log(`✔ Studio ready: ${STUDIO_NAME} (${STUDIO_SLUG}) -> ${studio.id}`);
+  console.log(
+    `✔ Studio ready: ${STUDIO_NAME} (${STUDIO_SLUG}) -> ${studio.id}`,
+  );
   return studio.id;
 }
 
 const services = [
   // Nails
-  { name: "Full Set Acrylics", category: "nails", description: "Full set of sculpted acrylic nails with your choice of shape and length", duration: "2 hrs", price: 65, popular: true },
-  { name: "Acrylic Fill", category: "nails", description: "Maintenance fill for existing acrylic nails", duration: "1.5 hrs", price: 45, popular: false },
-  { name: "Gel Manicure", category: "nails", description: "Long-lasting gel polish with nail shaping and cuticle care", duration: "1 hr", price: 40, popular: true },
-  { name: "Classic Manicure", category: "nails", description: "Traditional manicure with nail shaping, cuticle care, and polish", duration: "45 min", price: 25, popular: false },
-  { name: "Spa Pedicure", category: "nails", description: "Relaxing pedicure with exfoliation, massage, and polish", duration: "1 hr", price: 50, popular: false },
-  { name: "Nail Art Add-on", category: "nails", description: "Custom nail art designs (per nail)", duration: "15 min", price: 5, popular: false },
+  {
+    name: "Full Set Acrylics",
+    category: "nails",
+    description:
+      "Full set of sculpted acrylic nails with your choice of shape and length",
+    duration: "2 hrs",
+    price: 65,
+    popular: true,
+  },
+  {
+    name: "Acrylic Fill",
+    category: "nails",
+    description: "Maintenance fill for existing acrylic nails",
+    duration: "1.5 hrs",
+    price: 45,
+    popular: false,
+  },
+  {
+    name: "Gel Manicure",
+    category: "nails",
+    description: "Long-lasting gel polish with nail shaping and cuticle care",
+    duration: "1 hr",
+    price: 40,
+    popular: true,
+  },
+  {
+    name: "Classic Manicure",
+    category: "nails",
+    description:
+      "Traditional manicure with nail shaping, cuticle care, and polish",
+    duration: "45 min",
+    price: 25,
+    popular: false,
+  },
+  {
+    name: "Spa Pedicure",
+    category: "nails",
+    description: "Relaxing pedicure with exfoliation, massage, and polish",
+    duration: "1 hr",
+    price: 50,
+    popular: false,
+  },
+  {
+    name: "Nail Art Add-on",
+    category: "nails",
+    description: "Custom nail art designs (per nail)",
+    duration: "15 min",
+    price: 5,
+    popular: false,
+  },
   // Lashes
-  { name: "Classic Lash Set", category: "lashes", description: "Natural-looking lash extensions, one extension per natural lash", duration: "2 hrs", price: 120, popular: true },
-  { name: "Hybrid Lash Set", category: "lashes", description: "Mix of classic and volume lashes for a textured look", duration: "2.5 hrs", price: 150, popular: false },
-  { name: "Volume Lash Set", category: "lashes", description: "Multiple lightweight extensions per lash for dramatic fullness", duration: "3 hrs", price: 180, popular: true },
-  { name: "Lash Fill", category: "lashes", description: "Maintenance fill for existing lash extensions (2-3 weeks)", duration: "1 hr", price: 60, popular: false },
-  { name: "Lash Removal", category: "lashes", description: "Safe removal of existing lash extensions", duration: "30 min", price: 25, popular: false },
+  {
+    name: "Classic Lash Set",
+    category: "lashes",
+    description:
+      "Natural-looking lash extensions, one extension per natural lash",
+    duration: "2 hrs",
+    price: 120,
+    popular: true,
+  },
+  {
+    name: "Hybrid Lash Set",
+    category: "lashes",
+    description: "Mix of classic and volume lashes for a textured look",
+    duration: "2.5 hrs",
+    price: 150,
+    popular: false,
+  },
+  {
+    name: "Volume Lash Set",
+    category: "lashes",
+    description:
+      "Multiple lightweight extensions per lash for dramatic fullness",
+    duration: "3 hrs",
+    price: 180,
+    popular: true,
+  },
+  {
+    name: "Lash Fill",
+    category: "lashes",
+    description: "Maintenance fill for existing lash extensions (2-3 weeks)",
+    duration: "1 hr",
+    price: 60,
+    popular: false,
+  },
+  {
+    name: "Lash Removal",
+    category: "lashes",
+    description: "Safe removal of existing lash extensions",
+    duration: "30 min",
+    price: 25,
+    popular: false,
+  },
   // Hair
-  { name: "Silk Press", category: "hair", description: "Wash, blow-dry and silk press for a smooth, sleek finish", duration: "1.5 hrs", price: 70, popular: true },
-  { name: "Knotless Braids", category: "hair", description: "Protective knotless box braids in your choice of length", duration: "4 hrs", price: 160, popular: true },
-  { name: "Wig Install", category: "hair", description: "Custom lace wig install with styling and laid edges", duration: "2 hrs", price: 120, popular: false },
-  { name: "Wash & Style", category: "hair", description: "Cleansing shampoo, condition and blow-out with styling", duration: "1 hr", price: 55, popular: false },
+  {
+    name: "Silk Press",
+    category: "hair",
+    description: "Wash, blow-dry and silk press for a smooth, sleek finish",
+    duration: "1.5 hrs",
+    price: 70,
+    popular: true,
+  },
+  {
+    name: "Knotless Braids",
+    category: "hair",
+    description: "Protective knotless box braids in your choice of length",
+    duration: "4 hrs",
+    price: 160,
+    popular: true,
+  },
+  {
+    name: "Wig Install",
+    category: "hair",
+    description: "Custom lace wig install with styling and laid edges",
+    duration: "2 hrs",
+    price: 120,
+    popular: false,
+  },
+  {
+    name: "Wash & Style",
+    category: "hair",
+    description: "Cleansing shampoo, condition and blow-out with styling",
+    duration: "1 hr",
+    price: 55,
+    popular: false,
+  },
 ] as const;
 
 const businessHours = [
@@ -92,7 +206,13 @@ async function seedUser(
   await prisma.profile.upsert({
     where: { userId: user.id },
     update: {},
-    create: { studioId, userId: user.id, fullName, email, ...(phone ? { phone } : {}) },
+    create: {
+      studioId,
+      userId: user.id,
+      fullName,
+      email,
+      ...(phone ? { phone } : {}),
+    },
   });
   await prisma.loyaltyPoints.upsert({
     where: { userId: user.id },
@@ -134,7 +254,9 @@ async function seedCustomerActivity(studioId: string, customerId: string) {
       fullName: "Ama Customer",
       phone: "+233201112222",
       email: CUSTOMER_EMAIL,
-      appointmentDate: new Date(lastWeek.toISOString().slice(0, 10) + "T00:00:00.000Z"),
+      appointmentDate: new Date(
+        lastWeek.toISOString().slice(0, 10) + "T00:00:00.000Z",
+      ),
       appointmentTime: "10:00 AM",
       status: "COMPLETED",
       totalPrice: service.price,
@@ -160,7 +282,9 @@ async function seedCustomerActivity(studioId: string, customerId: string) {
     },
   });
 
-  console.log(`✔ Sample customer has 1 completed appointment and ${points} points.`);
+  console.log(
+    `✔ Sample customer has 1 completed appointment and ${points} points.`,
+  );
 }
 
 const categories = [
@@ -174,7 +298,13 @@ async function seedCategories(studioId: string) {
     await prisma.category.upsert({
       where: { studioId_slug: { studioId, slug: c.slug } },
       update: {},
-      create: { studioId, name: c.name, slug: c.slug, order: c.order, active: true },
+      create: {
+        studioId,
+        name: c.name,
+        slug: c.slug,
+        order: c.order,
+        active: true,
+      },
     });
   }
   console.log("✔ Categories ready (nails, lashes, hair).");
@@ -187,6 +317,7 @@ async function seedServices(studioId: string) {
     return;
   }
   await prisma.service.createMany({
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- the seed fixtures predate the studioId column's typing
     data: services.map((s) => ({ ...s, studioId })) as unknown as any[],
   });
   console.log(`✔ Seeded ${services.length} services (nails, lashes, hair).`);
@@ -214,10 +345,30 @@ async function seedReviews(studioId: string, customerId: string) {
   const byCategory = (c: string) => all.find((s) => s.category === c);
 
   const samples = [
-    { rating: 5, content: "Absolutely love my nails! El is so talented and always makes sure I leave feeling beautiful. The attention to detail is incredible.", category: "nails" },
-    { rating: 5, content: "Best lash extensions I have ever had! They look so natural and last for weeks. Highly recommend El's Beauty Studio!", category: "lashes" },
-    { rating: 5, content: "My silk press came out flawless and lasted for days. El really listens to what you want and delivers beyond expectations!", category: "hair" },
-    { rating: 4, content: "Great service and beautiful results. The booking process was easy and the studio has such a welcoming atmosphere.", category: "nails" },
+    {
+      rating: 5,
+      content:
+        "Absolutely love my nails! El is so talented and always makes sure I leave feeling beautiful. The attention to detail is incredible.",
+      category: "nails",
+    },
+    {
+      rating: 5,
+      content:
+        "Best lash extensions I have ever had! They look so natural and last for weeks. Highly recommend El's Beauty Studio!",
+      category: "lashes",
+    },
+    {
+      rating: 5,
+      content:
+        "My silk press came out flawless and lasted for days. El really listens to what you want and delivers beyond expectations!",
+      category: "hair",
+    },
+    {
+      rating: 4,
+      content:
+        "Great service and beautiful results. The booking process was easy and the studio has such a welcoming atmosphere.",
+      category: "nails",
+    },
   ];
 
   for (const s of samples) {
@@ -233,19 +384,27 @@ async function seedReviews(studioId: string, customerId: string) {
       },
     });
   }
-  console.log(`✔ Seeded ${samples.length} approved sample reviews (by the customer).`);
+  console.log(
+    `✔ Seeded ${samples.length} approved sample reviews (by the customer).`,
+  );
 }
 
 // The platform super admin has no studio, so it can't use the (studioId,email)
 // composite key — match on email + role instead. Idempotent.
 async function seedSuperAdmin() {
   const email = SUPER_ADMIN_EMAIL.toLowerCase();
-  const hashed = await bcrypt.hash(SUPER_ADMIN_PASSWORD, await bcrypt.genSalt(10));
+  const hashed = await bcrypt.hash(
+    SUPER_ADMIN_PASSWORD,
+    await bcrypt.genSalt(10),
+  );
   const existing = await prisma.user.findFirst({
     where: { email, role: "SUPER_ADMIN" },
   });
   if (existing) {
-    await prisma.user.update({ where: { id: existing.id }, data: { password: hashed } });
+    await prisma.user.update({
+      where: { id: existing.id },
+      data: { password: hashed },
+    });
     console.log(`• Super admin already present (${email}); password reset.`);
   } else {
     await prisma.user.create({
@@ -288,9 +447,15 @@ async function main() {
   await seedReviews(studioId, customer.id);
 
   console.log("\nDone. Accounts:");
-  console.log(`  SUPER ADMIN → ${SUPER_ADMIN_EMAIL} / ${SUPER_ADMIN_PASSWORD}  (/platform console)`);
-  console.log(`  ADMIN       → ${ADMIN_EMAIL} / ${ADMIN_PASSWORD}  (studio dashboard)`);
-  console.log(`  CUSTOMER    → ${CUSTOMER_EMAIL} / ${CUSTOMER_PASSWORD}  (booking + rewards)`);
+  console.log(
+    `  SUPER ADMIN → ${SUPER_ADMIN_EMAIL} / ${SUPER_ADMIN_PASSWORD}  (/platform console)`,
+  );
+  console.log(
+    `  ADMIN       → ${ADMIN_EMAIL} / ${ADMIN_PASSWORD}  (studio dashboard)`,
+  );
+  console.log(
+    `  CUSTOMER    → ${CUSTOMER_EMAIL} / ${CUSTOMER_PASSWORD}  (booking + rewards)`,
+  );
 }
 
 main()

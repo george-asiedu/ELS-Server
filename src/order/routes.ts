@@ -9,7 +9,12 @@ import {
 const router: Router = Router();
 
 // Customer
-router.post("/checkout", authenticate, requireCustomer, OrderController.checkout);
+router.post(
+  "/checkout",
+  authenticate,
+  requireCustomer,
+  OrderController.checkout,
+);
 router.post(
   "/booking-checkout",
   authenticate,

@@ -20,6 +20,15 @@ export const createEmailWorker = (): Worker<EmailJobData> => {
     {
       connection,
       concurrency: 5,
+      // An idle worker long-polls Redis for new jobs, and every poll is a
+      // billed command on hosted Redis. Adding a job wakes the poll at once,
+      // so waiting longer between polls costs nothing in delivery speed —
+      // it only cuts idle traffic (the default is 5s).
+      drainDelay: 60,
+      // How often to look for jobs whose worker died mid-send. Five minutes
+      // instead of the default 30s: a crashed send is retried a little later,
+      // and the idle worker makes a tenth of the requests.
+      stalledInterval: 5 * 60_000,
     },
   );
 
