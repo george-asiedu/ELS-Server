@@ -927,9 +927,7 @@ export class PlatformService extends Connection {
   }
 
   /**
-   * Public figures for the platform's landing page. A figure is left out
-   * (null) until it's big enough to be worth showing, so the page never
-   * advertises tiny numbers.
+   * Public figures for the platform's landing page (shown as they are).
    */
   public async getPublicStats() {
     const [studios, bookings, customers, pay] = await Promise.all([
@@ -943,10 +941,10 @@ export class PlatformService extends Connection {
     let processed = 0;
     for (const v of pay.total.values()) processed += v;
     return {
-      studiosLive: studios >= 5 ? studios : null,
-      bookingsMade: bookings >= 50 ? bookings : null,
-      customers: customers >= 50 ? customers : null,
-      paymentsProcessed: processed >= 1000 ? Math.round(processed) : null,
+      studiosLive: studios,
+      bookingsMade: bookings,
+      customers,
+      paymentsProcessed: Math.round(processed),
     };
   }
 
