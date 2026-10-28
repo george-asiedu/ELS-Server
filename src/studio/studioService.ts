@@ -23,6 +23,7 @@ import {
   subtractPeriod,
   isPlan,
 } from "../billing/billingPlans";
+import { isShopCategory } from "../billing/shopCategories";
 import {
   resolveStudioByDomain,
   forgetStudioDomain,
@@ -182,6 +183,9 @@ export class StudioService extends Connection {
     return {
       name: studio.name,
       slug: studio.slug,
+      // What the shop sells: picks the shop website's design.
+      shopCategory: studio.shopCategory ?? null,
+      plan: studio.plan,
       branding: {
         logoUrl: this.s3.deliveryUrl(studio.branding?.logoUrl ?? null) ?? null,
         primaryColor: studio.branding?.primaryColor ?? null,
@@ -868,7 +872,10 @@ export class StudioService extends Connection {
       update: {},
       create: { studioId: id },
     });
-    return { message: "Content retrieved", data: this.publicContent(content) };
+    return {
+      message: "Content retrieved",
+      data: await this.withShopCategory(id, content),
+    };
   }
 
   // ---- Public: the studio's numbers, for its website ---------------------
@@ -1247,6 +1254,7 @@ export class StudioService extends Connection {
       showTestimonials?: unknown;
       studioType?: unknown;
       siteTemplate?: unknown;
+      shopCategory?: unknown;
     },
   ) {
     const id = this.requireStudioId(studioId);
@@ -1304,6 +1312,17 @@ export class StudioService extends Connection {
     };
     if (input.studioType !== undefined)
       data.studioType = choice(input.studioType, STUDIO_TYPES, "studio type");
+    // What the shop sells lives on the studio itself (set at signup).
+    if (input.shopCategory !== undefined) {
+      const cat = input.shopCategory;
+      if (cat !== null && cat !== "" && !isShopCategory(cat)) {
+        throw new ApiError("Unknown shop category", HttpCode.BAD_REQUEST);
+      }
+      await this.studio.update({
+        where: { id },
+        data: { shopCategory: (cat as string | null) || null },
+      });
+    }
     if (input.siteTemplate !== undefined)
       data.siteTemplate = choice(
         input.siteTemplate,
@@ -1316,7 +1335,25 @@ export class StudioService extends Connection {
       update: data,
       create: { studioId: id, ...data },
     });
-    return { message: "Content updated", data: this.publicContent(content) };
+    return {
+      message: "Content updated",
+      data: await this.withShopCategory(id, content),
+    };
+  }
+
+  // The admin editor shows what the shop sells next to the content.
+  private async withShopCategory(
+    id: string,
+    content: Parameters<StudioService["publicContent"]>[0],
+  ) {
+    const studio = await this.studio.findUnique({
+      where: { id },
+      select: { shopCategory: true },
+    });
+    return {
+      ...this.publicContent(content),
+      shopCategory: studio?.shopCategory ?? null,
+    };
   }
 
   // Background sweep (see queue/workers/billingReminderWorker.ts, run on a
