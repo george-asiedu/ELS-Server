@@ -926,6 +926,30 @@ export class PlatformService extends Connection {
     };
   }
 
+  /**
+   * Public figures for the platform's landing page. A figure is left out
+   * (null) until it's big enough to be worth showing, so the page never
+   * advertises tiny numbers.
+   */
+  public async getPublicStats() {
+    const [studios, bookings, customers, pay] = await Promise.all([
+      this.studio.count({ where: { status: "ACTIVE" } }),
+      this.appointment.count({
+        where: { status: { in: ["CONFIRMED", "COMPLETED"] } },
+      }),
+      this.user.count({ where: { role: "CUSTOMER" } }),
+      this.customerPaymentsByStudio(),
+    ]);
+    let processed = 0;
+    for (const v of pay.total.values()) processed += v;
+    return {
+      studiosLive: studios >= 5 ? studios : null,
+      bookingsMade: bookings >= 50 ? bookings : null,
+      customers: customers >= 50 ? customers : null,
+      paymentsProcessed: processed >= 1000 ? Math.round(processed) : null,
+    };
+  }
+
   // Platform-wide figures for the super-admin dashboard. Two kinds of money,
   // kept apart because they're easy to confuse: what customers paid studios,
   // and what studios paid the platform.

@@ -8,6 +8,9 @@ const router: Router = Router();
 // Public: the current studio's branding/content/feature config for the SPA.
 router.get("/", StudioController.config);
 
+// Public: the studio's real numbers for its website's metrics strip.
+router.get("/stats", StudioController.getPublicStats);
+
 // Public: resolve a custom domain (host) to a studio slug (SPA bootstrap).
 router.get("/resolve-domain", StudioController.resolveDomain);
 

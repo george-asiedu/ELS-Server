@@ -135,6 +135,21 @@ const sanitizeFeatureCards = (value: unknown): FeatureCard[] | undefined => {
 export const isStudioBillingReference = (reference: string) =>
   reference.startsWith("ZURI-RENEW-") || reference.startsWith("ZURI-BILLING-");
 
+// Kinds of studio (the website's default wording) and website layouts.
+// Mirrored by the frontend's lib/studioTemplates.ts.
+export const STUDIO_TYPES = [
+  "hair",
+  "braids",
+  "nails",
+  "lashes-brows",
+  "makeup",
+  "skin-spa",
+  "barber",
+  "wellness",
+  "general",
+] as const;
+export const SITE_TEMPLATES = ["editorial", "bold", "minimal"] as const;
+
 export class StudioService extends Connection {
   private notifications = new NotificationService();
 
@@ -837,6 +852,12 @@ export class StudioService extends Connection {
       ...images,
       featureCards: content?.featureCards ?? null,
       showTestimonials: content?.showTestimonials ?? true,
+      studioType:
+        (content as { studioType?: string | null } | null | undefined)
+          ?.studioType ?? null,
+      siteTemplate:
+        (content as { siteTemplate?: string | null } | null | undefined)
+          ?.siteTemplate ?? null,
     };
   }
 
@@ -848,6 +869,46 @@ export class StudioService extends Connection {
       create: { studioId: id },
     });
     return { message: "Content retrieved", data: this.publicContent(content) };
+  }
+
+  // ---- Public: the studio's numbers, for its website ---------------------
+
+  /**
+   * Real figures for the website's metrics strip. A figure is only returned
+   * once it means something (a new studio doesn't advertise "0 clients"),
+   * so the strip shows what's true and hides what isn't there yet.
+   */
+  public async getPublicStats(studioId: string | null | undefined) {
+    const id = this.requireStudioId(studioId);
+    const [completed, clients, rating, services, studio] = await Promise.all([
+      this.appointment.count({ where: { status: "COMPLETED" } }),
+      this.appointment.groupBy({
+        by: ["phone"],
+        where: { status: { in: ["COMPLETED", "CONFIRMED"] } },
+      }),
+      this.review.aggregate({
+        where: { approved: true },
+        _avg: { rating: true },
+        _count: { _all: true },
+      }),
+      this.service.count({ where: { active: true } }),
+      this.studio.findUnique({ where: { id }, select: { createdAt: true } }),
+    ]);
+    const reviews = rating._count._all;
+    return {
+      message: "Studio stats",
+      data: {
+        appointmentsCompleted: completed >= 10 ? completed : null,
+        clientsServed: clients.length >= 10 ? clients.length : null,
+        averageRating:
+          reviews >= 3 && rating._avg.rating
+            ? Math.round(rating._avg.rating * 10) / 10
+            : null,
+        reviewCount: reviews >= 3 ? reviews : null,
+        servicesOffered: services || null,
+        onZuriSince: studio?.createdAt ?? null,
+      },
+    };
   }
 
   // ---- Admin: the studio's money ----------------------------------------
@@ -1184,6 +1245,8 @@ export class StudioService extends Connection {
     input: Partial<Record<ContentTextField | ContentImageField, unknown>> & {
       featureCards?: unknown;
       showTestimonials?: unknown;
+      studioType?: unknown;
+      siteTemplate?: unknown;
     },
   ) {
     const id = this.requireStudioId(studioId);
@@ -1193,6 +1256,8 @@ export class StudioService extends Connection {
     > & {
       featureCards?: FeatureCard[];
       showTestimonials?: boolean;
+      studioType?: string | null;
+      siteTemplate?: string | null;
     } = {};
 
     // Omitted = leave unchanged; blank = back to the default.
@@ -1228,6 +1293,23 @@ export class StudioService extends Connection {
 
     if (input.showTestimonials !== undefined)
       data.showTestimonials = Boolean(input.showTestimonials);
+
+    // Fixed choices; blank = back to the default.
+    const choice = (v: unknown, allowed: readonly string[], label: string) => {
+      if (v === null || v === "") return null;
+      if (typeof v !== "string" || !allowed.includes(v)) {
+        throw new ApiError(`Unknown ${label}`, HttpCode.BAD_REQUEST);
+      }
+      return v;
+    };
+    if (input.studioType !== undefined)
+      data.studioType = choice(input.studioType, STUDIO_TYPES, "studio type");
+    if (input.siteTemplate !== undefined)
+      data.siteTemplate = choice(
+        input.siteTemplate,
+        SITE_TEMPLATES,
+        "website design",
+      );
 
     const content = await this.studioContent.upsert({
       where: { studioId: id },

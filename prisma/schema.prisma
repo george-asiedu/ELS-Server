@@ -214,6 +214,11 @@ model StudioContent {
   ctaImageUrl      String?
   contactHeading   String?
   showTestimonials Boolean @default(true)
+  // What kind of studio (hair, nails, spa...): picks the website's default
+  // wording. Null = general beauty studio.
+  studioType       String?
+  // The website's layout: editorial, bold or minimal. Null = editorial.
+  siteTemplate     String?
 
   studio Studio @relation(fields: [studioId], references: [id], onDelete: Cascade)
 

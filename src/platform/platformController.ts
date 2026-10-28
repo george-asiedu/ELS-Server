@@ -74,6 +74,11 @@ export class PlatformController {
 
   // ---- Studios ----------------------------------------------------------
 
+  public static publicStats = async (_req: Request, res: Response) => {
+    const data = await platformService.getPublicStats();
+    return res.status(200).json({ message: "Platform stats", data });
+  };
+
   public static earnings = async (req: Request, res: Response) => {
     const str = (v: unknown) => (typeof v === "string" && v ? v : undefined);
     const date = (v: unknown) => {
