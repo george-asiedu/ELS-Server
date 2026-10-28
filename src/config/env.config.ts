@@ -123,6 +123,7 @@ export const env = {
       STANDARD_MONTHLY: Number(process.env.PLAN_STANDARD_MONTHLY) || 150,
       STANDARD_YEARLY: Number(process.env.PLAN_STANDARD_YEARLY) || 1500,
       PREMIUM_MONTHLY: Number(process.env.PLAN_PREMIUM_MONTHLY) || 350,
+      STOREFRONT_MONTHLY: Number(process.env.PLAN_STOREFRONT_MONTHLY) || 200,
       PREMIUM_YEARLY: Number(process.env.PLAN_PREMIUM_YEARLY) || 3500,
     },
   },

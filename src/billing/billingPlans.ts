@@ -1,4 +1,18 @@
-export type Plan = "STANDARD" | "PREMIUM";
+export type Plan = "STANDARD" | "PREMIUM" | "STOREFRONT";
+export const PLANS: Plan[] = ["STANDARD", "PREMIUM", "STOREFRONT"];
+export const isPlan = (v: unknown): v is Plan => PLANS.includes(v as Plan);
+
+/** Pick the value for a plan. */
+export const byPlan = <T>(plan: Plan, values: Record<Plan, T>): T =>
+  values[plan];
+
+/** "Standard", "Premium" or "Storefront". */
+export const planName = (plan: Plan | string): string =>
+  plan === "PREMIUM"
+    ? "Premium"
+    : plan === "STOREFRONT"
+      ? "Storefront"
+      : "Standard";
 export type Cadence = "MONTHLY" | "YEARLY";
 
 // Studio billing uses one-time Mobile Money charges per period rather than

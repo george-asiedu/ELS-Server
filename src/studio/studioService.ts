@@ -21,6 +21,7 @@ import {
   extendPeriod,
   isLapsed,
   subtractPeriod,
+  isPlan,
 } from "../billing/billingPlans";
 import {
   resolveStudioByDomain,
@@ -174,6 +175,7 @@ export class StudioService extends Connection {
       },
       content: this.publicContent(studio.content),
       settings: {
+        booking: studio.settings?.booking ?? true,
         commerce: studio.settings?.commerce ?? false,
         loyalty: studio.settings?.loyalty ?? true,
         referrals: studio.settings?.referrals ?? true,
@@ -474,7 +476,7 @@ export class StudioService extends Connection {
     cadence: string,
   ) {
     const id = this.requireStudioId(studioId);
-    if (!["STANDARD", "PREMIUM"].includes(plan)) {
+    if (!isPlan(plan)) {
       throw new ApiError("Invalid plan", HttpCode.BAD_REQUEST);
     }
     if (!["MONTHLY", "YEARLY"].includes(cadence)) {
@@ -485,6 +487,15 @@ export class StudioService extends Connection {
       select: { plan: true, billingCadence: true, billingMode: true },
     });
     if (!studio) throw new ApiError("Studio not found", HttpCode.NOT_FOUND);
+    // Zuri Storefront and the studio plans are different products: a
+    // storefront can change billing period, a studio can move between
+    // Standard and Premium, but neither crosses over.
+    if ((plan === "STOREFRONT") !== (studio.plan === "STOREFRONT")) {
+      throw new ApiError(
+        "Storefront and studio plans can't be switched between. Contact us if you need to.",
+        HttpCode.BAD_REQUEST,
+      );
+    }
     // A pay-as-you-earn studio may move to a recurring plan (this is the switch
     // itself, so any plan/cadence is allowed). The reverse isn't offered.
     if (
@@ -1265,7 +1276,12 @@ export class StudioService extends Connection {
         if (!owner?.email) continue;
 
         const lapsed = isLapsed(studio.currentPeriodEnd);
-        const planName = studio.plan === "PREMIUM" ? "Premium" : "Standard";
+        const planName =
+          studio.plan === "PREMIUM"
+            ? "Premium"
+            : studio.plan === "STOREFRONT"
+              ? "Storefront"
+              : "Standard";
         const periodKey = studio.currentPeriodEnd.toISOString().slice(0, 10);
 
         try {

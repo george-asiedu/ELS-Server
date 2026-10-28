@@ -59,25 +59,33 @@ Registry, copies `deploy/docker-compose.prod.yml` and `deploy/Caddyfile` to
 `/opt/zuri`, runs `prisma migrate deploy`, then restarts with the new image.
 If the migration fails, the old version keeps running.
 
-## 3. Before the first production release: migrations
+## 3. Database migrations
 
-Development has been using `prisma db push`, which doesn't write migration
-files, so `prisma/migrations` may not match `schema.prisma`. Production uses
-`prisma migrate deploy` (safe, reviewable). Once, on `develop`:
+Schema changes are tracked as Prisma migrations in `prisma/migrations`
+(checked: they match `schema.prisma` exactly). `prisma db push` is no longer
+used.
+
+- **Changing the schema:** edit `schema.prisma`, then `yarn migrate --name <change>`
+  (runs `prisma migrate dev`: writes the migration and applies it to your dev
+  database). Commit the migration folder with the code.
+- **Releases:** the production workflow runs `prisma migrate deploy`.
+- **Check:** `yarn migrate:status`.
+
+**One-time, for databases created with `db push`** (the current dev/test
+database): they have the tables but no record of the migrations. Mark the
+existing ones as applied (this changes no data), then apply the new ones:
 
 ```bash
-# Check whether migrations match the schema
-npx prisma migrate diff --from-migrations prisma/migrations --to-schema-datamodel prisma/schema.prisma --shadow-database-url "$SHADOW_DATABASE_URL"
-# If they don't, create one migration that catches up, review it, and commit it
-npx prisma migrate dev --name catch_up
+for m in 00000000000000_baseline 20260926175508_add_payment_attempts_and_ledger \
+  20260926202605_add_refunds_and_reschedule 20260926213011_add_pending_reschedule_and_notice \
+  20261007120000_add_scheduled_jobs 20261007130000_studio_landing_content \
+  20261008090000_subscription_setup_fee 20261008120000_plan_prices_site_settings_billing_charges; do
+  npx prisma migrate resolve --applied "$m"
+done
+yarn migrate:deploy   # applies 20261028120000_storefront_plan and anything newer
 ```
 
-From then on, change the schema with `prisma migrate dev --name <change>` and
-commit the migration with the code.
-
-For a brand-new production database, `migrate deploy` creates everything.
-If you copy data from the current database instead, mark the existing
-migrations as applied there first (`npx prisma migrate resolve --applied <name>`).
+A brand-new database (like production's) needs only `yarn migrate:deploy`.
 
 ## Rollback
 

@@ -85,9 +85,12 @@ enum PromoPlacement {
 }
 
 // Subscription plan a studio is on. Premium = Standard + the online shop.
+// STANDARD: booking. PREMIUM: booking + shop. STOREFRONT (Zuri Storefront):
+// a shop on its own, for any seller (not just beauty studios).
 enum StudioPlan {
   STANDARD
   PREMIUM
+  STOREFRONT
 }
 
 enum BillingCadence {
@@ -135,6 +138,9 @@ model Studio {
   // Percentage of each transaction the PLATFORM keeps (Paystack subaccount
   // percentage_charge). Set by the super admin; 0 = platform takes no cut.
   platformFeePercent     Float   @default(0)
+  // What a shop sells (clothing, food, perfume...), picked at signup. Chooses
+  // the shop website template. Null for booking-only studios.
+  shopCategory           String?
   // Mobile-money settlement account the subaccount pays out to (display only;
   // the authoritative copy lives on Paystack).
   // Settlement account type: "momo" (mobile money) or "bank".
@@ -222,6 +228,8 @@ model StudioContent {
 model StudioSettings {
   id                String  @id @default(cuid())
   studioId          String  @unique
+  // Appointment booking. Off for Zuri Storefront (shop-only) accounts.
+  booking           Boolean @default(true)
   commerce          Boolean @default(false)
   loyalty           Boolean @default(true)
   referrals         Boolean @default(true)
@@ -365,6 +373,7 @@ model StudioSignup {
   plan              StudioPlan     @default(STANDARD)
   cadence           BillingCadence @default(MONTHLY)
   billingMode       BillingMode    @default(SUBSCRIPTION)
+  shopCategory      String?
   reference         String         @unique
   status            SignupStatus   @default(PENDING)
   studioId          String?
@@ -473,10 +482,17 @@ model PlatformConfig {
 
   // Plan prices (GHS). Null = the built-in default (the PLAN_* env value,
   // else 150 / 1500 / 350 / 3500), so existing pricing holds until edited.
-  priceStandardMonthly Float?
-  priceStandardYearly  Float?
-  pricePremiumMonthly  Float?
-  pricePremiumYearly   Float?
+  priceStandardMonthly           Float?
+  priceStandardYearly            Float?
+  pricePremiumMonthly            Float?
+  pricePremiumYearly             Float?
+  // Zuri Storefront (shop only): price, signup setup fee, and the
+  // pay-as-you-earn commission and activation fee.
+  priceStorefrontMonthly         Float?
+  priceStorefrontYearly          Float?
+  subscriptionSetupFeeStorefront Float  @default(0)
+  commissionStorefrontPercent    Float  @default(5)
+  setupFeeStorefront             Float  @default(0)
 
   // Public site details shown on the platform pages. Null = the frontend's
   // built-in default.

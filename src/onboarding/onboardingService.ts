@@ -22,7 +22,10 @@ import {
   toPesewas,
   addPeriod,
   addMonths,
+  isPlan,
+  planName,
 } from "../billing/billingPlans";
+import { isShopCategory, type ShopCategory } from "../billing/shopCategories";
 import { NotificationService } from "../notifications/notificationService";
 import { buildReceiptPdf } from "../notifications/receiptPdf";
 import { ghs, receiptNumber } from "../notifications/format";
@@ -100,6 +103,7 @@ export class OnboardingService extends Connection {
     plan?: unknown;
     cadence?: unknown;
     billingMode?: unknown;
+    shopCategory?: unknown;
   }) {
     const name = String(input.name ?? "").trim();
     if (name.length < 2 || name.length > 60) {
@@ -124,7 +128,19 @@ export class OnboardingService extends Connection {
         HttpCode.BAD_REQUEST,
       );
     }
-    const plan: Plan = input.plan === "PREMIUM" ? "PREMIUM" : "STANDARD";
+    const plan: Plan = isPlan(input.plan) ? input.plan : "STANDARD";
+    // What the shop sells: required for Zuri Storefront, optional for
+    // Premium's shop, not used by booking-only Standard.
+    let shopCategory: ShopCategory | null = null;
+    if (plan !== "STANDARD") {
+      if (isShopCategory(input.shopCategory)) shopCategory = input.shopCategory;
+      else if (plan === "STOREFRONT") {
+        throw new ApiError(
+          "Tell us what you'll be selling",
+          HttpCode.BAD_REQUEST,
+        );
+      }
+    }
     const cadence: Cadence = input.cadence === "YEARLY" ? "YEARLY" : "MONTHLY";
 
     // Revenue-share is only selectable when the super admin has enabled it;
@@ -179,6 +195,7 @@ export class OnboardingService extends Connection {
         plan,
         cadence,
         billingMode,
+        ...(shopCategory ? { shopCategory } : {}),
         reference,
         status: "PENDING",
         // Recorded now, so finalize provisions exactly what was paid for even
@@ -291,6 +308,7 @@ export class OnboardingService extends Connection {
         plan,
         cadence,
         billingMode,
+        shopCategory: signup.shopCategory ?? null,
         // Revenue-share: platform takes the plan's commission per transaction and
         // there's no billing period. Subscription: 0% cut, a period is set.
         platformFeePercent: revenueShare ? commissionFor(plan, cfg) : 0,
@@ -344,7 +362,7 @@ export class OnboardingService extends Connection {
       const { subject, html } = studioCreated(platformBrand, {
         ownerFirstName: signup.ownerFullName?.split(" ")[0] || "there",
         studioName: studio.name,
-        planName: plan === "PREMIUM" ? "Premium" : "Standard",
+        planName: planName(plan),
         dashboardUrl: studioLink(studio.slug, "/admin/login"),
         storefrontUrl: websiteUrl,
       });
@@ -362,7 +380,7 @@ export class OnboardingService extends Connection {
                   : "Subscription receipt",
               receiptNumber: receiptNumber("RCP", studio.id),
               issuedAt: new Date(),
-              heading: `${plan === "PREMIUM" ? "Premium" : "Standard"} plan — ${studio.name}`,
+              heading: `${planName(plan)} plan — ${studio.name}`,
               lines: [
                 { label: "Studio", value: studio.name },
                 { label: "Account", value: signup.ownerEmail },

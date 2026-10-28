@@ -8,7 +8,9 @@
   "scripts": {
     "build:deploy": "yarn install --check-files --production=false && yarn prisma generate && yarn build",
     "generate": "prisma generate",
-    "push": "prisma db push",
+    "migrate": "prisma migrate dev",
+    "migrate:deploy": "prisma migrate deploy",
+    "migrate:status": "prisma migrate status",
     "build": "yarn generate && tsc",
     "dev": "nodemon --watch src --exec ts-node src/app.ts",
     "start": "node dist/app.js",
