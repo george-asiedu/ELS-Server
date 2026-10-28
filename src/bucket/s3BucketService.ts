@@ -6,6 +6,7 @@ import {
   CompleteMultipartUploadCommand,
   AbortMultipartUploadCommand,
   ListPartsCommand,
+  PutObjectCommand,
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { env } from "../config/env.config";
@@ -245,6 +246,28 @@ export class S3BucketService {
         UploadId: uploadId,
       }),
     );
+  }
+
+  /** Store an image the server made (e.g. the image maker) in the studio's media. */
+  public async putStudioImage(
+    body: Buffer,
+    category: string,
+    contentType = "image/webp",
+  ) {
+    const studioId = getTenantContext()?.studioId;
+    if (!studioId)
+      throw new ApiError("Studio context is required for media uploads", 400);
+    const key = `studios/${studioId}/${category}/${uuidv4()}.webp`;
+    await this.s3.send(
+      new PutObjectCommand({
+        Bucket: env.aws.s3BucketName,
+        Key: key,
+        Body: body,
+        ContentType: contentType,
+        CacheControl: "public, max-age=31536000, immutable",
+      }),
+    );
+    return this.publicUrl(key);
   }
 
   public assertOwnedMediaUrl(value: string, category: string) {

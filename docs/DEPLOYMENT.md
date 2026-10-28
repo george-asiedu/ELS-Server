@@ -36,7 +36,8 @@ mkdir -p /opt/zuri && chown deploy:deploy /opt/zuri
 - Create `/opt/zuri/.env` with the production values from `.env.example`
   (production `DATABASE_URL`, Paystack **live** keys, `ROOT_DOMAIN=zuristudios.com`,
   `CLIENT_URL=https://zuristudios.com`, AWS media bucket, Plunk, JWT secrets, and
-  so on). `PORT`, `REDIS_URL`, `SCHEDULER_ENABLED` and `TRUST_PROXY_HOPS` are
+  so on). Optional: `OPENAI_API_KEY` turns on the image maker in the studio admin
+  (`AI_IMAGES_PER_MONTH`, default 20 per studio). `PORT`, `REDIS_URL`, `SCHEDULER_ENABLED` and `TRUST_PROXY_HOPS` are
   set by the compose file. `chmod 600 /opt/zuri/.env`.
 - DNS: `api.zuristudios.com` → the VPS IP. Caddy gets the certificate on
   first start.
@@ -82,7 +83,7 @@ for m in 00000000000000_baseline 20260926175508_add_payment_attempts_and_ledger 
   20261008090000_subscription_setup_fee 20261008120000_plan_prices_site_settings_billing_charges; do
   npx prisma migrate resolve --applied "$m"
 done
-yarn migrate:deploy   # applies 20261028120000_storefront_plan and anything newer
+yarn migrate:deploy   # applies 20261028120000_storefront_plan and everything newer
 ```
 
 A brand-new database (like production's) needs only `yarn migrate:deploy`.

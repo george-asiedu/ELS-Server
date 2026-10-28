@@ -338,6 +338,9 @@ export class Connection {
   get studioContent() {
     return this.db.studioContent;
   }
+  get generatedImage() {
+    return this.db.generatedImage;
+  }
   get studioSettings() {
     return this.db.studioSettings;
   }

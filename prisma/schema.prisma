@@ -163,6 +163,7 @@ model Studio {
 
   branding        StudioBranding?
   content         StudioContent?
+  generatedImages GeneratedImage[]
   settings        StudioSettings?
   featureRequests FeatureRequest[]
 
@@ -1289,4 +1290,19 @@ model Refund {
   @@index([orderId])
   @@index([status, createdAt])
   @@map("refunds")
+}
+
+// Pictures a studio made with the image maker in its admin. Also counts
+// towards the monthly limit (env AI_IMAGES_PER_MONTH).
+model GeneratedImage {
+  id        String   @id @default(cuid())
+  studioId  String
+  studio    Studio   @relation(fields: [studioId], references: [id], onDelete: Cascade)
+  prompt    String
+  // hero | gallery | product | service: decides where the file is stored.
+  purpose   String
+  url       String
+  createdAt DateTime @default(now())
+
+  @@index([studioId, createdAt])
 }

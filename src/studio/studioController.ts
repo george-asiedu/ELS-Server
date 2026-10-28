@@ -3,9 +3,16 @@ import { StudioService } from "./studioService";
 import { S3BucketService } from "../bucket/s3BucketService";
 import { AuditService } from "../audit/auditService";
 import { ApiError } from "../middleware/apiError";
+import { ImageService } from "./imageService";
 
 const studioService = new StudioService(new S3BucketService());
 const audit = new AuditService();
+const imageService = new ImageService();
+
+const requireStudio = (id: string | null | undefined) => {
+  if (!id) throw new ApiError("Studio context missing", 404);
+  return id;
+};
 
 export class StudioController {
   // Public storefront config for the studio resolved by resolveTenant.
@@ -97,6 +104,19 @@ export class StudioController {
   public static getPublicStats = async (req: Request, res: Response) => {
     const result = await studioService.getPublicStats(req.studioId);
     return res.status(200).json(result);
+  };
+
+  public static listImages = async (req: Request, res: Response) => {
+    const result = await imageService.list(requireStudio(req.studioId));
+    return res.status(200).json(result);
+  };
+
+  public static generateImage = async (req: Request, res: Response) => {
+    const result = await imageService.generate(
+      requireStudio(req.studioId),
+      req.body ?? {},
+    );
+    return res.status(201).json(result);
   };
 
   public static getMoney = async (req: Request, res: Response) => {
