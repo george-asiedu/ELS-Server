@@ -16,7 +16,7 @@ const MUTED = "#7A6A6E"; // muted mauve-grey — secondary text
 const BORDER = "#EDE3E5";
 const IVORY = "#FBF6F3"; // outer background
 const CARD = "#FFFFFF";
-const EMPHASIS = "#C23B65"; // rose — highlighted totals in money tables
+const EMPHASIS = "#947400"; // Zuri yellow, darkened to read on white — highlighted totals
 
 // Escape any data we interpolate (customer names, notes, service names) —
 // this is our data, but some of it is free-text a customer typed, and we're
@@ -35,7 +35,7 @@ const brandName = (brand: EmailBrand) =>
 // The colour templates should use for CTA buttons/appointment-card accents:
 // the studio's own brand colour when set, else the Zuri cranberry pink.
 export const brandColor = (brand: EmailBrand): string =>
-  (brand.kind === "studio" && brand.studio.primaryColor) || "#C23B65";
+  (brand.kind === "studio" && brand.studio.primaryColor) || "#FBC500";
 // The Zuri mark, served from the public site's /public folder. Email clients
 // need an absolute URL, and PNG rather than SVG.
 const ZURI_LOGO_URL = "https://zuristudios.com/zuri-mark-square.png";
@@ -48,12 +48,25 @@ const brandSiteUrl = (brand: EmailBrand) =>
 // A bulletproof-enough CTA button: a table cell with background colour and
 // padding, degrading gracefully (square corners) on Outlook, which ignores
 // border-radius rather than breaking the layout.
+// Ink or white text, whichever reads better on the button colour.
+const textOn = (hex: string): string => {
+  const m = /^#?([0-9a-f]{6})$/i.exec(hex.trim());
+  if (!m) return "#ffffff";
+  const [r, g, b] = [0, 2, 4].map(
+    (i) => parseInt(m[1]!.slice(i, i + 2), 16) / 255,
+  );
+  const lin = (c: number) =>
+    c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+  const L = 0.2126 * lin(r!) + 0.7152 * lin(g!) + 0.0722 * lin(b!);
+  return (L + 0.05) / 0.0614 > 1.05 / (L + 0.05) ? "#101720" : "#ffffff";
+};
+
 export const button = (label: string, url: string, color: string): string => `
   <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin: 28px auto 0;">
     <tr>
       <td style="border-radius: 8px; background-color: ${color};">
         <a href="${esc(url)}" target="_blank"
-           style="display: inline-block; padding: 13px 32px; font-family: Arial, Helvetica, sans-serif; font-size: 15px; font-weight: 600; color: #ffffff; text-decoration: none; border-radius: 8px;">
+           style="display: inline-block; padding: 13px 32px; font-family: Arial, Helvetica, sans-serif; font-size: 15px; font-weight: 600; color: ${textOn(color)}; text-decoration: none; border-radius: 8px;">
           ${esc(label)}
         </a>
       </td>

@@ -1,7 +1,7 @@
 import { renderShell, button, esc } from "../design/shell";
 import { EmailBrand } from "../types";
 
-const ROSE = "#C23B65";
+const ROSE = "#FBC500";
 
 export const passwordResetRequested = (
   brand: EmailBrand,
@@ -91,7 +91,7 @@ export const customerWelcome = (
   const greeting = data.studioName
     ? `Welcome to ${esc(data.studioName)}`
     : "Welcome to Zuri Studios";
-  const color = brand.kind === "studio" ? "#C23B65" : ROSE;
+  const color = brand.kind === "studio" ? "#FBC500" : ROSE;
   return {
     subject: data.studioName
       ? `Welcome to ${data.studioName}, ${data.firstName}`

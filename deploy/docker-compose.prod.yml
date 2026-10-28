@@ -1,0 +1,43 @@
+# Production stack on the Contabo VPS. Lives at /opt/zuri on the server with a
+# .env next to it (see docs/DEPLOYMENT.md). The deploy workflow sets
+# API_IMAGE to the image it just pushed.
+services:
+  api:
+    image: ${API_IMAGE:-ghcr.io/OWNER/els-server:latest}
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      PORT: "5000"
+      REDIS_URL: redis://redis:6379
+      SCHEDULER_ENABLED: "true"
+      TRUST_PROXY_HOPS: "1"
+    depends_on:
+      - redis
+    expose:
+      - "5000"
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory-policy", "noeviction"]
+    volumes:
+      - redis-data:/data
+
+  # HTTPS for api.<domain>, certificates handled automatically.
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - api
+
+volumes:
+  redis-data:
+  caddy-data:
+  caddy-config:
