@@ -13,6 +13,7 @@ export class OrderController {
       deliveryPhone,
       applyPoints,
       referralCode,
+      couponCode,
     } = req.body ?? {};
     const result = await orderService.checkout(
       req.user.id,
@@ -21,6 +22,7 @@ export class OrderController {
         deliveryAddress,
         deliveryPhone,
         applyPoints: applyPoints === true || applyPoints === "true",
+        couponCode,
         referralCode,
       },
       req.headers.origin,
@@ -29,6 +31,15 @@ export class OrderController {
   };
 
   // Public — a guest buys one or more products without an account.
+  // Shows the discount before paying; checkout works it out again itself.
+  public static checkCoupon = async (req: Request, res: Response) => {
+    const data = await orderService.priceCoupon(
+      req.body?.code,
+      Number(req.body?.subtotal) || 0,
+    );
+    return res.status(200).json({ message: "Coupon applied", data });
+  };
+
   public static guestCheckout = async (req: Request, res: Response) => {
     const {
       items,
@@ -39,6 +50,7 @@ export class OrderController {
       deliveryAddress,
       deliveryPhone,
       referralCode,
+      couponCode,
     } = req.body ?? {};
     if (!Array.isArray(items) || items.length === 0) {
       throw new ApiError("At least one product is required", 400);
@@ -53,6 +65,7 @@ export class OrderController {
         deliveryAddress,
         deliveryPhone,
         referralCode,
+        couponCode,
       },
       req.headers.origin,
     );

@@ -1,6 +1,10 @@
 import { Router } from "express";
 import { ProductController } from "./productController";
-import { authenticate, requireAdmin } from "../middleware/auth";
+import {
+  authenticate,
+  requireAdmin,
+  requireCustomer,
+} from "../middleware/auth";
 
 const router: Router = Router();
 
@@ -12,6 +16,14 @@ router.get("/all", authenticate, requireAdmin, ProductController.listAll);
 router.post("/", authenticate, requireAdmin, ProductController.create);
 router.put("/:id", authenticate, requireAdmin, ProductController.update);
 router.delete("/:id", authenticate, requireAdmin, ProductController.remove);
+
+router.get("/:id/reviews", ProductController.listReviews);
+router.post(
+  "/:id/reviews",
+  authenticate,
+  requireCustomer,
+  ProductController.addReview,
+);
 
 // Public single (kept after /all so it doesn't shadow it)
 router.get("/:id", ProductController.getOne);

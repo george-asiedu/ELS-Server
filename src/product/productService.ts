@@ -19,12 +19,111 @@ export interface CreateProductInput {
   active?: boolean;
   popular?: boolean;
   imageUrl?: string | null;
+  images?: string[];
+  sizes?: string[];
+  colors?: string[];
 }
 
 export type UpdateProductInput = Partial<CreateProductInput>;
 
 export class ProductService extends Connection {
   private s3 = new S3BucketService();
+
+  // Display form of a product's photos, and its approved reviews' rating.
+  private async present<
+    T extends { id: string; imageUrl: string | null; images: string[] },
+  >(products: T[]) {
+    const stats = await this.review.groupBy({
+      by: ["productId"],
+      where: { productId: { in: products.map((p) => p.id) }, approved: true },
+      _avg: { rating: true },
+      _count: { _all: true },
+    });
+    const byId = new Map(stats.map((r) => [r.productId, r]));
+    return products.map((p) => {
+      const r = byId.get(p.id);
+      return {
+        ...p,
+        imageUrl: this.s3.deliveryUrl(p.imageUrl),
+        images: p.images.map((u) => this.s3.deliveryUrl(u) ?? u),
+        ratingAverage: r?._avg.rating ?? null,
+        ratingCount: r?._count._all ?? 0,
+      };
+    });
+  }
+
+  private cleanList(values: string[] | undefined) {
+    return values === undefined
+      ? undefined
+      : [...new Set(values.map((v) => String(v).trim()).filter(Boolean))].slice(
+          0,
+          30,
+        );
+  }
+
+  private options(data: UpdateProductInput) {
+    const sizes = this.cleanList(data.sizes);
+    const colors = this.cleanList(data.colors);
+    if (colors?.some((c) => !/^[^|]{1,40}\|#[0-9a-fA-F]{6}$/.test(c))) {
+      throw new ApiError("Each colour needs a name and a colour value", 400);
+    }
+    const images = this.cleanList(data.images)?.map((u) =>
+      this.s3.assertOwnedMediaUrl(u, "products"),
+    );
+    return {
+      ...(sizes ? { sizes } : {}),
+      ...(colors ? { colors } : {}),
+      ...(images ? { images: images.slice(0, 8) } : {}),
+    };
+  }
+
+  /** Approved reviews of one product, newest first. */
+  public async listReviews(productId: string) {
+    const data = await this.review.findMany({
+      where: { productId, approved: true },
+      orderBy: { createdAt: "desc" },
+      take: 20,
+      select: {
+        id: true,
+        rating: true,
+        content: true,
+        createdAt: true,
+        user: { select: { profile: { select: { fullName: true } } } },
+      },
+    });
+    return { message: "Reviews retrieved successfully", data };
+  }
+
+  /** Only someone who bought it can review it, once. Goes to the owner first. */
+  public async addReview(
+    userId: string,
+    productId: string,
+    rating: number,
+    content: unknown,
+  ) {
+    if (!Number.isInteger(rating) || rating < 1 || rating > 5) {
+      throw new ApiError("Choose a rating from 1 to 5 stars", 400);
+    }
+    const bought = await this.orderItem.findFirst({
+      where: {
+        productId,
+        order: { userId, status: { in: ["PAID", "FULFILLED"] } },
+      },
+      select: { id: true },
+    });
+    if (!bought) {
+      throw new ApiError("You can review products you've bought", 403);
+    }
+    if (await this.review.findFirst({ where: { userId, productId } })) {
+      throw new ApiError("You've already reviewed this product", 409);
+    }
+    const text =
+      typeof content === "string" ? content.trim().slice(0, 1000) : "";
+    await this.review.create({
+      data: { userId, productId, rating, ...(text ? { content: text } : {}) },
+    });
+    return { message: "Thanks! Your review will appear once it's approved." };
+  }
 
   private async assertCategoryExists(slug: string) {
     const category = await this.productCategory.findFirst({ where: { slug } });
@@ -45,12 +144,11 @@ export class ProductService extends Connection {
       orderBy: [{ category: "asc" }, { name: "asc" }, { id: "asc" }],
       ...cursorPageArgs(page),
     });
-    products.forEach((item) => {
-      item.imageUrl = this.s3.deliveryUrl(item.imageUrl);
-    });
+    const paged = cursorPageResult(products, page);
     return {
       message: "Products retrieved successfully",
-      ...cursorPageResult(products, page),
+      ...paged,
+      data: await this.present(paged.data),
     };
   }
 
@@ -59,20 +157,19 @@ export class ProductService extends Connection {
       orderBy: [{ category: "asc" }, { name: "asc" }, { id: "asc" }],
       ...cursorPageArgs(page),
     });
-    products.forEach((item) => {
-      item.imageUrl = this.s3.deliveryUrl(item.imageUrl);
-    });
+    const paged = cursorPageResult(products, page);
     return {
       message: "Products retrieved successfully",
-      ...cursorPageResult(products, page),
+      ...paged,
+      data: await this.present(paged.data),
     };
   }
 
   public async getById(id: string) {
     const product = await this.product.findUnique({ where: { id } });
     if (!product) throw new ApiError("Product not found", 404);
-    product.imageUrl = this.s3.deliveryUrl(product.imageUrl);
-    return { message: "Product retrieved successfully", data: product };
+    const [data] = await this.present([product]);
+    return { message: "Product retrieved successfully", data };
   }
 
   public async create(data: CreateProductInput) {
@@ -98,6 +195,7 @@ export class ProductService extends Connection {
         active: data.active ?? true,
         popular: data.popular ?? false,
         ...(imageUrl ? { imageUrl } : {}),
+        ...this.options(data),
       },
     });
     return { message: "Product created successfully", data: product };
@@ -134,6 +232,7 @@ export class ProductService extends Connection {
         ...(data.active !== undefined ? { active: data.active } : {}),
         ...(data.popular !== undefined ? { popular: data.popular } : {}),
         ...(imageUrl ? { imageUrl } : {}),
+        ...this.options(data),
       },
     });
     return { message: "Product updated successfully", data: product };

@@ -33,6 +33,8 @@ const SCOPED_MODELS = new Set<string>([
   "ReferralOrderReward",
   "CommerceSettings",
   "PromoBanner",
+  "WishlistItem",
+  "Coupon",
   "PaymentAttempt",
   "LedgerEntry",
   "Refund",

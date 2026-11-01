@@ -341,6 +341,12 @@ export class Connection {
   get emailVerification() {
     return this.db.emailVerification;
   }
+  get wishlistItem() {
+    return this.db.wishlistItem;
+  }
+  get coupon() {
+    return this.db.coupon;
+  }
   get generatedImage() {
     return this.db.generatedImage;
   }

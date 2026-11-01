@@ -1,3 +1,5 @@
+import wishlistRoutes from "../wishlist/routes";
+import couponRoutes from "../coupon/routes";
 import { Router } from "express";
 import authRoutes from "../auth/routes";
 import profileRoutes from "../profile/routes";
@@ -51,6 +53,8 @@ router.use("/refunds", refundRoutes);
 router.use("/products", productRoutes);
 router.use("/product-categories", productCategoryRoutes);
 router.use("/cart", cartRoutes);
+router.use("/wishlist", wishlistRoutes);
+router.use("/coupons", couponRoutes);
 router.use("/orders", orderRoutes);
 router.use("/commerce", commerceRoutes);
 router.use("/feature-requests", featureRequestRoutes);

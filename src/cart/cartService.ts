@@ -16,6 +16,8 @@ const itemsInclude = {
           trackStock: true,
           active: true,
           category: true,
+          sizes: true,
+          colors: true,
         },
       },
     },
@@ -43,25 +45,68 @@ export class CartService extends Connection {
     return { message: "Cart retrieved successfully", data: cart };
   }
 
-  public async addItem(userId: string, productId: string, quantity: number) {
+  /** Options must be ones the product offers, and required if it offers any. */
+  private assertOptions(
+    product: { sizes: string[]; colors: string[] },
+    size: string,
+    color: string,
+  ) {
+    if (product.sizes.length && !product.sizes.includes(size)) {
+      throw new ApiError("Please choose a size", 400);
+    }
+    if (!product.sizes.length && size) throw new ApiError("Invalid size", 400);
+    const names = product.colors.map((c) => c.split("|")[0]);
+    if (names.length && !names.includes(color)) {
+      throw new ApiError("Please choose a colour", 400);
+    }
+    if (!names.length && color) throw new ApiError("Invalid colour", 400);
+  }
+
+  // Stock is per product, so other options of it in the cart count too.
+  private async otherLinesQty(
+    cartId: string,
+    productId: string,
+    lineId?: string,
+  ) {
+    const lines = await this.cartItem.findMany({
+      where: { cartId, productId, ...(lineId ? { id: { not: lineId } } : {}) },
+      select: { quantity: true },
+    });
+    return lines.reduce((n, l) => n + l.quantity, 0);
+  }
+
+  public async addItem(
+    userId: string,
+    productId: string,
+    quantity: number,
+    size = "",
+    color = "",
+  ) {
     const qty = Math.max(1, Math.floor(quantity || 1));
     const product = await this.product.findUnique({ where: { id: productId } });
     if (!product || !product.active) {
       throw new ApiError("Product is not available", 404);
     }
-
-    const cart = await this.getOrCreate(userId);
-    const existingItem = await this.cartItem.findUnique({
-      where: { cartId_productId: { cartId: cart.id, productId } },
-    });
-    const desired = (existingItem?.quantity ?? 0) + qty;
-
-    // Respect available stock when the product tracks inventory.
-    const finalQty = product.trackStock
-      ? Math.min(desired, product.stock)
-      : desired;
+    this.assertOptions(product, size, color);
     if (product.trackStock && product.stock <= 0) {
       throw new ApiError("Product is out of stock", 400);
+    }
+
+    const cart = await this.getOrCreate(userId);
+    const existingItem = await this.cartItem.findFirst({
+      where: { cartId: cart.id, productId, size, color },
+    });
+    const others = await this.otherLinesQty(
+      cart.id,
+      productId,
+      existingItem?.id,
+    );
+    const desired = (existingItem?.quantity ?? 0) + qty;
+    const finalQty = product.trackStock
+      ? Math.min(desired, product.stock - others)
+      : desired;
+    if (finalQty <= 0) {
+      throw new ApiError("You already have all our stock in your bag", 400);
     }
 
     if (existingItem) {
@@ -71,16 +116,22 @@ export class CartService extends Connection {
       });
     } else {
       await this.cartItem.create({
-        data: { cartId: cart.id, productId, quantity: finalQty },
+        data: { cartId: cart.id, productId, quantity: finalQty, size, color },
       });
     }
     return this.getMine(userId);
   }
 
-  public async updateItem(userId: string, productId: string, quantity: number) {
+  public async updateItem(
+    userId: string,
+    productId: string,
+    quantity: number,
+    size = "",
+    color = "",
+  ) {
     const cart = await this.getOrCreate(userId);
-    const item = await this.cartItem.findUnique({
-      where: { cartId_productId: { cartId: cart.id, productId } },
+    const item = await this.cartItem.findFirst({
+      where: { cartId: cart.id, productId, size, color },
     });
     if (!item) throw new ApiError("Item not in cart", 404);
 
@@ -91,10 +142,10 @@ export class CartService extends Connection {
     }
 
     const product = await this.product.findUnique({ where: { id: productId } });
-    const finalQty =
-      product?.trackStock && product.stock >= 0
-        ? Math.min(qty, product.stock)
-        : qty;
+    const others = await this.otherLinesQty(cart.id, productId, item.id);
+    const finalQty = product?.trackStock
+      ? Math.max(1, Math.min(qty, product.stock - others))
+      : qty;
 
     await this.cartItem.update({
       where: { id: item.id },
@@ -103,9 +154,16 @@ export class CartService extends Connection {
     return this.getMine(userId);
   }
 
-  public async removeItem(userId: string, productId: string) {
+  public async removeItem(
+    userId: string,
+    productId: string,
+    size = "",
+    color = "",
+  ) {
     const cart = await this.getOrCreate(userId);
-    await this.cartItem.deleteMany({ where: { cartId: cart.id, productId } });
+    await this.cartItem.deleteMany({
+      where: { cartId: cart.id, productId, size, color },
+    });
     return this.getMine(userId);
   }
 

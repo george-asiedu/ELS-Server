@@ -28,6 +28,8 @@ type FulfillmentType = "PICKUP" | "DELIVERY";
 interface ItemSpec {
   productId: string;
   quantity: number;
+  size?: string;
+  color?: string;
 }
 
 interface LineItem {
@@ -36,6 +38,8 @@ interface LineItem {
   unitPrice: number;
   costPrice: number;
   quantity: number;
+  size?: string | undefined;
+  color?: string | undefined;
 }
 
 interface Contact {
@@ -50,6 +54,7 @@ export interface CheckoutInput {
   deliveryPhone?: string;
   applyPoints?: boolean;
   referralCode?: string;
+  couponCode?: string;
 }
 
 export interface GuestCheckoutInput {
@@ -61,6 +66,7 @@ export interface GuestCheckoutInput {
   deliveryAddress?: string;
   deliveryPhone?: string;
   referralCode?: string;
+  couponCode?: string;
 }
 
 const orderInclude = { items: true } as const;
@@ -101,20 +107,43 @@ export class OrderService extends Connection {
   }
 
   // Load products, validate availability, and snapshot pricing/cost.
-  private async resolveLineItems(specs: ItemSpec[]): Promise<LineItem[]> {
+  // Bookings add products without choosing options, so they skip that check.
+  private async resolveLineItems(
+    specs: ItemSpec[],
+    requireOptions = true,
+  ): Promise<LineItem[]> {
     if (!specs.length) throw new ApiError("No products selected", 400);
     const products = await this.product.findMany({
       where: { id: { in: specs.map((s) => s.productId) } },
     });
     const byId = new Map(products.map((p) => [p.id, p]));
     const items: LineItem[] = [];
+    // Stock is per product: lines for different options share it.
+    const wanted = new Map<string, number>();
     for (const spec of specs) {
       const qty = Math.max(1, Math.floor(spec.quantity || 1));
       const p = byId.get(spec.productId);
       if (!p || !p.active) {
         throw new ApiError("A selected product is no longer available", 400);
       }
-      if (p.trackStock && qty > p.stock) {
+      const size = spec.size || undefined;
+      const color = spec.color || undefined;
+      const colorNames = p.colors.map((c) => c.split("|")[0]);
+      if (size && !p.sizes.includes(size)) {
+        throw new ApiError(`"${size}" isn't a size of "${p.name}"`, 400);
+      }
+      if (color && !colorNames.includes(color)) {
+        throw new ApiError(`"${color}" isn't a colour of "${p.name}"`, 400);
+      }
+      if (requireOptions && p.sizes.length && !size) {
+        throw new ApiError(`Choose a size for "${p.name}"`, 400);
+      }
+      if (requireOptions && colorNames.length && !color) {
+        throw new ApiError(`Choose a colour for "${p.name}"`, 400);
+      }
+      const total = (wanted.get(p.id) ?? 0) + qty;
+      wanted.set(p.id, total);
+      if (p.trackStock && total > p.stock) {
         throw new ApiError(`Only ${p.stock} of "${p.name}" left in stock`, 400);
       }
       items.push({
@@ -123,6 +152,8 @@ export class OrderService extends Connection {
         unitPrice: effectivePrice(p),
         costPrice: p.costPrice ?? 0,
         quantity: qty,
+        size,
+        color,
       });
     }
     return items;
@@ -137,6 +168,7 @@ export class OrderService extends Connection {
     deliveryAddress?: string | undefined;
     deliveryPhone?: string | undefined;
     referralCode?: string | undefined;
+    couponCode?: string | undefined;
     applyPoints?: boolean | undefined;
     appointmentId?: string | undefined;
     callbackPath: string;
@@ -188,6 +220,15 @@ export class OrderService extends Connection {
       }
     }
 
+    // A coupon comes off what's left after points, and only off products.
+    const coupon = params.couponCode
+      ? await this.priceCoupon(params.couponCode, subtotal)
+      : null;
+    const couponDiscount = coupon
+      ? Math.min(coupon.discount, subtotal - discountAmount)
+      : 0;
+    discountAmount = Math.round((discountAmount + couponDiscount) * 100) / 100;
+
     const deliveryFee = fulfillment === "DELIVERY" ? settings.deliveryFee : 0;
     const total =
       Math.round((subtotal - discountAmount + deliveryFee) * 100) / 100;
@@ -216,6 +257,7 @@ export class OrderService extends Connection {
         deliveryPhone:
           fulfillment === "DELIVERY" ? params.deliveryPhone!.trim() : null,
         referralCode: params.referralCode?.trim() || null,
+        ...(coupon ? { couponCode: coupon.code, couponDiscount } : {}),
         ...(params.appointmentId
           ? { appointmentId: params.appointmentId }
           : {}),
@@ -227,6 +269,8 @@ export class OrderService extends Connection {
             unitPrice: li.unitPrice,
             costPrice: li.costPrice,
             quantity: li.quantity,
+            size: li.size ?? null,
+            color: li.color ?? null,
           })),
         },
       },
@@ -283,6 +327,38 @@ export class OrderService extends Connection {
     };
   }
 
+  /** Check a coupon against a subtotal. Throws why it can't be used. */
+  public async priceCoupon(rawCode: string, subtotal: number) {
+    const code = String(rawCode ?? "")
+      .trim()
+      .toUpperCase();
+    const coupon = code
+      ? await this.coupon.findFirst({ where: { code } })
+      : null;
+    if (
+      !coupon ||
+      !coupon.active ||
+      (coupon.expiresAt && coupon.expiresAt < new Date()) ||
+      (coupon.maxUses !== null && coupon.usedCount >= coupon.maxUses)
+    ) {
+      throw new ApiError("That code isn't valid", 400);
+    }
+    if (subtotal < coupon.minSubtotal) {
+      throw new ApiError(
+        `This code needs an order of at least GHS ${coupon.minSubtotal}`,
+        400,
+      );
+    }
+    const raw =
+      coupon.type === "PERCENT"
+        ? (subtotal * coupon.value) / 100
+        : coupon.value;
+    return {
+      code: coupon.code,
+      discount: Math.round(Math.min(raw, subtotal) * 100) / 100,
+    };
+  }
+
   // Logged-in customer checkout from their saved cart.
   public async checkout(userId: string, input: CheckoutInput, origin?: string) {
     const cart = await this.cart.findUnique({
@@ -293,7 +369,12 @@ export class OrderService extends Connection {
       throw new ApiError("Your cart is empty", 400);
     }
     const lineItems = await this.resolveLineItems(
-      cart.items.map((i) => ({ productId: i.productId, quantity: i.quantity })),
+      cart.items.map((i) => ({
+        productId: i.productId,
+        quantity: i.quantity,
+        size: i.size,
+        color: i.color,
+      })),
     );
     const email = await this.userEmail(userId);
     if (!email) throw new ApiError("An email is required to check out", 400);
@@ -311,6 +392,7 @@ export class OrderService extends Connection {
       fulfillment: input.fulfillment,
       deliveryAddress: input.deliveryAddress,
       deliveryPhone: input.deliveryPhone,
+      couponCode: input.couponCode,
       referralCode: input.referralCode,
       applyPoints: input.applyPoints,
       callbackPath: "/order/callback",
@@ -335,6 +417,7 @@ export class OrderService extends Connection {
       deliveryAddress: input.deliveryAddress,
       deliveryPhone: input.deliveryPhone,
       referralCode: input.referralCode,
+      couponCode: input.couponCode,
       callbackPath: "/order/callback",
       origin,
     });
@@ -371,7 +454,7 @@ export class OrderService extends Connection {
       throw new ApiError("The shop is currently unavailable", 400);
     }
 
-    const lineItems = await this.resolveLineItems(input.items);
+    const lineItems = await this.resolveLineItems(input.items, false);
     const productSubtotal =
       Math.round(
         lineItems.reduce((s, li) => s + li.unitPrice * li.quantity, 0) * 100,
@@ -879,6 +962,12 @@ export class OrderService extends Connection {
           },
         });
         if (claim.count === 0) return 0;
+        if (order.couponCode) {
+          await tx.coupon.updateMany({
+            where: { code: order.couponCode },
+            data: { usedCount: { increment: 1 } },
+          });
+        }
         const items = await tx.orderItem.findMany({
           where: { orderId: order.id },
         });

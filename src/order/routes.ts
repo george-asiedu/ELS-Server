@@ -8,6 +8,8 @@ import {
 
 const router: Router = Router();
 
+router.post("/coupon", OrderController.checkCoupon);
+
 // Customer
 router.post(
   "/checkout",
