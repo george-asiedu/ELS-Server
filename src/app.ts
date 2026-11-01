@@ -218,6 +218,7 @@ app.use("/api/studio/billing", sensitiveActionLimiter);
 app.use("/api/studio/images", sensitiveActionLimiter);
 app.use("/api/platform/auth", sensitiveActionLimiter);
 app.use("/api/auth/signup", accountCreationLimiter);
+app.use("/api/onboarding/email-code", recoveryLimiter);
 app.use("/api/auth/forgot-password", recoveryLimiter);
 app.use("/api/auth/reset-password", recoveryLimiter);
 app.use("/api/platform/auth/forgot-password", recoveryLimiter);

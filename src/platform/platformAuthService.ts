@@ -8,10 +8,18 @@ import {
   revokeLoginSessions,
 } from "../auth/sessionService";
 import { LoginDeviceMetadata } from "../auth/loginDevice";
+import {
+  assertNotLocked,
+  clearLoginFailures,
+  lockoutKey,
+  recordLoginFailure,
+  unknownUserHash,
+} from "../auth/loginLockout";
 import { env } from "../config/env.config";
 import { NotificationService } from "../notifications/notificationService";
 import { NotificationTemplate } from "../notifications/registry";
 import {
+  accountLocked,
   loginAlert,
   passwordResetRequested,
 } from "../notifications/templates/auth";
@@ -33,19 +41,49 @@ export class PlatformAuthService extends Connection {
     const normalized = String(email ?? "")
       .trim()
       .toLowerCase();
+    const lockKey = lockoutKey(null, normalized);
+    await assertNotLocked(lockKey);
+
     // Scope strictly to super admins so a studio user with the same email can
     // never authenticate against the platform surface.
     const user = await this.user.findFirst({
       where: { email: normalized, role: "SUPER_ADMIN" },
     });
-    if (!user) {
+    const valid = await verifyPassword(
+      password,
+      user?.password ?? (await unknownUserHash()),
+    );
+    if (!user || !valid) {
+      const lock = await recordLoginFailure(lockKey);
+      if (lock) {
+        if (user && lock.first) {
+          // Not awaited, so a real account takes no longer than an unknown one.
+          const { subject, html } = accountLocked(platformBrand, {
+            lockedFor:
+              lock.minutes >= 60
+                ? `${lock.minutes / 60} hours`
+                : `${lock.minutes} minutes`,
+            recoveryUrl: `${env.clientUrl}/platform/forgot-password`,
+          });
+          void notifications
+            .send({
+              template: NotificationTemplate.AUTH_ACCOUNT_LOCKED,
+              to: user.email,
+              subject,
+              html,
+              studioId: null,
+              entityType: "User",
+              entityId: `${user.id}:${Date.now()}`,
+            })
+            .catch((error) =>
+              console.error("Failed to send account-locked email:", error),
+            );
+        }
+        throw lock.error;
+      }
       throw new ApiError("Invalid email or password", HttpCode.BAD_REQUEST);
     }
-
-    const valid = await verifyPassword(password, user.password);
-    if (!valid) {
-      throw new ApiError("Invalid email or password", HttpCode.BAD_REQUEST);
-    }
+    await clearLoginFailures(lockKey);
 
     const { token, isNewDevice, deviceKey } = await createLoginSession(
       {
@@ -105,6 +143,7 @@ export class PlatformAuthService extends Connection {
     const resetToken = randomBytes(32).toString("hex");
     const hashedToken = createHash("sha256").update(resetToken).digest("hex");
     const expiry = new Date(Date.now() + 60 * 60 * 1000);
+    await clearLoginFailures(lockoutKey(null, user.email));
     await this.user.update({
       where: { id: user.id },
       data: { resetToken: hashedToken, resetTokenExpiry: expiry },

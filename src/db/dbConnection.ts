@@ -338,6 +338,9 @@ export class Connection {
   get studioContent() {
     return this.db.studioContent;
   }
+  get emailVerification() {
+    return this.db.emailVerification;
+  }
   get generatedImage() {
     return this.db.generatedImage;
   }

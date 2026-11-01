@@ -1,3 +1,5 @@
+import { createHmac, randomInt, timingSafeEqual } from "crypto";
+import jwt from "jsonwebtoken";
 import { shortId } from "../utils/shortId";
 import { studioLink } from "../utils/studioLink";
 import { Connection } from "../db/dbConnection";
@@ -31,10 +33,15 @@ import { buildReceiptPdf } from "../notifications/receiptPdf";
 import { ghs, receiptNumber } from "../notifications/format";
 import { NotificationTemplate } from "../notifications/registry";
 import { studioCreated } from "../notifications/templates/studio";
+import { emailVerificationCode } from "../notifications/templates/auth";
 import { platformBrand } from "../notifications/brand";
 
 type BillingMode = "SUBSCRIPTION" | "REVENUE_SHARE";
 
+const EMAIL_CODE_MINUTES = 15;
+const EMAIL_CODE_MAX_ATTEMPTS = 5;
+const EMAIL_CODE_RESEND_MS = 60_000;
+const EMAIL_PROOF_PURPOSE = "signup-email";
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 // Min 8 chars with an uppercase, lowercase, number, and special character —
 // matches the login/signup validators so a new owner can sign in right after.
@@ -94,7 +101,117 @@ export class OnboardingService extends Connection {
     return { message: "Onboarding config", data: cfg };
   }
 
+  private codeHash(email: string, code: string) {
+    return createHmac("sha256", env.JWT_SECRET)
+      .update(`${email}:${code}`)
+      .digest("hex");
+  }
+
+  /** Email a 6-digit code. Says the same thing whether the email is in use. */
+  public async sendEmailCode(rawEmail: unknown) {
+    const email = String(rawEmail ?? "")
+      .trim()
+      .toLowerCase();
+    if (!EMAIL_RE.test(email)) {
+      throw new ApiError("A valid email is required", HttpCode.BAD_REQUEST);
+    }
+    const now = new Date();
+    const existing = await this.emailVerification.findUnique({
+      where: { email },
+    });
+    if (
+      existing &&
+      now.getTime() - existing.sentAt.getTime() < EMAIL_CODE_RESEND_MS
+    ) {
+      throw new ApiError(
+        "We just sent a code. Please wait a minute before asking for another.",
+        HttpCode.TOO_MANY_REQUESTS,
+      );
+    }
+    const code = String(randomInt(100000, 1000000));
+    const row = {
+      codeHash: this.codeHash(email, code),
+      attempts: 0,
+      sentAt: now,
+      expiresAt: new Date(now.getTime() + EMAIL_CODE_MINUTES * 60_000),
+    };
+    await this.emailVerification.upsert({
+      where: { email },
+      create: { email, ...row },
+      update: row,
+    });
+    const { subject, html } = emailVerificationCode(platformBrand, {
+      code,
+      expiresInMinutes: EMAIL_CODE_MINUTES,
+    });
+    await this.notifications.send({
+      template: NotificationTemplate.AUTH_EMAIL_VERIFICATION,
+      to: email,
+      subject,
+      html,
+      studioId: null,
+      entityType: "EmailVerification",
+      entityId: `${email}:${now.getTime()}`,
+    });
+    return { message: "Code sent", data: { email } };
+  }
+
+  /** Check a code. A match returns a short-lived proof that start() requires. */
+  public async confirmEmailCode(rawEmail: unknown, rawCode: unknown) {
+    const email = String(rawEmail ?? "")
+      .trim()
+      .toLowerCase();
+    const code = String(rawCode ?? "").trim();
+    const wrong = new ApiError(
+      "That code isn't right or has expired. Check it, or ask for a new one.",
+      HttpCode.BAD_REQUEST,
+    );
+    // The count is taken first and atomically, so parallel guesses can't
+    // squeeze past the limit.
+    const counted = await this.emailVerification.updateMany({
+      where: {
+        email,
+        attempts: { lt: EMAIL_CODE_MAX_ATTEMPTS },
+        expiresAt: { gt: new Date() },
+      },
+      data: { attempts: { increment: 1 } },
+    });
+    if (!counted.count) throw wrong;
+    const row = await this.emailVerification.findUnique({ where: { email } });
+    const given = Buffer.from(this.codeHash(email, code));
+    const stored = Buffer.from(row?.codeHash ?? "");
+    if (given.length !== stored.length || !timingSafeEqual(given, stored)) {
+      throw wrong;
+    }
+    await this.emailVerification.delete({ where: { email } });
+    return {
+      message: "Email confirmed",
+      data: {
+        emailToken: jwt.sign(
+          { purpose: EMAIL_PROOF_PURPOSE, email },
+          env.JWT_SECRET,
+          { expiresIn: "1h" },
+        ),
+      },
+    };
+  }
+
+  private assertEmailProof(token: unknown, email: string) {
+    try {
+      const proof = jwt.verify(String(token ?? ""), env.JWT_SECRET) as {
+        purpose?: string;
+        email?: string;
+      };
+      if (proof.purpose === EMAIL_PROOF_PURPOSE && proof.email === email)
+        return;
+    } catch {
+      /* Falls through to the same error as a mismatch. */
+    }
+    throw new ApiError("Please confirm your email first", HttpCode.BAD_REQUEST);
+  }
+
   public async start(input: {
+    emailToken?: unknown;
     name?: unknown;
     slug?: unknown;
     ownerEmail?: unknown;
@@ -119,6 +236,7 @@ export class OnboardingService extends Connection {
     if (!EMAIL_RE.test(ownerEmail)) {
       throw new ApiError("A valid email is required", HttpCode.BAD_REQUEST);
     }
+    this.assertEmailProof(input.emailToken, ownerEmail);
     const ownerPassword = String(input.ownerPassword ?? "");
     // Enforce the SAME rules the login/signup validators use, so an owner can
     // actually sign in afterwards with the password they set here.

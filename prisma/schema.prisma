@@ -1306,3 +1306,25 @@ model GeneratedImage {
 
   @@index([studioId, createdAt])
 }
+
+// Wrong-password tracking for login lockouts (auth/loginLockout). Keyed by a
+// hash of studio + email, so unknown emails behave the same as real ones.
+model LoginLockout {
+  key          String    @id
+  failedCount  Int       @default(0)
+  lockCount    Int       @default(0)
+  lockedUntil  DateTime?
+  lastFailedAt DateTime  @default(now())
+
+  @@index([lastFailedAt])
+}
+
+// A signup's email code, proving the owner controls the address before they
+// pay. The code is stored hashed and the row is removed once it's used.
+model EmailVerification {
+  email     String   @id
+  codeHash  String
+  attempts  Int      @default(0)
+  sentAt    DateTime
+  expiresAt DateTime
+}

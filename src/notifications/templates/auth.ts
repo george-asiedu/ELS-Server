@@ -49,6 +49,46 @@ export const passwordChanged = (
   };
 };
 
+export const accountLocked = (
+  brand: EmailBrand,
+  data: { lockedFor: string; recoveryUrl: string },
+) => ({
+  subject: "Sign-in to your account has been paused",
+  html: renderShell({
+    brand,
+    previewText: `Too many wrong passwords. Sign-in is locked for ${data.lockedFor}.`,
+    bodyHtml: `
+        <h1 style="margin: 0 0 12px; font-family: Georgia, serif; font-size: 22px; color: #2A1B1F;">Sign-in paused</h1>
+        <p style="margin: 0 0 16px; font-family: Arial, sans-serif; font-size: 15px; color: #2A1B1F; line-height: 1.6;">
+          Someone entered the wrong password for your account 3 times, so we've locked sign-in for ${esc(data.lockedFor)}. You can try again after that.
+        </p>
+        ${button("Reset your password", data.recoveryUrl, ROSE)}
+        <p class="muted" style="margin: 20px 0 0; font-family: Arial, sans-serif; font-size: 13px; color: #7A6A6E; line-height: 1.6;">
+          Resetting your password opens sign-in straight away. If this wasn't you, we recommend doing that now.
+        </p>`,
+  }),
+});
+
+export const emailVerificationCode = (
+  brand: EmailBrand,
+  data: { code: string; expiresInMinutes: number },
+) => ({
+  subject: `${data.code} is your Zuri Studios verification code`,
+  html: renderShell({
+    brand,
+    previewText: `Your code is ${data.code}.`,
+    bodyHtml: `
+        <h1 style="margin: 0 0 12px; font-family: Georgia, serif; font-size: 22px; color: #2A1B1F;">Confirm your email</h1>
+        <p style="margin: 0 0 16px; font-family: Arial, sans-serif; font-size: 15px; color: #2A1B1F; line-height: 1.6;">
+          Enter this code to continue setting up your account. It expires in ${data.expiresInMinutes} minutes.
+        </p>
+        <p style="margin: 0 0 16px; font-family: Arial, sans-serif; font-size: 32px; font-weight: bold; letter-spacing: 6px; color: #2A1B1F;">${esc(data.code)}</p>
+        <p class="muted" style="margin: 0; font-family: Arial, sans-serif; font-size: 13px; color: #7A6A6E; line-height: 1.6;">
+          If you didn't ask for this, you can ignore this email.
+        </p>`,
+  }),
+});
+
 export const loginAlert = (
   brand: EmailBrand,
   data: {
