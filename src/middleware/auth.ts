@@ -1,11 +1,14 @@
-import { readSessionCookie } from "../auth/sessionCookie";
+import { readSessionCookie, setSessionCookie } from "../auth/sessionCookie";
 import { Request, Response, NextFunction } from "express";
 import jwt from "jsonwebtoken";
 import { env } from "../config/env.config";
 import { ApiError } from "./apiError";
 import { HttpCode } from "../models/status_codes";
 import { AuthToken } from "../models/user";
-import { isActiveLoginSession } from "../auth/sessionService";
+import {
+  isActiveLoginSession,
+  renewLoginSession,
+} from "../auth/sessionService";
 import { reenterTenant } from "./tenant";
 
 interface AccessTokenPayload {
@@ -21,7 +24,7 @@ const extractToken = readSessionCookie;
 
 export const authenticate = async (
   req: Request,
-  _res: Response,
+  res: Response,
   next: NextFunction,
 ) => {
   try {
@@ -68,11 +71,15 @@ export const authenticate = async (
       studioId: decoded.studioId ?? null,
     };
     req.authSessionId = decoded.jti;
+    const renewed = await renewLoginSession(
+      decoded as unknown as Parameters<typeof renewLoginSession>[0],
+    );
+    if (renewed) setSessionCookie(req, res, renewed);
 
     // The session lookup above awaited I/O, so continue in the request's
     // tenant context explicitly (see reenterTenant) — every authenticated
     // route gets this, rather than each route having to remember it.
-    return reenterTenant(req, _res, next);
+    return reenterTenant(req, res, next);
   } catch (error) {
     return next(error);
   }

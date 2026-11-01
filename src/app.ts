@@ -94,7 +94,10 @@ const isAllowedOrigin = (origin: string): boolean => {
   }
   if (
     env.nodeEnv !== "production" &&
-    (host === "localhost" || host.startsWith("127.") || host.endsWith(".local"))
+    (host === "localhost" ||
+      host.endsWith(".localhost") ||
+      host.startsWith("127.") ||
+      host.endsWith(".local"))
   ) {
     return true;
   }

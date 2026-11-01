@@ -99,9 +99,14 @@ declare global {
   }
 }
 
-export const loginToken = (user: Payload, sessionId = randomUUID()) => {
+export const loginToken = (
+  user: Payload,
+  sessionId: string = randomUUID(),
+  // Set when renewing: keeps the token within the session's overall limit.
+  lifetimeSeconds?: number,
+) => {
   const secret = env.JWT_SECRET;
-  const accessDuration = env.JWT_EXPIRATION;
+  const accessDuration = lifetimeSeconds ?? env.JWT_EXPIRATION;
   const refreshDuration = env.JWT_REFRESH_EXPIRES;
 
   const accessToken = jwt.sign(

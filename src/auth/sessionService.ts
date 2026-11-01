@@ -153,6 +153,50 @@ export const isActiveLoginSession = async (
   return expiresAt > Date.now();
 };
 
+const SESSION_LIFETIME_MS = 3 * 24 * 60 * 60 * 1000;
+
+/**
+ * Keep an active user signed in: once a token is past half its life, issue a
+ * fresh one for the same session. A session never outlives 3 days from sign-in,
+ * then the user signs in again. Returns null when no renewal is due.
+ */
+export const renewLoginSession = async (decoded: {
+  sub: string;
+  email: string;
+  role: Payload["role"];
+  studioId?: string | null;
+  jti: string;
+  iat: number;
+  exp: number;
+}) => {
+  const nowSeconds = Date.now() / 1000;
+  if (nowSeconds < decoded.iat + (decoded.exp - decoded.iat) / 2) return null;
+  const session = await raw.authSession.findUnique({
+    where: { id: decoded.jti },
+  });
+  if (!session) return null;
+  const cap = session.createdAt.getTime() + SESSION_LIFETIME_MS;
+  const maxSeconds = Math.floor((cap - Date.now()) / 1000);
+  if (maxSeconds <= 60) return null;
+  const { accessToken } = loginToken(
+    {
+      id: decoded.sub,
+      email: decoded.email,
+      role: decoded.role,
+      studioId: decoded.studioId ?? null,
+    },
+    decoded.jti,
+    Math.min(decoded.exp - decoded.iat, maxSeconds),
+  );
+  const fresh = jwt.decode(accessToken) as { exp: number };
+  await raw.authSession.update({
+    where: { id: decoded.jti },
+    data: { expiresAt: new Date(fresh.exp * 1000) },
+  });
+  await bumpVersion(`user-sessions:${decoded.sub}`);
+  return accessToken;
+};
+
 export const revokeLoginSessions = async (userId: string) => {
   await raw.authSession.deleteMany({ where: { userId } });
   await bumpVersion(`user-sessions:${userId}`);
