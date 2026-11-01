@@ -1384,14 +1384,19 @@ export class StudioService extends Connection {
         },
       });
 
+      const owners = await this.user.findMany({
+        where: {
+          id: { in: studios.flatMap((s) => s.ownerUserId ?? []) },
+        },
+        select: { id: true, email: true },
+      });
+      const ownerById = new Map(owners.map((o) => [o.id, o]));
+
       let expiringSoon = 0;
       let expired = 0;
       for (const studio of studios) {
         if (!studio.ownerUserId || !studio.currentPeriodEnd) continue;
-        const owner = await this.user.findUnique({
-          where: { id: studio.ownerUserId },
-          select: { email: true },
-        });
+        const owner = ownerById.get(studio.ownerUserId);
         if (!owner?.email) continue;
 
         const lapsed = isLapsed(studio.currentPeriodEnd);

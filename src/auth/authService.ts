@@ -19,6 +19,7 @@ import {
 import { brandFromStudio, platformBrand } from "../notifications/brand";
 import { createLoginSession, revokeLoginSessions } from "./sessionService";
 import { LoginDeviceMetadata } from "./loginDevice";
+import { confirmEmailCode, sendEmailCode } from "./emailCode";
 import {
   assertNotLocked,
   clearLoginFailures,
@@ -142,6 +143,41 @@ export class AuthService extends UserRepository {
     } catch (error) {
       console.error("Failed to send account-locked email:", error);
     }
+  }
+
+  // Optional for customers: offered in their account, never required.
+  public async emailVerificationStatus(userId: string) {
+    const user = await this.user.findUnique({
+      where: { id: userId },
+      select: { emailVerifiedAt: true },
+    });
+    return {
+      message: "Status retrieved",
+      data: { verified: Boolean(user?.emailVerifiedAt) },
+    };
+  }
+
+  public async sendVerificationCode(user: {
+    id: string;
+    email: string;
+    studioId?: string | null;
+  }) {
+    await sendEmailCode({
+      key: `user:${user.id}`,
+      to: user.email,
+      brand: await this.studioEmailBrand(null, platformBrand),
+      studioId: user.studioId ?? null,
+    });
+    return { message: "Code sent" };
+  }
+
+  public async confirmVerificationCode(userId: string, code: unknown) {
+    await confirmEmailCode(`user:${userId}`, code);
+    await this.user.update({
+      where: { id: userId },
+      data: { emailVerifiedAt: new Date() },
+    });
+    return { message: "Email confirmed", data: { verified: true } };
   }
 
   public async login(data: Login, device?: LoginDeviceMetadata) {

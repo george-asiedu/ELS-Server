@@ -72,6 +72,11 @@ jobs:
             echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
             export API_IMAGE
             docker compose -f docker-compose.prod.yml pull api
+            # A restorable copy before any schema change; keeps the latest 14.
+            mkdir -p backups
+            docker run --rm --env-file .env -v "$PWD/backups:/backups" postgres:17-alpine \
+              sh -c 'pg_dump "$DATABASE_URL" -Fc -f "/backups/pre-'"${API_IMAGE##*:}"'.dump"'
+            ls -1t backups/*.dump | tail -n +15 | xargs -r rm --
             # Schema changes first; the old version keeps serving until this passes.
             docker compose -f docker-compose.prod.yml run --rm api npx prisma migrate deploy
             docker compose -f docker-compose.prod.yml up -d --remove-orphans

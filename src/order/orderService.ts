@@ -103,12 +103,14 @@ export class OrderService extends Connection {
   // Load products, validate availability, and snapshot pricing/cost.
   private async resolveLineItems(specs: ItemSpec[]): Promise<LineItem[]> {
     if (!specs.length) throw new ApiError("No products selected", 400);
+    const products = await this.product.findMany({
+      where: { id: { in: specs.map((s) => s.productId) } },
+    });
+    const byId = new Map(products.map((p) => [p.id, p]));
     const items: LineItem[] = [];
     for (const spec of specs) {
       const qty = Math.max(1, Math.floor(spec.quantity || 1));
-      const p = await this.product.findUnique({
-        where: { id: spec.productId },
-      });
+      const p = byId.get(spec.productId);
       if (!p || !p.active) {
         throw new ApiError("A selected product is no longer available", 400);
       }
@@ -860,15 +862,86 @@ export class OrderService extends Connection {
     // The webhook, reconcile sweep and customer verify can race here. Only the
     // caller that flips PENDING_PAYMENT → PAID runs the side effects below
     // (stock, loyalty, cart, receipt); the rest return the order as it stands.
-    const claimed = await this.order.updateMany({
-      where: { id: order.id, status: "PENDING_PAYMENT" },
-      data: {
-        status: "PAID",
-        transactionId: String(data.id),
-        channel: data.channel ?? null,
-        paidAt: data.paid_at ? new Date(data.paid_at) : new Date(),
+    // Claim, stock, cart and points commit together: a crash part-way can't
+    // leave an order marked paid with the rest undone, because nothing retries
+    // once the status has flipped. (Only tx-safe calls inside: see
+    // withAdvisoryLock.)
+    const claimedCount = await this.withAdvisoryLock(
+      `order:paid:${order.id}`,
+      async (tx) => {
+        const claim = await tx.order.updateMany({
+          where: { id: order.id, status: "PENDING_PAYMENT" },
+          data: {
+            status: "PAID",
+            transactionId: String(data.id),
+            channel: data.channel ?? null,
+            paidAt: data.paid_at ? new Date(data.paid_at) : new Date(),
+          },
+        });
+        if (claim.count === 0) return 0;
+        const items = await tx.orderItem.findMany({
+          where: { orderId: order.id },
+        });
+        // Decrement stock (never below zero). Done in the database rather than
+        // read-then-write, so concurrent orders can't overwrite each other.
+        for (const item of items) {
+          if (!item.productId) continue;
+          const decremented = await tx.product.updateMany({
+            where: {
+              id: item.productId,
+              trackStock: true,
+              stock: { gte: item.quantity },
+            },
+            data: { stock: { decrement: item.quantity } },
+          });
+          if (decremented.count === 0) {
+            await tx.product.updateMany({
+              where: {
+                id: item.productId,
+                trackStock: true,
+                stock: { lt: item.quantity },
+              },
+              data: { stock: 0 },
+            });
+          }
+        }
+        // Clear the buyer's cart (customers only) and earn loyalty on the
+        // product net (subtotal - discount), not delivery.
+        if (order.userId) {
+          const cart = await tx.cart.findFirst({
+            where: { userId: order.userId },
+          });
+          if (cart)
+            await tx.cartItem.deleteMany({ where: { cartId: cart.id } });
+          const net = order.subtotal - order.discountAmount;
+          const points = Math.floor(net / OrderService.POINTS_PER_GHS_EARN);
+          if (points > 0) {
+            await tx.loyaltyTransaction.create({
+              data: {
+                userId: order.userId,
+                points,
+                type: "EARNED",
+                description: `Purchase — order ${order.orderNumber}`,
+              },
+            });
+            const raised = await tx.loyaltyPoints.updateMany({
+              where: { userId: order.userId },
+              data: {
+                points: { increment: points },
+                lifetimePoints: { increment: points },
+              },
+            });
+            if (!raised.count) {
+              await tx.loyaltyPoints.create({
+                data: { userId: order.userId, points, lifetimePoints: points },
+              });
+            }
+          }
+        }
+        return claim.count;
       },
-    });
+    );
+    const claimed = { count: claimedCount };
     if (claimed.count === 0) {
       return this.order.findUnique({
         where: { id: order.id },
@@ -923,61 +996,6 @@ export class OrderService extends Connection {
         itemCount: paid.items.length,
       },
     });
-
-    // Decrement stock (never below zero). Done in the database rather than
-    // read-then-write, so concurrent orders for one product can't overwrite
-    // each other's decrement.
-    for (const item of paid.items) {
-      if (!item.productId) continue;
-      const decremented = await this.product.updateMany({
-        where: {
-          id: item.productId,
-          trackStock: true,
-          stock: { gte: item.quantity },
-        },
-        data: { stock: { decrement: item.quantity } },
-      });
-      if (decremented.count === 0) {
-        await this.product.updateMany({
-          where: {
-            id: item.productId,
-            trackStock: true,
-            stock: { lt: item.quantity },
-          },
-          data: { stock: 0 },
-        });
-      }
-    }
-
-    // Clear the buyer's cart (customers only).
-    if (order.userId) {
-      const cart = await this.cart.findUnique({
-        where: { userId: order.userId },
-      });
-      if (cart) await this.cartItem.deleteMany({ where: { cartId: cart.id } });
-
-      // Earn loyalty on the product net (subtotal - discount), not delivery.
-      const net = paid.subtotal - paid.discountAmount;
-      const points = Math.floor(net / OrderService.POINTS_PER_GHS_EARN);
-      if (points > 0) {
-        await this.loyaltyTransaction.create({
-          data: {
-            userId: order.userId,
-            points,
-            type: "EARNED",
-            description: `Purchase — order ${paid.orderNumber}`,
-          },
-        });
-        await this.loyaltyPoints.upsert({
-          where: { userId: order.userId },
-          update: {
-            points: { increment: points },
-            lifetimePoints: { increment: points },
-          },
-          create: { userId: order.userId, points, lifetimePoints: points },
-        });
-      }
-    }
 
     // Referral reward — 50 pts to the code owner, once per buyer (by email).
     await this.awardReferralReward(

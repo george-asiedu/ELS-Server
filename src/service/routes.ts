@@ -1,3 +1,4 @@
+import { cachePublic } from "../cache/cache";
 import { Router } from "express";
 import { ServiceController } from "./serviceController";
 import { authenticate, requireAdmin } from "../middleware/auth";
@@ -5,7 +6,7 @@ import { authenticate, requireAdmin } from "../middleware/auth";
 const router: Router = Router();
 
 // Public
-router.get("/", ServiceController.list);
+router.get("/", cachePublic(), ServiceController.list);
 
 // Admin
 router.get("/all", authenticate, requireAdmin, ServiceController.listAll);

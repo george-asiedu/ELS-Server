@@ -1,3 +1,4 @@
+import { cachePublic } from "../cache/cache";
 import { Router } from "express";
 import { PromoController } from "./promoController";
 import { authenticate, requireAdmin } from "../middleware/auth";
@@ -5,7 +6,7 @@ import { authenticate, requireAdmin } from "../middleware/auth";
 const router: Router = Router();
 
 // Public — storefront reads active banners for a placement.
-router.get("/", PromoController.list);
+router.get("/", cachePublic(), PromoController.list);
 
 // Admin — manage this studio's banners.
 router.get("/all", authenticate, requireAdmin, PromoController.listAll);

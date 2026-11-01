@@ -1,3 +1,4 @@
+import { readSessionCookie } from "../auth/sessionCookie";
 import { Request, Response, NextFunction } from "express";
 import jwt from "jsonwebtoken";
 import { env } from "../config/env.config";
@@ -16,13 +17,7 @@ interface AccessTokenPayload {
   jti?: string;
 }
 
-const extractToken = (req: Request): string | null => {
-  const header = req.headers.authorization;
-  if (header && header.startsWith("Bearer ")) {
-    return header.slice(7).trim();
-  }
-  return null;
-};
+const extractToken = readSessionCookie;
 
 export const authenticate = async (
   req: Request,

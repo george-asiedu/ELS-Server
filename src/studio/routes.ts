@@ -1,3 +1,4 @@
+import { cachePublic } from "../cache/cache";
 import { Router } from "express";
 import { StudioController } from "./studioController";
 import { authenticate, requireAdmin } from "../middleware/auth";
@@ -6,10 +7,10 @@ import { UserDirectoryController } from "../users/userDirectoryController";
 const router: Router = Router();
 
 // Public: the current studio's branding/content/feature config for the SPA.
-router.get("/", StudioController.config);
+router.get("/", cachePublic(), StudioController.config);
 
 // Public: the studio's real numbers for its website's metrics strip.
-router.get("/stats", StudioController.getPublicStats);
+router.get("/stats", cachePublic(300), StudioController.getPublicStats);
 
 // Public: resolve a custom domain (host) to a studio slug (SPA bootstrap).
 router.get("/resolve-domain", StudioController.resolveDomain);

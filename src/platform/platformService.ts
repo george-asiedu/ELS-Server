@@ -324,6 +324,7 @@ export interface ProvisionCoreInput {
   slug: string; // already validated + normalized
   ownerEmail: string; // already normalized
   ownerPasswordHash: string;
+  ownerEmailVerified?: boolean;
   ownerFullName?: string;
   customDomain?: string;
   plan: Plan;
@@ -1233,6 +1234,7 @@ export class PlatformService extends Connection {
       data: {
         email: input.ownerEmail,
         password: input.ownerPasswordHash,
+        ...(input.ownerEmailVerified ? { emailVerifiedAt: new Date() } : {}),
         role: "ADMIN",
         studioId: studio.id,
       },

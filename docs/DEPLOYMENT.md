@@ -88,6 +88,37 @@ yarn migrate:deploy   # applies 20261028120000_storefront_plan and everything ne
 
 A brand-new database (like production's) needs only `yarn migrate:deploy`.
 
+### Safe schema changes
+
+Prisma has no "down" migrations, and each release runs the new schema before the
+new code starts. So every migration must still work with the code before it:
+
+- **Add first:** new tables and nullable (or defaulted) columns are always safe.
+- **Remove later:** stop using a column in one release; drop it in a later one.
+- **Rename or change a type in steps:** add the new column, copy, switch the
+  code, then drop the old one.
+
+Each production release saves `/opt/zuri/backups/pre-<sha>.dump` first (latest 14
+kept). To undo a bad migration, restore into a new Neon branch to check it, or
+fix it forward with a new migration. Neon's point-in-time restore is the
+fallback. Check the Postgres image version in `deploy-prod.yml` is not older
+than the Neon server's, and that `DATABASE_URL` is Neon's direct (not pooled) URL
+for migrations.
+
+## Sessions and cookies
+
+Signed-in sessions are `HttpOnly` cookies on the API's host, one per studio.
+
+- **Production:** site and API must be on the same site (`*.zuristudios.com`).
+  Leave `COOKIE_SAMESITE=lax`.
+- **Development on Vercel + Render:** these are different sites, so set
+  `COOKIE_SAMESITE=none` on Render. Browsers that block third-party cookies may
+  still refuse it; a shared parent domain avoids that.
+- **Custom domains:** a studio's own domain must forward `/api/*` to the API (in
+  CloudFront, a behavior with the API as its origin, no caching, all cookies and
+  headers forwarded). The app calls `/api` on the same domain there, so the
+  cookie belongs to that domain. Without this, sign-in fails on custom domains.
+
 ## Rollback
 
 On the server: `cd /opt/zuri && API_IMAGE=ghcr.io/<owner>/els-server:<previous-sha> docker compose -f docker-compose.prod.yml up -d`.

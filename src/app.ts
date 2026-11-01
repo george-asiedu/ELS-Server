@@ -9,6 +9,7 @@ import { xss } from "express-xss-sanitizer";
 import { env } from "./config/env.config";
 import { globalErrorHandler } from "./middleware/globalErrorHandler";
 import { resolveTenant } from "./middleware/tenant";
+import { resolveStudioByDomain } from "./tenant/studioResolver";
 import routes from "./routes/index";
 import { bootstrapQueues, shutdownQueues } from "./queue";
 import { startScheduler, stopScheduler } from "./scheduler/scheduler";
@@ -53,6 +54,16 @@ const extraOrigins = (process.env.ALLOWED_ORIGINS ?? "")
   .split(",")
   .map((o) => o.trim().toLowerCase().replace(/\/$/, ""))
   .filter(Boolean);
+
+const isVerifiedDomainOrigin = async (origin: string): Promise<boolean> => {
+  try {
+    const { protocol, hostname } = new URL(origin);
+    if (protocol !== "https:") return false;
+    return Boolean(await resolveStudioByDomain(hostname));
+  } catch {
+    return false;
+  }
+};
 
 const isAllowedOrigin = (origin: string): boolean => {
   let host: string;
@@ -116,17 +127,37 @@ app.use(
       "X-Studio-Slug",
       "X-Device-Id",
       "Idempotency-Key",
+      "X-Zuri-Client",
     ],
+    credentials: true,
     maxAge: 600,
     origin: (origin, cb) => {
       // No Origin header = same-origin, curl, or server-to-server (e.g. the
       // Paystack webhook) — allow; browsers always send Origin on cross-site.
       if (!origin) return cb(null, true);
       if (isAllowedOrigin(origin)) return cb(null, true);
-      return cb(new ApiError("Origin is not allowed", HttpCode.FORBIDDEN));
+      // A studio's own verified domain (its /api is forwarded here).
+      void isVerifiedDomainOrigin(origin).then((ok) =>
+        ok
+          ? cb(null, true)
+          : cb(new ApiError("Origin is not allowed", HttpCode.FORBIDDEN)),
+      );
     },
   }),
 );
+// CSRF: a cookie is sent automatically, but another site can't add this header
+// (CORS refuses it), so a state-changing request carrying it came from our app.
+app.use("/api", (req: Request, _res: Response, next: NextFunction) => {
+  const unsafe = !["GET", "HEAD", "OPTIONS"].includes(req.method);
+  if (
+    unsafe &&
+    /(?:^|;\s*)zuri_/.test(req.headers.cookie ?? "") &&
+    !req.headers["x-zuri-client"]
+  ) {
+    return next(new ApiError("Request not allowed", HttpCode.FORBIDDEN));
+  }
+  return next();
+});
 app.use(hpp());
 // Attach logging before rate limits and body parsing so rejected or malformed
 // API requests are still recorded without inspecting their payloads.
@@ -219,6 +250,7 @@ app.use("/api/studio/images", sensitiveActionLimiter);
 app.use("/api/platform/auth", sensitiveActionLimiter);
 app.use("/api/auth/signup", accountCreationLimiter);
 app.use("/api/onboarding/email-code", recoveryLimiter);
+app.use("/api/auth/email-code", recoveryLimiter);
 app.use("/api/auth/forgot-password", recoveryLimiter);
 app.use("/api/auth/reset-password", recoveryLimiter);
 app.use("/api/platform/auth/forgot-password", recoveryLimiter);

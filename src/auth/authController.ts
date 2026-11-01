@@ -6,6 +6,7 @@ import { ApiError } from "../middleware/apiError";
 import { validateEmail, validatePassword } from "../profile/validator/profile";
 import { revokeLoginSession } from "./sessionService";
 import { getLoginDeviceMetadata } from "./loginDevice";
+import { clearSessionCookie, withoutToken } from "./sessionCookie";
 import { assertValid } from "../utils/validation";
 
 const authService = new AuthService();
@@ -15,6 +16,7 @@ export class AuthController {
     if (req.user && req.authSessionId) {
       await revokeLoginSession(req.authSessionId, req.user.id);
     }
+    clearSessionCookie(req, res);
     return res.status(200).json({ message: "Logged out successfully" });
   };
 
@@ -24,7 +26,7 @@ export class AuthController {
       req.body,
       getLoginDeviceMetadata(req),
     );
-    return res.status(201).json(result);
+    return res.status(201).json(withoutToken(req, res, result));
   };
 
   public static login = async (req: Request, res: Response) => {
@@ -32,6 +34,24 @@ export class AuthController {
     const result = await authService.login(
       req.body,
       getLoginDeviceMetadata(req),
+    );
+    return res.status(200).json(withoutToken(req, res, result));
+  };
+
+  public static emailStatus = async (req: Request, res: Response) => {
+    const result = await authService.emailVerificationStatus(req.user!.id);
+    return res.status(200).json(result);
+  };
+
+  public static sendEmailCode = async (req: Request, res: Response) => {
+    const result = await authService.sendVerificationCode(req.user!);
+    return res.status(200).json(result);
+  };
+
+  public static confirmEmailCode = async (req: Request, res: Response) => {
+    const result = await authService.confirmVerificationCode(
+      req.user!.id,
+      req.body?.code,
     );
     return res.status(200).json(result);
   };

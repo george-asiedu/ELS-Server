@@ -1,3 +1,4 @@
+import { cachePublic } from "../cache/cache";
 import { Router } from "express";
 import { PlatformController } from "./platformController";
 import { FeatureRequestController } from "../featureRequest/featureRequestController";
@@ -19,8 +20,8 @@ router.post("/auth/forgot-password", PlatformController.forgotPassword);
 router.post("/auth/reset-password", PlatformController.resetPassword);
 
 // Public: site details, prices and setup fees for the platform pages.
-router.get("/public-config", PlatformController.publicConfig);
-router.get("/public-stats", PlatformController.publicStats);
+router.get("/public-config", cachePublic(), PlatformController.publicConfig);
+router.get("/public-stats", cachePublic(300), PlatformController.publicStats);
 
 // Everything below requires a signed-in super admin.
 router.use(authenticate, requireSuperAdmin);

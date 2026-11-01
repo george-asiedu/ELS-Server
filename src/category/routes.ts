@@ -1,3 +1,4 @@
+import { cachePublic } from "../cache/cache";
 import { Router } from "express";
 import { CategoryController } from "./categoryController";
 import { authenticate, requireAdmin } from "../middleware/auth";
@@ -5,7 +6,7 @@ import { authenticate, requireAdmin } from "../middleware/auth";
 const router: Router = Router();
 
 // Public — only visible (active) categories.
-router.get("/", CategoryController.list);
+router.get("/", cachePublic(), CategoryController.list);
 
 // Admin
 router.get("/all", authenticate, requireAdmin, CategoryController.listAll);

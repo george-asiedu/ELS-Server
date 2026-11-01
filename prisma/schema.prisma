@@ -546,6 +546,9 @@ model User {
 
   resetToken       String?
   resetTokenExpiry DateTime?
+  // Set once the email is confirmed. Owners do it before paying; customers can
+  // choose to later, from their account. Nothing is blocked without it.
+  emailVerifiedAt  DateTime?
 
   profile             Profile?
   appointments        Appointment[]
