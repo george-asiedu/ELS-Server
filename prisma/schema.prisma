@@ -150,16 +150,23 @@ model Studio {
   payoutAccountName      String?
 
   // Subscription / billing (platform revenue; the studio's plan gates features).
-  plan                 StudioPlan     @default(STANDARD)
-  billingCadence       BillingCadence @default(MONTHLY)
+  plan                   StudioPlan     @default(STANDARD)
+  billingCadence         BillingCadence @default(MONTHLY)
   // How the platform earns from this studio: a recurring plan fee
   // (SUBSCRIPTION) or a percentage cut of each customer transaction
   // (REVENUE_SHARE, where the plan sets the commission %). Chosen at signup.
-  billingMode          BillingMode    @default(SUBSCRIPTION)
-  paystackCustomerCode String?
-  subscriptionCode     String?
-  subscriptionStatus   String? // active | lapsed | revenue_share | ...
-  currentPeriodEnd     DateTime?
+  billingMode            BillingMode    @default(SUBSCRIPTION)
+  paystackCustomerCode   String?
+  subscriptionCode       String?
+  subscriptionStatus     String? // active | lapsed | revenue_share | ...
+  currentPeriodEnd       DateTime?
+  // Set by the super admin for this customer only. A custom monthly price
+  // (yearly is 10x, like the list price) applies to its current plan; a
+  // discount applies to every charge until it ends (no end = ongoing).
+  customPriceMonthly     Float?
+  billingDiscountPercent Float?
+  billingDiscountEndsAt  DateTime?
+  billingNote            String?
 
   branding        StudioBranding?
   content         StudioContent?
@@ -380,6 +387,7 @@ model StudioSignup {
   cadence           BillingCadence @default(MONTHLY)
   billingMode       BillingMode    @default(SUBSCRIPTION)
   shopCategory      String?
+  promoCode         String?
   reference         String         @unique
   status            SignupStatus   @default(PENDING)
   studioId          String?
@@ -431,6 +439,8 @@ model StudioBillingCharge {
   appliedAt DateTime?
   createdAt DateTime                  @default(now())
   updatedAt DateTime                  @updatedAt
+  // The billing promo used, counted once the charge is paid.
+  promoCode String?
 
   @@index([studioId])
   @@map("studio_billing_charges")
@@ -1389,4 +1399,21 @@ model Coupon {
 
   @@unique([studioId, code])
   @@index([studioId])
+}
+
+// A platform billing promo: % off what a studio or store owner pays (signup,
+// renewal, plan change). Managed in the super admin's Billing page.
+model BillingPromo {
+  id         String    @id @default(cuid())
+  code       String    @unique
+  percentOff Float
+  // Plans it works for; empty means every plan.
+  plans      String[]  @default([])
+  expiresAt  DateTime?
+  maxUses    Int?
+  usedCount  Int       @default(0)
+  active     Boolean   @default(true)
+  createdAt  DateTime  @default(now())
+
+  @@map("billing_promos")
 }

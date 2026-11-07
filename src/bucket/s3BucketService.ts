@@ -248,7 +248,7 @@ export class S3BucketService {
     );
   }
 
-  /** Store an image the server made (e.g. the image maker) in the studio's media. */
+  /** Store an image the server made in the studio's media. */
   public async putStudioImage(
     body: Buffer,
     category: string,

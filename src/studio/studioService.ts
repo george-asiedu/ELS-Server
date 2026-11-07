@@ -8,11 +8,7 @@ import { env } from "../config/env.config";
 import { randomUUID } from "crypto";
 import { shortId } from "../utils/shortId";
 import { promises as dns } from "dns";
-import {
-  planFlags,
-  planPriceFor,
-  loadBillingConfig,
-} from "../platform/platformService";
+import { planFlags, loadBillingConfig } from "../platform/platformService";
 import { AuditService } from "../audit/auditService";
 import {
   Plan,
@@ -23,6 +19,13 @@ import {
   subtractPeriod,
   isPlan,
 } from "../billing/billingPlans";
+import {
+  STUDIO_PRICE_SELECT,
+  activeDiscount,
+  countPromoUse,
+  promoPercent,
+  studioPriceFor,
+} from "../billing/studioPricing";
 import { isShopCategory } from "../billing/shopCategories";
 import {
   resolveStudioByDomain,
@@ -417,15 +420,26 @@ export class StudioService extends Connection {
     const s = await this.studio.findUnique({
       where: { id },
       select: {
-        plan: true,
         billingCadence: true,
         billingMode: true,
         platformFeePercent: true,
         subscriptionStatus: true,
         currentPeriodEnd: true,
+        ...STUDIO_PRICE_SELECT,
       },
     });
     if (!s) throw new ApiError("Studio not found", HttpCode.NOT_FOUND);
+    const cfg = await loadBillingConfig();
+    // What this studio pays per period for each plan, after its own terms.
+    const yourPrices = Object.fromEntries(
+      (["STANDARD", "PREMIUM", "STOREFRONT"] as Plan[]).map((p) => [
+        p,
+        {
+          MONTHLY: studioPriceFor(s, p, "MONTHLY", cfg).amount,
+          YEARLY: studioPriceFor(s, p, "YEARLY", cfg).amount,
+        },
+      ]),
+    );
     // Revenue-share studios have no billing period, so they never "lapse" —
     // the platform earns its cut per transaction instead.
     const revenueShare = s.billingMode === "REVENUE_SHARE";
@@ -437,6 +451,9 @@ export class StudioService extends Connection {
         cadence: s.billingCadence,
         billingMode: s.billingMode,
         commissionPercent: revenueShare ? s.platformFeePercent : 0,
+        yourPrices,
+        discountPercent: activeDiscount(s),
+        discountEndsAt: activeDiscount(s) ? s.billingDiscountEndsAt : null,
         // Derived from the period end so the UI always reflects reality even if
         // no webhook fired: "active" while paid, "lapsed" once the period ends.
         subscriptionStatus: revenueShare
@@ -460,12 +477,38 @@ export class StudioService extends Connection {
     kind: "RENEWAL" | "PLAN_CHANGE",
     plan: Plan,
     cadence: Cadence,
+    rawPromo?: unknown,
   ) {
-    const amount = planPriceFor(plan, cadence, await loadBillingConfig());
+    const studio = await this.studio.findUnique({
+      where: { id: studioId },
+      select: STUDIO_PRICE_SELECT,
+    });
+    const promo = await promoPercent(rawPromo, plan);
+    const { amount } = studioPriceFor(
+      studio,
+      plan,
+      cadence,
+      await loadBillingConfig(),
+      promo,
+    );
+    if (!(amount > 0)) {
+      throw new ApiError(
+        "This charge comes to nothing. Contact us to apply it.",
+        HttpCode.BAD_REQUEST,
+      );
+    }
     const email = await this.ownerEmail(studioId);
     const reference = `${kind === "RENEWAL" ? "ZURI-RENEW-" : "ZURI-BILLING-"}${shortId()}`;
     await this.studioBillingCharge.create({
-      data: { reference, studioId, kind, plan, cadence, amount },
+      data: {
+        reference,
+        studioId,
+        kind,
+        plan,
+        cadence,
+        amount,
+        ...(promo.code ? { promoCode: promo.code } : {}),
+      },
     });
     const init = await paystack.initialize({
       email,
@@ -493,6 +536,7 @@ export class StudioService extends Connection {
     studioId: string | null | undefined,
     plan: string,
     cadence: string,
+    promoCode?: unknown,
   ) {
     const id = this.requireStudioId(studioId);
     if (!isPlan(plan)) {
@@ -529,12 +573,16 @@ export class StudioService extends Connection {
       "PLAN_CHANGE",
       plan as Plan,
       cadence as Cadence,
+      promoCode,
     );
     return { message: "Plan change started", data };
   }
 
   // Renew the current plan for another period (manual, before/after lapse).
-  public async startRenewal(studioId: string | null | undefined) {
+  public async startRenewal(
+    studioId: string | null | undefined,
+    promoCode?: unknown,
+  ) {
     const id = this.requireStudioId(studioId);
     const studio = await this.studio.findUnique({
       where: { id },
@@ -552,6 +600,7 @@ export class StudioService extends Connection {
       "RENEWAL",
       studio.plan as Plan,
       studio.billingCadence as Cadence,
+      promoCode,
     );
     return { message: "Renewal started", data };
   }
@@ -682,6 +731,7 @@ export class StudioService extends Connection {
     try {
       if (charge.kind === "RENEWAL") await this.renewFromCharge(charge);
       else await this.changePlanFromCharge(charge);
+      await countPromoUse(charge.promoCode);
     } catch (error) {
       // Nothing changed for the studio, so release the claim for a retry.
       await this.studioBillingCharge.update({
@@ -1381,6 +1431,9 @@ export class StudioService extends Connection {
           currentPeriodEnd: true,
           ownerUserId: true,
           slug: true,
+          customPriceMonthly: true,
+          billingDiscountPercent: true,
+          billingDiscountEndsAt: true,
         },
       });
 
@@ -1431,11 +1484,12 @@ export class StudioService extends Connection {
             expired++;
           } else {
             const amountDue = ghs(
-              planPriceFor(
+              studioPriceFor(
+                studio,
                 studio.plan as Plan,
                 studio.billingCadence as Cadence,
                 billingConfig,
-              ),
+              ).amount,
             );
             const { subject, html } = subscriptionExpiringSoon(platformBrand, {
               planName,

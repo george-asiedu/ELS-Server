@@ -33,6 +33,7 @@ import { ghs, receiptNumber } from "../notifications/format";
 import { NotificationTemplate } from "../notifications/registry";
 import { studioCreated } from "../notifications/templates/studio";
 import { confirmEmailCode, sendEmailCode } from "../auth/emailCode";
+import { countPromoUse, promoPercent } from "../billing/studioPricing";
 import { platformBrand } from "../notifications/brand";
 
 type BillingMode = "SUBSCRIPTION" | "REVENUE_SHARE";
@@ -59,6 +60,13 @@ export class OnboardingService extends Connection {
   private platform = new PlatformService();
   private audit = new AuditService();
   private notifications = new NotificationService();
+
+  /** Check a billing promo for the signup screen. */
+  public async checkPromo(rawCode: unknown, rawPlan: unknown) {
+    const plan: Plan = isPlan(rawPlan) ? rawPlan : "STANDARD";
+    const promo = await promoPercent(rawCode, plan);
+    return { message: "Promo applied", data: promo };
+  }
 
   public async availability(rawSlug: string) {
     let slug: string;
@@ -143,6 +151,7 @@ export class OnboardingService extends Connection {
 
   public async start(input: {
     emailToken?: unknown;
+    promoCode?: unknown;
     name?: unknown;
     slug?: unknown;
     ownerEmail?: unknown;
@@ -216,19 +225,24 @@ export class OnboardingService extends Connection {
       billingMode === "SUBSCRIPTION"
         ? subscriptionSetupFor(plan, cadence, cfg)
         : null;
-    const amountPesewas =
+    const listPesewas =
       billingMode === "REVENUE_SHARE"
         ? Math.round(setupFeeFor(plan, cfg) * 100)
         : setup
           ? Math.round(setup.fee * 100)
           : toPesewas(planPriceFor(plan, cadence, cfg));
 
-    if (billingMode === "SUBSCRIPTION" && !amountPesewas) {
+    if (billingMode === "SUBSCRIPTION" && !listPesewas) {
       throw new ApiError(
         "Billing is not configured for that plan yet. Please contact us.",
         HttpCode.BAD_GATEWAY,
       );
     }
+    // A billing promo takes its % off whatever is charged now.
+    const promo = await promoPercent(input.promoCode, plan);
+    const amountPesewas = Math.round(
+      listPesewas * (1 - Math.min(100, promo.percent) / 100),
+    );
 
     const reference = `${SIGNUP_PREFIX}${shortId()}`;
     const ownerPasswordHash = await getPasswordHash(ownerPassword);
@@ -246,6 +260,7 @@ export class OnboardingService extends Connection {
         billingMode,
         ...(shopCategory ? { shopCategory } : {}),
         reference,
+        ...(promo.code ? { promoCode: promo.code } : {}),
         status: "PENDING",
         // Recorded now, so finalize provisions exactly what was paid for even
         // if the super admin changes the fees in between.
@@ -254,8 +269,9 @@ export class OnboardingService extends Connection {
       },
     });
 
-    // Free revenue-share signup (no setup fee): provision right away.
-    if (billingMode === "REVENUE_SHARE" && !amountPesewas) {
+    // Nothing to pay (a revenue-share plan with no setup fee, or a 100%
+    // promo): provision right away.
+    if (!amountPesewas) {
       const done = await this.finalize(reference, { skipPaymentCheck: true });
       return {
         message: "Signup provisioned",
@@ -375,6 +391,7 @@ export class OnboardingService extends Connection {
             },
       }),
     );
+    await countPromoUse(signup.promoCode);
 
     await this.studioSignup.update({
       where: { id: signup.id },

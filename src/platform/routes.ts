@@ -1,3 +1,4 @@
+import { billingAdminRoutes } from "./billingAdmin";
 import { cachePublic } from "../cache/cache";
 import { Router } from "express";
 import { PlatformController } from "./platformController";
@@ -28,6 +29,7 @@ router.use(authenticate, requireSuperAdmin);
 router.post("/auth/logout", PlatformController.logout);
 
 router.get("/me", PlatformController.me);
+router.use(billingAdminRoutes);
 router.get("/analytics", PlatformController.analytics);
 router.get("/earnings", PlatformController.earnings);
 router.get("/billing-config", PlatformController.getBillingConfig);

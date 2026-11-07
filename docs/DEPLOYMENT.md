@@ -56,7 +56,7 @@ Port 5060 and Postgres are never opened in UFW; Nginx is the only way in.
 4. **Settings** (Server): `sudoedit /etc/zuri/api.env`. Fill every empty value
    (Paystack **live** keys, JWT secret from `openssl rand -hex 48`, AWS media
    bucket, Plunk). Check: `sudo grep -nE '^[A-Z_]+=$' /etc/zuri/api.env`;
-   only optional ones (`OPENAI_API_KEY`, `BACKUP_BUCKET`) may stay empty.
+   only `BACKUP_BUCKET` may stay empty.
 5. **Backups off the server:** create a **private** S3 bucket (not the media
    one, which CloudFront serves publicly), set `BACKUP_BUCKET`, and give the
    AWS keys in `api.env` `s3:PutObject` on it. Add a lifecycle rule to delete

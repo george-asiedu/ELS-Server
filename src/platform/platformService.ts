@@ -1,3 +1,4 @@
+import { studioPriceFor } from "../billing/studioPricing";
 import { Connection } from "../db/dbConnection";
 import { ApiError } from "../middleware/apiError";
 import { isLapsed, byPlan, planName, type Plan } from "../billing/billingPlans";
@@ -1116,6 +1117,19 @@ export class PlatformService extends Connection {
           }
         : null,
       lastPayment,
+      // What this customer pays per period now, after its own terms.
+      yourPrice: studioPriceFor(
+        studio,
+        studio.plan as Plan,
+        studio.billingCadence as "MONTHLY" | "YEARLY",
+        await loadBillingConfig(),
+      ),
+      terms: {
+        customPriceMonthly: studio.customPriceMonthly,
+        discountPercent: studio.billingDiscountPercent,
+        discountEndsAt: studio.billingDiscountEndsAt,
+        note: studio.billingNote,
+      },
       totalPaid:
         Math.round(earnings.reduce((t, e) => t + e.amount, 0) * 100) / 100,
       payments: earnings,

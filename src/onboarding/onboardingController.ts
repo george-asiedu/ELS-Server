@@ -30,6 +30,14 @@ export class OnboardingController {
     return res.status(200).json(result);
   };
 
+  public static checkPromo = async (req: Request, res: Response) => {
+    const result = await onboardingService.checkPromo(
+      req.query.code,
+      req.query.plan,
+    );
+    return res.status(200).json(result);
+  };
+
   public static start = async (req: Request, res: Response) => {
     const result = await onboardingService.start(req.body ?? {});
     return res.status(201).json(result);

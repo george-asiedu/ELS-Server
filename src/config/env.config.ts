@@ -97,18 +97,11 @@ export const env = {
   // Apex host of the platform, e.g. "app.example.com"; its subdomains are
   // studios and the apex itself is the super-admin surface.
   rootDomain: (process.env.ROOT_DOMAIN as string) || "",
-  // Optional. The image maker in the studio admin (studio/imageService). Off
-  // when OPENAI_API_KEY is empty. Each studio can make AI_IMAGES_PER_MONTH.
   // Session cookie SameSite. "lax" when the site and API share a domain; "none"
   // only for a cross-site development setup (e.g. Vercel + Render).
   cookieSameSite: (process.env.COOKIE_SAMESITE === "none" ? "none" : "lax") as
     | "none"
     | "lax",
-  openai: {
-    apiKey: (process.env.OPENAI_API_KEY as string) || "",
-    imageModel: (process.env.OPENAI_IMAGE_MODEL as string) || "gpt-image-1",
-    imagesPerMonth: Number(process.env.AI_IMAGES_PER_MONTH) || 20,
-  },
   paystack: {
     secretKey: process.env.PAYSTACK_SECRET_KEY as string,
     publicKey: process.env.PAYSTACK_PUBLIC_KEY as string,

@@ -33,15 +33,6 @@ router.get(
 // Admin: what customers paid and what Paystack has paid out to the studio.
 router.get("/money", authenticate, requireAdmin, StudioController.getMoney);
 
-// Admin: the image maker (pictures made with AI for the website).
-router.get("/images", authenticate, requireAdmin, StudioController.listImages);
-router.post(
-  "/images",
-  authenticate,
-  requireAdmin,
-  StudioController.generateImage,
-);
-
 // Admin: custom domain management.
 router.get("/domain", authenticate, requireAdmin, StudioController.getDomain);
 router.put("/domain", authenticate, requireAdmin, StudioController.setDomain);
