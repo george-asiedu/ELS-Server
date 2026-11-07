@@ -34,11 +34,20 @@ mkdir -p /opt/zuri && chown deploy:deploy /opt/zuri
 - Add the deploy user's SSH key: generate a key pair just for GitHub,
   put the public key in `/home/deploy/.ssh/authorized_keys`.
 - Create `/opt/zuri/.env` with the production values from `.env.example`
-  (production `DATABASE_URL`, Paystack **live** keys, `ROOT_DOMAIN=zuristudios.com`,
+  (Paystack **live** keys, `ROOT_DOMAIN=zuristudios.com`,
   `CLIENT_URL=https://zuristudios.com`, AWS media bucket, Plunk, JWT secrets, and
   so on). Optional: `OPENAI_API_KEY` turns on the image maker in the studio admin
-  (`AI_IMAGES_PER_MONTH`, default 20 per studio). `PORT`, `REDIS_URL`, `SCHEDULER_ENABLED` and `TRUST_PROXY_HOPS` are
-  set by the compose file. `chmod 600 /opt/zuri/.env`.
+  (`AI_IMAGES_PER_MONTH`, default 20 per studio). `PORT`, `REDIS_URL`,
+  `SCHEDULER_ENABLED`, `TRUST_PROXY_HOPS` and `DATABASE_URL` are set by the
+  compose file. `chmod 600 /opt/zuri/.env`.
+- **Database:** Postgres runs on the VPS in the `db` container. Add to `.env`:
+  - `POSTGRES_PASSWORD`: letters and numbers only (it goes inside a URL), e.g.
+    `openssl rand -hex 24`. Don't change it after the first start: the
+    database keeps the password it was created with.
+  - `BACKUP_S3_BUCKET` (recommended): a **private** S3 bucket for nightly
+    backups. Not the media bucket, which CloudFront serves publicly. The AWS
+    keys already in `.env` need write access to it. Add a lifecycle rule there
+    to delete copies older than 30 days.
 - DNS: `api.zuristudios.com` → the VPS IP. Caddy gets the certificate on
   first start.
 
@@ -98,12 +107,27 @@ new code starts. So every migration must still work with the code before it:
 - **Rename or change a type in steps:** add the new column, copy, switch the
   code, then drop the old one.
 
-Each production release saves `/opt/zuri/backups/pre-<sha>.dump` first (latest 14
-kept). To undo a bad migration, restore into a new Neon branch to check it, or
-fix it forward with a new migration. Neon's point-in-time restore is the
-fallback. Check the Postgres image version in `deploy-prod.yml` is not older
-than the Neon server's, and that `DATABASE_URL` is Neon's direct (not pooled) URL
-for migrations.
+### Backups and restore
+
+- **Nightly:** the `backup` container writes `/opt/zuri/backups/nightly-*.dump`
+  (14 days kept) and copies each to `BACKUP_S3_BUCKET` when set. Check it with
+  `docker compose -f docker-compose.prod.yml logs backup`.
+- **Before each release:** `/opt/zuri/backups/pre-<sha>.dump` (latest 14).
+- **Contabo auto backup** snapshots the whole server as a further fallback.
+
+To restore a dump (this replaces the current data; stop the API first):
+
+```bash
+cd /opt/zuri
+docker compose -f docker-compose.prod.yml stop api
+docker compose -f docker-compose.prod.yml exec -T db \
+  pg_restore -U zuri -d zuri --clean --if-exists < backups/<file>.dump
+docker compose -f docker-compose.prod.yml start api
+```
+
+Try a restore once after going live, so you know it works. To undo a bad
+migration, restore the matching `pre-<sha>.dump`, or fix it forward with a new
+migration.
 
 ## Sessions and cookies
 
