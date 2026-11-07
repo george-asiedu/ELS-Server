@@ -3,13 +3,14 @@
 | Branch    | Environment | Hosting                     |
 |-----------|-------------|-----------------------------|
 | `develop` | Development | Render                      |
-| `main`    | Production  | Contabo VPS (EU), Docker    |
+| `main`    | Production  | Contabo VPS (EU), systemd   |
 
 Every push runs **CI** (`.github/workflows/ci.yml`: lint, build). The deploy
 workflow for that branch runs only if CI passes.
 
 The API runs its scheduler and email queue in the same process, so
-production is one `api` container plus Redis (for the queue) and Caddy (HTTPS).
+production is one `zuri-api` service behind Nginx, with Postgres and Redis on
+the same server.
 
 ## 1. Development: Render
 
