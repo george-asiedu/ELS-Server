@@ -317,7 +317,8 @@ const port = env.port;
 if (!port)
   throw new Error("Port number is not defined in environment variables");
 
-const server = app.listen(port, "0.0.0.0", () => {
+// HOST=127.0.0.1 on the VPS (behind Nginx); everywhere else all interfaces.
+const server = app.listen(port, process.env.HOST || "0.0.0.0", () => {
   console.log(`Server is running on port ${port}`);
 });
 

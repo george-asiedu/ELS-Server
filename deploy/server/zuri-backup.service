@@ -1,0 +1,21 @@
+# Nightly database dump (scripts/backup.sh). Run by zuri-backup.timer.
+#   sudo systemctl start zuri-backup     run one now
+#   journalctl -u zuri-backup            how the last one went
+
+[Unit]
+Description=Zuri Studios database backup
+After=postgresql.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=zuri
+Group=zuri
+EnvironmentFile=/etc/zuri/api.env
+WorkingDirectory=/srv/zuri-api/current
+ExecStart=/usr/bin/bash scripts/backup.sh
+PrivateTmp=yes
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/var/backups/zuri

@@ -1,7 +1,10 @@
 name: Deploy production (Contabo VPS)
 
-# main deploys to the VPS: build the image, push it to GitHub Container
-# Registry, then on the server apply database migrations and restart.
+# main → production, on the VPS that also runs Nichelle. Builds and packages a
+# release here (the server never builds), uploads it over SSH, and
+# deploy/server/deploy.sh backs up, migrates, switches and health-checks it,
+# rolling back by itself if the new release doesn't come up.
+# Setup and settings: docs/DEPLOYMENT.md.
 on:
   workflow_run:
     workflows: [CI]
@@ -9,76 +12,110 @@ on:
     branches: [main]
   workflow_dispatch:
 
+# One at a time, never cancelled mid-flight: it migrates a live database.
 concurrency:
   group: deploy-prod
   cancel-in-progress: false
 
 permissions:
   contents: read
-  packages: write
 
 jobs:
   deploy:
     if: github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push')
     runs-on: ubuntu-latest
-    environment: production
+    environment:
+      name: production
+      url: ${{ vars.API_URL }}
     env:
-      IMAGE: ghcr.io/${{ github.repository_owner }}/els-server
+      SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
     steps:
+      - name: Check environment configuration
+        env:
+          HOST: ${{ vars.SSH_HOST }}
+          KNOWN: ${{ vars.SSH_KNOWN_HOSTS }}
+          KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          API_URL: ${{ vars.API_URL }}
+        run: |
+          missing=()
+          [ -n "$HOST" ]    || missing+=("SSH_HOST (variable)")
+          [ -n "$KNOWN" ]   || missing+=("SSH_KNOWN_HOSTS (variable)")
+          [ -n "$KEY" ]     || missing+=("SSH_PRIVATE_KEY (secret)")
+          [ -n "$API_URL" ] || missing+=("API_URL (variable)")
+          if [ ${#missing[@]} -gt 0 ]; then
+            echo "::error title=Environment 'production' is not configured::Missing: ${missing[*]}"
+            exit 1
+          fi
+
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          ref: ${{ env.SHA }}
 
-      - uses: docker/login-action@v3
+      # Node 22, the same as the server, so native modules match.
+      - uses: actions/setup-node@v4
         with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          node-version: 22
+          cache: yarn
 
-      - name: Build and push image
-        id: build
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          push: true
-          tags: |
-            ${{ env.IMAGE }}:${{ github.event.workflow_run.head_sha || github.sha }}
-            ${{ env.IMAGE }}:latest
+      - run: yarn install --frozen-lockfile
+      - run: yarn build
 
-      - name: Copy compose files to the server
-        uses: appleboy/scp-action@v0.1.7
-        with:
-          host: ${{ secrets.VPS_HOST }}
-          username: ${{ secrets.VPS_USER }}
-          key: ${{ secrets.VPS_SSH_KEY }}
-          source: deploy/docker-compose.prod.yml,deploy/Caddyfile,deploy/db-backup.sh
-          target: /opt/zuri
-          strip_components: 1
+      # Compiled code plus what install, migrate, backup and rollback need.
+      # src/generated carries the Prisma client and its engine. No secrets.
+      - name: Package release
+        run: |
+          tar -czf "release-${SHA}.tgz" \
+            dist src/generated prisma prisma.config.ts scripts deploy/server \
+            package.json yarn.lock
+          ls -lh "release-${SHA}.tgz"
 
-      - name: Migrate and restart
-        uses: appleboy/ssh-action@v1.2.0
+      # The server's host key is pinned, so nothing can pose as the VPS. The
+      # key is a CI-only key in /home/deploy/.ssh/authorized_keys.
+      - name: Set up SSH
         env:
-          API_IMAGE: ${{ env.IMAGE }}:${{ github.event.workflow_run.head_sha || github.sha }}
-          GHCR_USER: ${{ github.actor }}
-          GHCR_TOKEN: ${{ secrets.GHCR_PULL_TOKEN }}
-        with:
-          host: ${{ secrets.VPS_HOST }}
-          username: ${{ secrets.VPS_USER }}
-          key: ${{ secrets.VPS_SSH_KEY }}
-          envs: API_IMAGE,GHCR_USER,GHCR_TOKEN
-          script: |
-            set -e
-            cd /opt/zuri
-            echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
-            export API_IMAGE
-            docker compose -f docker-compose.prod.yml pull api
-            # A restorable copy before any schema change; keeps the latest 14.
-            mkdir -p backups
-            docker compose -f docker-compose.prod.yml up -d --wait db
-            docker compose -f docker-compose.prod.yml exec -T db \
-              pg_dump -U zuri -Fc zuri > "backups/pre-${API_IMAGE##*:}.dump"
-            ls -1t backups/pre-*.dump | tail -n +15 | xargs -r rm --
-            # Schema changes first; the old version keeps serving until this passes.
-            docker compose -f docker-compose.prod.yml run --rm api npx prisma migrate deploy
-            docker compose -f docker-compose.prod.yml up -d --remove-orphans
-            docker image prune -f
+          KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          KNOWN: ${{ vars.SSH_KNOWN_HOSTS }}
+        run: |
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          printf '%s\n' "$KNOWN" > ~/.ssh/known_hosts
+          cat > ~/.ssh/config <<CONF
+          Host vps
+            HostName ${{ vars.SSH_HOST }}
+            User ${{ vars.SSH_USER || 'deploy' }}
+            IdentityFile ~/.ssh/deploy_key
+            IdentitiesOnly yes
+            StrictHostKeyChecking yes
+            ServerAliveInterval 30
+          CONF
+
+      - name: Upload release
+        run: |
+          ssh vps 'mkdir -p ~/incoming-zuri'
+          scp "release-${SHA}.tgz" deploy/server/deploy.sh vps:incoming-zuri/
+
+      - name: Activate release
+        run: ssh vps "bash ~/incoming-zuri/deploy.sh ${SHA} ~/incoming-zuri/release-${SHA}.tgz"
+
+      - name: Verify health endpoint
+        run: |
+          set -euo pipefail
+          curl -sS --fail --retry 5 --retry-delay 5 --retry-all-errors "${{ vars.API_URL }}/health" | jq -e '.status == "ok"'
+
+      - name: Remove SSH key
+        if: always()
+        run: rm -f ~/.ssh/deploy_key
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "### API deploy: production"
+            echo ""
+            echo "| | |"
+            echo "|---|---|"
+            echo "| Commit | \`${SHA}\` |"
+            echo "| Health | ${{ vars.API_URL }}/health |"
+            echo "| Roll back | \`ssh deploy@${{ vars.SSH_HOST }} bash /srv/zuri-api/current/deploy/server/rollback.sh\` |"
+          } >> "$GITHUB_STEP_SUMMARY"

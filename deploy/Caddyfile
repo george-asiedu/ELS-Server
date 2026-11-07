@@ -1,5 +1,0 @@
-# Replace with your API domain. Caddy gets and renews the TLS certificate.
-api.zuristudios.com {
-	encode gzip
-	reverse_proxy api:5000
-}

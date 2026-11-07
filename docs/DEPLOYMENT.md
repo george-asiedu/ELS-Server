@@ -21,53 +21,93 @@ production is one `api` container plus Redis (for the queue) and Caddy (HTTPS).
 
 ## 2. Production: Contabo VPS
 
-### One-time server setup (Ubuntu)
+The API runs on the same Contabo VPS as Nichelle (Ubuntu 24.04, 8 GB,
+Germany), following the same design: no Docker, a systemd service behind
+Nginx, releases built in GitHub Actions. Nichelle's setup already hardened the
+server (SSH keys only, no root login, UFW 22/80/443, fail2ban, automatic
+updates, swap) and installed Node 22, Redis, Nginx and Certbot. Zuri adds only:
 
-```bash
-# As root
-adduser deploy && usermod -aG sudo deploy
-curl -fsSL https://get.docker.com | sh && usermod -aG docker deploy
-ufw allow OpenSSH && ufw allow 80 && ufw allow 443 && ufw enable
-mkdir -p /opt/zuri && chown deploy:deploy /opt/zuri
-```
+| | |
+|---|---|
+| App user | `zuri` (runs the app; no login; can't change its code) |
+| Service | `zuri-api` on `127.0.0.1:5060`, with its scheduler and email queue |
+| Nginx site | `api.zuristudios.com` → `127.0.0.1:5060`, HTTPS by Certbot |
+| Database | PostgreSQL 17 on loopback, database and role `zuri` |
+| Redis | Nichelle's Redis, database `1`, so queues and keys never mix |
+| Releases | `/srv/zuri-api/releases/*`, `current` symlink, 5 kept |
+| Settings | `/etc/zuri/api.env` (root:zuri, 640), never inside a release |
+| Backups | nightly at 02:30 UTC to `/var/backups/zuri` (14 days) and S3 |
 
-- Add the deploy user's SSH key: generate a key pair just for GitHub,
-  put the public key in `/home/deploy/.ssh/authorized_keys`.
-- Create `/opt/zuri/.env` with the production values from `.env.example`
-  (Paystack **live** keys, `ROOT_DOMAIN=zuristudios.com`,
-  `CLIENT_URL=https://zuristudios.com`, AWS media bucket, Plunk, JWT secrets, and
-  so on). Optional: `OPENAI_API_KEY` turns on the image maker in the studio admin
-  (`AI_IMAGES_PER_MONTH`, default 20 per studio). `PORT`, `REDIS_URL`,
-  `SCHEDULER_ENABLED`, `TRUST_PROXY_HOPS` and `DATABASE_URL` are set by the
-  compose file. `chmod 600 /opt/zuri/.env`.
-- **Database:** Postgres runs on the VPS in the `db` container. Add to `.env`:
-  - `POSTGRES_PASSWORD`: letters and numbers only (it goes inside a URL), e.g.
-    `openssl rand -hex 24`. Don't change it after the first start: the
-    database keeps the password it was created with.
-  - `BACKUP_S3_BUCKET` (recommended): a **private** S3 bucket for nightly
-    backups. Not the media bucket, which CloudFront serves publicly. The AWS
-    keys already in `.env` need write access to it. Add a lifecycle rule there
-    to delete copies older than 30 days.
-- DNS: `api.zuristudios.com` → the VPS IP. Caddy gets the certificate on
-  first start.
+Port 5060 and Postgres are never opened in UFW; Nginx is the only way in.
+
+### One-time setup
+
+1. **DNS:** `api.zuristudios.com` → an **A** record to the VPS IPv4.
+2. **Copy the setup files and run them** (Local, from `ELS-Server`):
+   ```bash
+   scp -r deploy/server deploy@SERVER_IP:/tmp/zuri-setup
+   ssh -t deploy@SERVER_IP 'sudo bash /tmp/zuri-setup/setup.sh'
+   ```
+   It creates the database with a random password and fills `DATABASE_URL`
+   and `REDIS_URL` into `/etc/zuri/api.env`.
+3. **HTTPS** (Server):
+   `sudo certbot --nginx -d api.zuristudios.com --redirect -m YOU@EMAIL --agree-tos -n`
+4. **Settings** (Server): `sudoedit /etc/zuri/api.env`. Fill every empty value
+   (Paystack **live** keys, JWT secret from `openssl rand -hex 48`, AWS media
+   bucket, Plunk). Check: `sudo grep -nE '^[A-Z_]+=$' /etc/zuri/api.env`;
+   only optional ones (`OPENAI_API_KEY`, `BACKUP_BUCKET`) may stay empty.
+5. **Backups off the server:** create a **private** S3 bucket (not the media
+   one, which CloudFront serves publicly), set `BACKUP_BUCKET`, and give the
+   AWS keys in `api.env` `s3:PutObject` on it. Add a lifecycle rule to delete
+   copies after 30 days. Test: `sudo systemctl start zuri-backup` then
+   `journalctl -u zuri-backup`.
 
 ### GitHub
 
-Environment **production**:
+A CI-only key, so it can be revoked alone (Local):
 
-| Secret            | Value                                                        |
-|-------------------|--------------------------------------------------------------|
-| `VPS_HOST`        | the VPS IP or hostname                                       |
-| `VPS_USER`        | `deploy`                                                     |
-| `VPS_SSH_KEY`     | the private key matching the server's authorized key        |
-| `GHCR_PULL_TOKEN` | a GitHub token with `read:packages` (lets the server pull the image) |
+```bash
+ssh-keygen -t ed25519 -f ~/.ssh/zuri-ci -N "" -C "github-actions@zuri-api"
+ssh-copy-id -i ~/.ssh/zuri-ci.pub deploy@SERVER_IP
+ssh-keyscan -t ed25519 SERVER_IP     # the host key line, for pinning
+```
+
+`ELS-Server` → Settings → Environments → `production` (deployment branch:
+`main`):
+
+| Kind | Name | Value |
+|---|---|---|
+| Variable | `API_URL` | `https://api.zuristudios.com` |
+| Variable | `SSH_HOST` | the VPS IP |
+| Variable | `SSH_USER` | `deploy` |
+| Variable | `SSH_KNOWN_HOSTS` | the line `ssh-keyscan` printed |
+| Secret | `SSH_PRIVATE_KEY` | the contents of `~/.ssh/zuri-ci` (not `.pub`) |
+
+Then delete `~/.ssh/zuri-ci` locally. The old Docker secrets (`VPS_*`,
+`GHCR_PULL_TOKEN`) are no longer used.
 
 ### What a release does
 
-`deploy-prod.yml` builds the Docker image, pushes it to GitHub Container
-Registry, copies `deploy/docker-compose.prod.yml` and `deploy/Caddyfile` to
-`/opt/zuri`, runs `prisma migrate deploy`, then restarts with the new image.
-If the migration fails, the old version keeps running.
+`deploy-prod.yml` runs after CI passes on `main`: builds and packages the
+release, uploads it, then `deploy/server/deploy.sh` installs dependencies,
+backs up the database (`~deploy/zuri-predeploy`, 14 kept), runs
+`prisma migrate deploy`, switches `current`, restarts and waits for
+`/health`. If the new release doesn't come up, it switches back by itself.
+
+### Running it (Server, as deploy)
+
+| To… | Run |
+|---|---|
+| see if it's running | `systemctl status zuri-api` |
+| follow logs | `journalctl -u zuri-api -f` |
+| restart after editing `api.env` | `sudo systemctl restart zuri-api` |
+| list / roll back releases | `bash /srv/zuri-api/current/deploy/server/rollback.sh --list` (no flag: one back) |
+| Nginx errors | `sudo tail -f /var/log/nginx/zuri-api.error.log` |
+| database shell | `sudo -u postgres psql zuri` |
+
+**Shared server:** Zuri and Nichelle share 8 GB. `zuri-api` is capped at
+1.5 GB and Postgres is sized for the rest; watch `free -h`. If Nichelle's Redis
+password is ever changed, update `REDIS_URL` in `/etc/zuri/api.env` too.
 
 ## 3. Database migrations
 
@@ -109,25 +149,21 @@ new code starts. So every migration must still work with the code before it:
 
 ### Backups and restore
 
-- **Nightly:** the `backup` container writes `/opt/zuri/backups/nightly-*.dump`
-  (14 days kept) and copies each to `BACKUP_S3_BUCKET` when set. Check it with
-  `docker compose -f docker-compose.prod.yml logs backup`.
-- **Before each release:** `/opt/zuri/backups/pre-<sha>.dump` (latest 14).
-- **Contabo auto backup** snapshots the whole server as a further fallback.
+- **Nightly:** `zuri-backup.timer` → `/var/backups/zuri` (14 days) and
+  `BACKUP_BUCKET`. Check with `journalctl -u zuri-backup`.
+- **Before each release:** `~deploy/zuri-predeploy/pre-<sha>.dump`.
+- **Contabo auto backup** of the whole server is a further fallback.
 
-To restore a dump (this replaces the current data; stop the API first):
+To restore (this replaces the current data):
 
 ```bash
-cd /opt/zuri
-docker compose -f docker-compose.prod.yml stop api
-docker compose -f docker-compose.prod.yml exec -T db \
-  pg_restore -U zuri -d zuri --clean --if-exists < backups/<file>.dump
-docker compose -f docker-compose.prod.yml start api
+sudo systemctl stop zuri-api
+sudo -u postgres pg_restore -d zuri --clean --if-exists --no-owner --role=zuri /path/to/file.dump
+sudo systemctl start zuri-api
 ```
 
-Try a restore once after going live, so you know it works. To undo a bad
-migration, restore the matching `pre-<sha>.dump`, or fix it forward with a new
-migration.
+Try a restore once after going live, into a scratch database
+(`sudo -u postgres createdb -O zuri zuri_check`) so you know it works.
 
 ## Sessions and cookies
 
@@ -145,4 +181,6 @@ Signed-in sessions are `HttpOnly` cookies on the API's host, one per studio.
 
 ## Rollback
 
-On the server: `cd /opt/zuri && API_IMAGE=ghcr.io/<owner>/els-server:<previous-sha> docker compose -f docker-compose.prod.yml up -d`.
+`bash /srv/zuri-api/current/deploy/server/rollback.sh` on the server puts the
+previous release back (code only; the database stays, so keep migrations
+additive).
