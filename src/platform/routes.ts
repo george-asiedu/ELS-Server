@@ -1,6 +1,7 @@
 import { billingAdminRoutes } from "./billingAdmin";
 import { cachePublic } from "../cache/cache";
 import { Router } from "express";
+import { AuthController } from "../auth/authController";
 import { PlatformController } from "./platformController";
 import { FeatureRequestController } from "../featureRequest/featureRequestController";
 import { PlatformReviewController } from "../platformReview/platformReviewController";
@@ -27,6 +28,12 @@ router.get("/public-stats", cachePublic(300), PlatformController.publicStats);
 // Everything below requires a signed-in super admin.
 router.use(authenticate, requireSuperAdmin);
 router.post("/auth/logout", PlatformController.logout);
+// Two-step sign-in for the super admin's own account.
+router.get("/auth/2fa", AuthController.twoFactorStatus);
+router.post("/auth/2fa/setup", AuthController.twoFactorSetup);
+router.post("/auth/2fa/enable", AuthController.twoFactorEnable);
+router.post("/auth/2fa/disable", AuthController.twoFactorDisable);
+router.post("/auth/2fa/recovery-codes", AuthController.twoFactorRecoveryCodes);
 
 router.get("/me", PlatformController.me);
 router.use(billingAdminRoutes);

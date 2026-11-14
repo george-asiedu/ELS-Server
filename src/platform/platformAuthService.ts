@@ -1,3 +1,4 @@
+import { assertSignInCode } from "../auth/twoFactor";
 import { randomBytes, createHash } from "crypto";
 import { Connection } from "../db/dbConnection";
 import { ApiError } from "../middleware/apiError";
@@ -37,6 +38,7 @@ export class PlatformAuthService extends Connection {
     email: string,
     password: string,
     device?: LoginDeviceMetadata,
+    totp?: unknown,
   ) {
     const normalized = String(email ?? "")
       .trim()
@@ -83,6 +85,7 @@ export class PlatformAuthService extends Connection {
       }
       throw new ApiError("Invalid email or password", HttpCode.BAD_REQUEST);
     }
+    await assertSignInCode(user, totp, lockKey);
     await clearLoginFailures(lockKey);
 
     const { token, isNewDevice, deviceKey } = await createLoginSession(

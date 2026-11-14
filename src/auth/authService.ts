@@ -18,9 +18,8 @@ import {
 } from "../notifications/templates/auth";
 import { brandFromStudio, platformBrand } from "../notifications/brand";
 import { createLoginSession, revokeLoginSessions } from "./sessionService";
-import { HttpCode } from "../models/status_codes";
 import { LoginDeviceMetadata } from "./loginDevice";
-import { verifySignInCode } from "./twoFactor";
+import { assertSignInCode } from "./twoFactor";
 import { confirmEmailCode, sendEmailCode } from "./emailCode";
 import {
   assertNotLocked,
@@ -202,23 +201,7 @@ export class AuthService extends UserRepository {
       }
       throw new ApiError("Invalid email or password", 400);
     }
-    if (user.totpEnabled) {
-      if (!data.totp) {
-        // The client shows the code step; not a failure.
-        throw new ApiError(
-          "Enter the code from your authenticator app",
-          HttpCode.UNAUTHORIZED_ACCESS,
-          [{ code: "TOTP_REQUIRED" }],
-        );
-      }
-      if (!(await verifySignInCode(user, data.totp))) {
-        const lock = await recordLoginFailure(lockKey);
-        if (lock) throw lock.error;
-        throw new ApiError("That code isn't right", HttpCode.UNAUTHORIZED_ACCESS, [
-          { code: "TOTP_INVALID" },
-        ]);
-      }
-    }
+    await assertSignInCode(user, data.totp, lockKey);
     await clearLoginFailures(lockKey);
 
     const payload = {

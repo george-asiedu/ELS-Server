@@ -52,6 +52,7 @@ export class PlatformController {
       email,
       password,
       getLoginDeviceMetadata(req),
+      req.body?.totp,
     );
     return res.status(200).json(withoutToken(req, res, result));
   };

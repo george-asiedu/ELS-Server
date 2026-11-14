@@ -11,6 +11,7 @@ import { env } from "../config/env.config";
 import { ApiError } from "../middleware/apiError";
 import { HttpCode } from "../models/status_codes";
 import { getPasswordHash, verifyPassword } from "../utils/helper";
+import { recordLoginFailure } from "./loginLockout";
 
 // Authenticator-app two-factor sign-in (TOTP, RFC 6238), as in the Westend
 // City Church app: an encrypted secret per user, a QR code to scan, ten
@@ -118,6 +119,38 @@ export const verifySignInCode = async (
   return /^\d{6}$/.test(code)
     ? acceptCode(user, code)
     : useRecoveryCode(user.id, code);
+};
+
+/**
+ * The second step of any sign-in, after the password checked out. Throws a
+ * 401 the client recognises: TOTP_REQUIRED shows the code field; a wrong code
+ * counts towards the same lockout as a wrong password.
+ */
+export const assertSignInCode = async (
+  user: {
+    id: string;
+    totpEnabled: boolean;
+    totpSecretEnc: string | null;
+    totpLastStep: number | null;
+  },
+  totp: unknown,
+  lockKey: string,
+) => {
+  if (!user.totpEnabled) return;
+  if (typeof totp !== "string" || !totp.trim()) {
+    throw new ApiError(
+      "Enter the code from your authenticator app",
+      HttpCode.UNAUTHORIZED_ACCESS,
+      [{ code: "TOTP_REQUIRED" }],
+    );
+  }
+  if (!(await verifySignInCode(user, totp))) {
+    const lock = await recordLoginFailure(lockKey);
+    if (lock) throw lock.error;
+    throw new ApiError("That code isn't right", HttpCode.UNAUTHORIZED_ACCESS, [
+      { code: "TOTP_INVALID" },
+    ]);
+  }
 };
 
 const load = (userId: string) =>
