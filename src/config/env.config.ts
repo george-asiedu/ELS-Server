@@ -93,6 +93,19 @@ export const env = {
       ? process.env.SCHEDULER_ENABLED.trim().toLowerCase() === "true"
       : (process.env.NODE_ENV ?? "").trim().toLowerCase() === "production",
   clientUrl: process.env.CLIENT_URL as string,
+  // Encrypts authenticator-app secrets (32 random bytes, base64). Optional:
+  // without it a key is derived from JWT_SECRET. Set it in production, and
+  // never change it once set, or everyone's two-step sign-in stops working.
+  totpEncryptionKey: (process.env.TOTP_ENCRYPTION_KEY as string) || "",
+  // Web push (VAPID). Generate once with `npx web-push generate-vapid-keys`.
+  // Without the keys, push stays off and the app says so.
+  vapid: {
+    publicKey: (process.env.VAPID_PUBLIC_KEY as string) || "",
+    privateKey: (process.env.VAPID_PRIVATE_KEY as string) || "",
+    subject:
+      (process.env.VAPID_SUBJECT as string) ||
+      "mailto:customersupport@zuristudios.com",
+  },
   // Studio slug used when a request carries no studio hint (subdomain/header).
   // Apex host of the platform, e.g. "app.example.com"; its subdomains are
   // studios and the apex itself is the super-admin surface.

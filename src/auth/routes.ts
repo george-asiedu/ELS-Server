@@ -14,6 +14,15 @@ router.post(
   authenticate,
   AuthController.confirmEmailCode,
 );
+router.get("/2fa", authenticate, AuthController.twoFactorStatus);
+router.post("/2fa/setup", authenticate, AuthController.twoFactorSetup);
+router.post("/2fa/enable", authenticate, AuthController.twoFactorEnable);
+router.post("/2fa/disable", authenticate, AuthController.twoFactorDisable);
+router.post(
+  "/2fa/recovery-codes",
+  authenticate,
+  AuthController.twoFactorRecoveryCodes,
+);
 router.post("/forgot-password", AuthController.forgotPassword);
 router.post("/reset-password/:token", AuthController.resetPassword);
 

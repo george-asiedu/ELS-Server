@@ -3,6 +3,7 @@ import { emailQueue } from "../queue/queues";
 import { sendEmailNow } from "../email/emailService";
 import { NotificationTemplateKey } from "./registry";
 import type { EmailAttachment } from "../email/emailService";
+import { pushForNotification } from "../push/pushService";
 
 export interface SendNotificationArgs {
   template: NotificationTemplateKey;
@@ -47,6 +48,10 @@ export class NotificationService extends Connection {
       },
     });
     if (existing) return; // already notified for this exact event — no-op
+
+    // The same event as a push to the recipient's devices (if they turned it
+    // on). Not awaited and never throws, so it can't hold up or break the email.
+    void pushForNotification(args);
 
     const queued = Boolean(emailQueue);
     let log: { id: string };

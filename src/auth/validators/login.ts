@@ -30,6 +30,12 @@ const loginSchema: JSONSchemaType<Login> = {
         minLength: "Password is required",
       },
     },
+    totp: {
+      type: "string",
+      nullable: true,
+      maxLength: 20,
+      errorMessage: { type: "Code must be a string" },
+    },
   },
   required: ["email", "password"],
   additionalProperties: false,

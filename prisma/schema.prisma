@@ -560,6 +560,14 @@ model User {
   // choose to later, from their account. Nothing is blocked without it.
   emailVerifiedAt  DateTime?
 
+  // Authenticator-app two-factor sign-in. The secret is AES-GCM encrypted;
+  // totpLastStep is the last 30-second step accepted, so a code can't be reused.
+  totpSecretEnc     String?
+  totpEnabled       Boolean            @default(false)
+  totpLastStep      Int?
+  recoveryCodes     RecoveryCode[]
+  pushSubscriptions PushSubscription[]
+
   profile             Profile?
   appointments        Appointment[]
   reviews             Review[]
@@ -581,6 +589,34 @@ model User {
   @@index([studioId])
   @@index([role])
   @@map("users")
+}
+
+// One-time codes for signing in without the authenticator app. Hashed; shown once.
+model RecoveryCode {
+  id       String    @id @default(cuid())
+  userId   String
+  user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  codeHash String
+  usedAt   DateTime?
+
+  @@index([userId])
+  @@map("recovery_codes")
+}
+
+// A browser or installed app that gets push notifications for this user.
+model PushSubscription {
+  id            String    @id @default(cuid())
+  userId        String
+  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  endpoint      String    @unique
+  p256dh        String
+  auth          String
+  userAgent     String?   @db.VarChar(300)
+  createdAt     DateTime  @default(now())
+  lastSuccessAt DateTime?
+
+  @@index([userId])
+  @@map("push_subscriptions")
 }
 
 // Server-side bearer-token sessions allow immediate revocation and enforce a

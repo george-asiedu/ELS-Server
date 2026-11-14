@@ -2,6 +2,7 @@ import wishlistRoutes from "../wishlist/routes";
 import couponRoutes from "../coupon/routes";
 import { Router } from "express";
 import authRoutes from "../auth/routes";
+import pushRoutes from "../push/routes";
 import profileRoutes from "../profile/routes";
 import serviceRoutes from "../service/routes";
 import appointmentRoutes from "../appointment/routes";
@@ -38,6 +39,7 @@ router.use("/uploads", uploadRoutes);
 router.use("/studio", studioRoutes);
 
 router.use("/auth", authRoutes);
+router.use("/push", pushRoutes);
 router.use("/profile", profileRoutes);
 router.use("/categories", categoryRoutes);
 router.use("/services", serviceRoutes);

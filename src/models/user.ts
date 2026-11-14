@@ -9,6 +9,8 @@ export interface Signup {
 export interface Login {
   email: string;
   password: string;
+  // The authenticator (or recovery) code, once the account asks for one.
+  totp?: string;
 }
 
 export enum AuthToken {

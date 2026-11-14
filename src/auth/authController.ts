@@ -8,6 +8,16 @@ import { revokeLoginSession } from "./sessionService";
 import { getLoginDeviceMetadata } from "./loginDevice";
 import { clearSessionCookie, withoutToken } from "./sessionCookie";
 import { assertValid } from "../utils/validation";
+import {
+  confirmTwoFactorSetup,
+  disableTwoFactor,
+  regenerateRecoveryCodes,
+  startTwoFactorSetup,
+  twoFactorStatus,
+} from "./twoFactor";
+import { createTenantClient } from "../tenant/tenantClient";
+
+const { raw } = createTenantClient();
 
 const authService = new AuthService();
 
@@ -71,6 +81,46 @@ export class AuthController {
       throw new ApiError("Token is required", 400);
     }
     const result = await authService.resetPassword(token, req.body.password);
+    return res.status(200).json(result);
+  };
+
+  // ---- Two-step sign-in (authenticator app)
+
+  public static twoFactorStatus = async (req: Request, res: Response) => {
+    return res.status(200).json(await twoFactorStatus(req.user!.id));
+  };
+
+  public static twoFactorSetup = async (req: Request, res: Response) => {
+    // The app lists the account under the studio's name (or the platform's).
+    const studio = req.user!.studioId
+      ? await raw.studio.findUnique({
+          where: { id: req.user!.studioId },
+          select: { name: true },
+        })
+      : null;
+    const result = await startTwoFactorSetup(
+      req.user!.id,
+      studio?.name ?? "Zuri Studios",
+    );
+    return res.status(200).json(result);
+  };
+
+  public static twoFactorEnable = async (req: Request, res: Response) => {
+    const result = await confirmTwoFactorSetup(req.user!.id, req.body?.code);
+    return res.status(200).json(result);
+  };
+
+  public static twoFactorDisable = async (req: Request, res: Response) => {
+    const result = await disableTwoFactor(
+      req.user!.id,
+      req.body?.password,
+      req.body?.code,
+    );
+    return res.status(200).json(result);
+  };
+
+  public static twoFactorRecoveryCodes = async (req: Request, res: Response) => {
+    const result = await regenerateRecoveryCodes(req.user!.id, req.body?.code);
     return res.status(200).json(result);
   };
 }
