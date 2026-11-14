@@ -932,21 +932,20 @@ export class PlatformService extends Connection {
    * Public figures for the platform's landing page (shown as they are).
    */
   public async getPublicStats() {
-    const [studios, bookings, customers, pay] = await Promise.all([
+    const [studios, bookings, customers, orders] = await Promise.all([
       this.studio.count({ where: { status: "ACTIVE" } }),
       this.appointment.count({
         where: { status: { in: ["CONFIRMED", "COMPLETED"] } },
       }),
       this.user.count({ where: { role: "CUSTOMER" } }),
-      this.customerPaymentsByStudio(),
+      // Shop orders customers paid for (and those already handed over).
+      this.order.count({ where: { status: { in: ["PAID", "FULFILLED"] } } }),
     ]);
-    let processed = 0;
-    for (const v of pay.total.values()) processed += v;
     return {
       studiosLive: studios,
       bookingsMade: bookings,
       customers,
-      paymentsProcessed: Math.round(processed),
+      ordersPlaced: orders,
     };
   }
 
