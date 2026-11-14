@@ -369,7 +369,7 @@ export const renderShell = (args: {
             <td bgcolor="#ffffff" class="email-card email-padding" style="background: #ffffff; padding: 32px 32px 8px; font-size: 15px; line-height: 1.55; color: #333333;">
               ${bodyHtml}
               <p style="margin: 28px 0 0; font-size: 15px; line-height: 1.55; color: #333333;">Kind regards,</p>
-              <p style="margin: 2px 0 24px; font-size: 16px; line-height: 1.5; color: ${BAND};">The ${esc(name)} team</p>
+              <p style="margin: 2px 0 24px; font-size: 16px; line-height: 1.5; color: ${BAND};">${esc(name)}</p>
             </td>
           </tr>
           <tr>
