@@ -64,6 +64,19 @@ export const JOBS: JobDefinition[] = [
     },
   },
   {
+    key: "review-requests",
+    label: "Review requests",
+    description:
+      "Asks customers for a review (email and push) a day after a completed visit and a few days after an order was handed over. Each is asked once.",
+    schedule: { periodMinutes: 24 * 60, offsetMinutes: 10 * 60 },
+    scheduleLabel: "Daily at 10:00 UTC",
+    maxRunMinutes: 20,
+    run: async () => {
+      const { ReviewRequestService } = await import("../reviews/reviewRequests");
+      return { ...(await new ReviewRequestService().sendDue()) };
+    },
+  },
+  {
     key: "monthly-reports",
     label: "Monthly reports",
     description:

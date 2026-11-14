@@ -104,6 +104,7 @@ const PUSH_ROUTES: Partial<Record<NotificationTemplateKey, string>> = {
   FEATURE_REQUEST_SUBMITTED_PLATFORM: "/platform",
   STUDIO_MONTHLY_REPORT: "/admin/analytics",
   REFUNDED_BY_STUDIO: "/account",
+  REVIEW_REQUEST: "/account",
 };
 
 /**
@@ -138,8 +139,9 @@ export const pushForNotification = async (args: {
   studioId?: string | null;
   entityId: string;
   pushBody?: string;
+  pushUrl?: string;
 }): Promise<number> => {
-  const url = PUSH_ROUTES[args.template];
+  const url = args.pushUrl ?? PUSH_ROUTES[args.template];
   if (!url) return 0;
   try {
     const users = await raw.user.findMany({

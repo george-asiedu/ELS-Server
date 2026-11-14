@@ -24,6 +24,8 @@ export interface SendNotificationArgs {
   // The push that goes with this email says this instead of the subject
   // (e.g. "Your report is in your email").
   pushBody?: string;
+  // Where tapping the push opens, when it should be a particular page.
+  pushUrl?: string;
 }
 
 /**
