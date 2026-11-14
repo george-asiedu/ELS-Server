@@ -100,6 +100,9 @@ export class Connection {
   get expense() {
     return this.db.expense;
   }
+  get customerNote() {
+    return this.db.customerNote;
+  }
   get contactInfo() {
     return this.db.contactInfo;
   }

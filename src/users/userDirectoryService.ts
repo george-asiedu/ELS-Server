@@ -181,9 +181,35 @@ export class UserDirectoryService extends Connection {
         }),
       ]);
 
+    // The business's own view: favourite service, last visit, missed
+    // bookings, and its private notes (not for platform accounts).
+    const [favourite, lastVisit, noShows, note] = await Promise.all([
+      this.appointment.groupBy({
+        by: ["serviceId"],
+        where: { userId: id, status: { in: ["CONFIRMED", "COMPLETED"] } },
+        _count: { _all: true },
+        orderBy: { _count: { serviceId: "desc" } },
+        take: 1,
+      }),
+      this.appointment.findFirst({
+        where: { userId: id, status: "COMPLETED" },
+        orderBy: { appointmentDate: "desc" },
+        select: { appointmentDate: true },
+      }),
+      this.appointment.count({ where: { userId: id, status: "NO_SHOW" } }),
+      user.studioId ? this.customerNote.findFirst({ where: { userId: id }, select: { notes: true } }) : null,
+    ]);
+    const favouriteService = favourite[0]
+      ? await this.service.findUnique({ where: { id: favourite[0].serviceId }, select: { name: true } })
+      : null;
+
     return {
       message: "User",
       data: {
+        favouriteService: favouriteService?.name ?? null,
+        lastVisit: lastVisit?.appointmentDate ?? null,
+        noShows,
+        notes: note?.notes ?? "",
         id: user.id,
         email: user.email,
         role: user.role,
@@ -221,6 +247,17 @@ export class UserDirectoryService extends Connection {
         })),
       },
     };
+  }
+
+  /** A business's private notes about a customer. */
+  public async saveNotes(id: string, notes: unknown) {
+    const user = await this.user.findFirst({ where: { id }, select: { id: true } });
+    if (!user) throw new ApiError("User not found", HttpCode.NOT_FOUND);
+    const text = typeof notes === "string" ? notes.trim().slice(0, 2000) : "";
+    const existing = await this.customerNote.findFirst({ where: { userId: id } });
+    if (existing) await this.customerNote.update({ where: { id: existing.id }, data: { notes: text } });
+    else await this.customerNote.create({ data: { userId: id, notes: text } });
+    return { message: "Notes saved", data: { notes: text } };
   }
 
   /** Super admin only: name, phone, location and email. */

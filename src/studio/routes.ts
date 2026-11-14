@@ -29,6 +29,8 @@ router.get(
   requireAdmin,
   UserDirectoryController.studioDetail,
 );
+// The business's private notes about a customer.
+router.put("/users/:id/notes", authenticate, requireAdmin, UserDirectoryController.studioNotes);
 
 // Admin: what customers paid and what Paystack has paid out to the studio.
 router.get("/money", authenticate, requireAdmin, StudioController.getMoney);

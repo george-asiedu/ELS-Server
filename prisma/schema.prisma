@@ -1027,6 +1027,18 @@ model Expense {
   @@map("expenses")
 }
 
+// A business's private notes about one of its customers ("allergic to X").
+model CustomerNote {
+  id        String   @id @default(cuid())
+  studioId  String?
+  userId    String
+  notes     String   @db.VarChar(2000)
+  updatedAt DateTime @updatedAt
+
+  @@unique([studioId, userId])
+  @@map("customer_notes")
+}
+
 model BlockedDate {
   id       String   @id @default(cuid())
   studioId String?
