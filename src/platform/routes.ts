@@ -3,6 +3,7 @@ import { cachePublic } from "../cache/cache";
 import { Router } from "express";
 import { AuthController } from "../auth/authController";
 import pushRoutes from "../push/routes";
+import inboxRoutes from "../push/inboxRoutes";
 import { PlatformController } from "./platformController";
 import { FeatureRequestController } from "../featureRequest/featureRequestController";
 import { PlatformReviewController } from "../platformReview/platformReviewController";
@@ -36,6 +37,7 @@ router.post("/auth/2fa/enable", AuthController.twoFactorEnable);
 router.post("/auth/2fa/disable", AuthController.twoFactorDisable);
 router.post("/auth/2fa/recovery-codes", AuthController.twoFactorRecoveryCodes);
 router.use("/push", pushRoutes);
+router.use("/inbox", inboxRoutes);
 
 router.get("/me", PlatformController.me);
 router.use(billingAdminRoutes);

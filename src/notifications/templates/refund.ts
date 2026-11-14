@@ -97,3 +97,32 @@ export const refundFailed = (
     }),
   };
 };
+
+/**
+ * Sent to the CUSTOMER when the studio records that it paid them back itself
+ * (Mobile Money, cash or bank) for a cancelled booking or order.
+ */
+export const refundedByStudio = (
+  brand: EmailBrand,
+  data: { customerFirstName: string; studioName: string; amount: number; what: string },
+) => {
+  const amount = `GHS ${data.amount.toFixed(2)}`;
+  return {
+    subject: `${data.studioName} has refunded you ${amount}`,
+    html: renderShell({
+      brand,
+      previewText: `${amount} for ${data.what}.`,
+      documentType: "Refund",
+      bodyHtml: `
+        ${statusBadge("success", "REFUNDED")}
+        <h1 style="margin: 0 0 12px; font-family: Georgia, serif; font-size: 22px; color: #2A1B1F; text-align: center;">Your refund is on its way</h1>
+        <p style="margin: 0; font-family: Arial, sans-serif; font-size: 15px; color: #2A1B1F; line-height: 1.6; text-align: center;">
+          Hi ${esc(data.customerFirstName)}, ${esc(data.studioName)} has refunded you <strong>${esc(amount)}</strong> for ${esc(data.what)}.
+          They sent it to you directly, so how it arrives depends on how they paid you back (for example Mobile Money).
+        </p>
+        <p class="muted" style="margin: 14px 0 0; font-family: Arial, sans-serif; font-size: 13px; color: #7A6A6E; text-align: center;">
+          If it hasn't reached you within a few days, please contact ${esc(data.studioName)}.
+        </p>`,
+    }),
+  };
+};

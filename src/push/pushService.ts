@@ -103,12 +103,33 @@ const PUSH_ROUTES: Partial<Record<NotificationTemplateKey, string>> = {
   FEATURE_REQUEST_STATUS_STUDIO: "/admin/feature-requests",
   FEATURE_REQUEST_SUBMITTED_PLATFORM: "/platform",
   STUDIO_MONTHLY_REPORT: "/admin/analytics",
+  REFUNDED_BY_STUDIO: "/account",
 };
 
 /**
- * The push twin of an email: the people with that email address (in that
- * studio, or platform accounts) get the subject as a notification. Never
- * throws: a push problem must not affect the email or the event.
+ * Tell people something: a row in their in-app notifications list, plus a
+ * push to every device they've switched on. Returns how many devices got it.
+ */
+export const notifyUsers = async (userIds: string[], payload: PushPayload) => {
+  const ids = [...new Set(userIds)];
+  if (!ids.length) return 0;
+  await raw.notification.createMany({
+    data: ids.map((userId) => ({
+      userId,
+      title: payload.title.slice(0, 120),
+      body: payload.body.slice(0, 400),
+      url: payload.url.slice(0, 300),
+    })),
+  });
+  const { sent } = await pushToUsers(ids, payload);
+  return sent;
+};
+
+/**
+ * The in-app and push twin of an email: the people with that email address
+ * (in that studio, or platform accounts) get the subject as a notification.
+ * Returns how many devices got the push. Never throws: a problem here must
+ * not affect the email or the event.
  */
 export const pushForNotification = async (args: {
   template: NotificationTemplateKey;
@@ -119,7 +140,7 @@ export const pushForNotification = async (args: {
   pushBody?: string;
 }): Promise<number> => {
   const url = PUSH_ROUTES[args.template];
-  if (!url || !pushConfigured) return 0;
+  if (!url) return 0;
   try {
     const users = await raw.user.findMany({
       where: {
@@ -127,7 +148,6 @@ export const pushForNotification = async (args: {
         // A studio's email reaches that studio's accounts; a platform email
         // (no studio) reaches the super admins.
         ...(args.studioId ? { studioId: args.studioId } : { studioId: null }),
-        pushSubscriptions: { some: {} },
       },
       select: { id: true },
     });
@@ -138,7 +158,7 @@ export const pushForNotification = async (args: {
           select: { name: true },
         })
       : null;
-    const { sent } = await pushToUsers(
+    return await notifyUsers(
       users.map((u) => u.id),
       {
         title: studio?.name ?? "Zuri Studios",
@@ -147,9 +167,8 @@ export const pushForNotification = async (args: {
         tag: `${args.template}:${args.entityId}`,
       },
     );
-    return sent;
   } catch (e) {
-    console.warn(`Push for ${args.template} failed:`, (e as Error).message);
+    console.warn(`Notice for ${args.template} failed:`, (e as Error).message);
     return 0;
   }
 };
@@ -162,17 +181,16 @@ export const PUSH_FIRST = new Set<NotificationTemplateKey>([
 ]);
 
 /**
- * A push to every admin of a studio (with devices on), sent once per `key`:
- * the notification log's unique key stops a second sweep repeating it.
+ * A notice (in-app and push) to every admin of a studio, sent once per `key`:
+ * the notification log's unique key stops a repeat.
  */
-export const pushToStudioAdmins = async (
+export const notifyStudioAdmins = async (
   studioId: string,
-  key: { template: NotificationTemplateKey; entityId: string },
+  key: { template: string; entityId: string; entityType?: string },
   payload: PushPayload,
 ) => {
-  if (!pushConfigured) return 0;
   const admins = await raw.user.findMany({
-    where: { studioId, role: "ADMIN", pushSubscriptions: { some: {} } },
+    where: { studioId, role: "ADMIN" },
     select: { id: true },
   });
   if (!admins.length) return 0;
@@ -182,7 +200,7 @@ export const pushToStudioAdmins = async (
         studioId,
         template: key.template,
         recipient: `admins:${studioId}`,
-        entityType: "Appointment",
+        entityType: key.entityType ?? "Appointment",
         entityId: key.entityId,
         status: "PUSHED",
         sentAt: new Date(),
@@ -192,9 +210,8 @@ export const pushToStudioAdmins = async (
     if ((e as { code?: string }).code === "P2002") return 0; // already sent
     throw e;
   }
-  const { sent } = await pushToUsers(
+  return notifyUsers(
     admins.map((a) => a.id),
     payload,
   );
-  return sent;
 };

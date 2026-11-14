@@ -1,4 +1,4 @@
-import { pushToStudioAdmins } from "../push/pushService";
+import { notifyStudioAdmins } from "../push/pushService";
 import { Connection, TenantTx } from "../db/dbConnection";
 import {
   CursorPage,
@@ -412,7 +412,7 @@ export class AppointmentService extends Connection {
 
         // The studio's admins get a push for every booking (walk-ins too).
         if (appt.studioId) {
-          await pushToStudioAdmins(
+          await notifyStudioAdmins(
             appt.studioId,
             {
               template:

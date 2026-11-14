@@ -567,6 +567,7 @@ model User {
   totpLastStep      Int?
   recoveryCodes     RecoveryCode[]
   pushSubscriptions PushSubscription[]
+  notifications     Notification[]
 
   profile             Profile?
   appointments        Appointment[]
@@ -601,6 +602,22 @@ model RecoveryCode {
 
   @@index([userId])
   @@map("recovery_codes")
+}
+
+// The in-app notifications list: everything sent as a push is also kept here,
+// so it can be read in the app whether or not push is switched on.
+model Notification {
+  id        String    @id @default(cuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title     String    @db.VarChar(120)
+  body      String    @db.VarChar(400)
+  url       String    @db.VarChar(300)
+  readAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId, createdAt])
+  @@map("notifications")
 }
 
 // A browser or installed app that gets push notifications for this user.
@@ -709,8 +726,17 @@ model Appointment {
   // product order per appointment is enforced in application code.
   productOrders       Order[]
 
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  // The customer asked to cancel; the studio approves (status CANCELLED) or
+  // declines (cleared). Refunds are settled by the studio outside the app.
+  cancelRequestedAt     DateTime?
+  cancelRequestReason   String?   @db.VarChar(500)
+  // The studio paid the customer back itself (Mobile Money, cash, bank) and
+  // recorded it here. No money moves through the platform.
+  refundedOutsideAt     DateTime?
+  refundedOutsideAmount Float?
+  refundedOutsideNote   String?   @db.VarChar(300)
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
 
   @@index([studioId])
   @@index([userId])
@@ -1126,8 +1152,17 @@ model Order {
   channel       String?
   paidAt        DateTime?
 
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  // The customer asked to cancel; the studio approves (status CANCELLED) or
+  // declines (cleared). Refunds are settled by the studio outside the app.
+  cancelRequestedAt     DateTime?
+  cancelRequestReason   String?   @db.VarChar(500)
+  // The studio paid the customer back itself (Mobile Money, cash, bank) and
+  // recorded it here. No money moves through the platform.
+  refundedOutsideAt     DateTime?
+  refundedOutsideAmount Float?
+  refundedOutsideNote   String?   @db.VarChar(300)
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
 
   @@unique([studioId, orderNumber])
   @@index([studioId])

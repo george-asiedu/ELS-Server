@@ -90,7 +90,7 @@ const { raw: rawDb } = createTenantClient();
 
 // What an admin without two-step sign-in can still reach: setting it up,
 // signing out, their own details, and their notification devices.
-const TWO_FACTOR_EXEMPT = /^\/(auth\/(2fa|logout)|me$|push)/;
+const TWO_FACTOR_EXEMPT = /^\/(auth\/(2fa|logout)|me$|push|inbox)/;
 
 /**
  * Admins and the super admin must have two-step sign-in on before they can
