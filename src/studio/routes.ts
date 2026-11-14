@@ -102,6 +102,11 @@ router.put(
 router.get("/payout", authenticate, requireAdmin, StudioController.getPayout);
 // Who pays Paystack's fee on customer payments: the customer or the business.
 router.get("/messaging", authenticate, requireAdmin, StudioController.getMessaging);
+// Invite another business: the invite link and how many joined through it.
+router.get("/referrals", authenticate, requireAdmin, async (req, res) => {
+  const { referralSummary } = await import("../billing/businessReferral");
+  return res.status(200).json({ data: await referralSummary(req.studioId!) });
+});
 router.put("/messaging", authenticate, requireAdmin, StudioController.setMessaging);
 router.get("/fee-payer", authenticate, requireAdmin, StudioController.getFeePayer);
 router.put("/fee-payer", authenticate, requireAdmin, StudioController.setFeePayer);

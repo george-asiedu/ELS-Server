@@ -1,3 +1,4 @@
+import { rewardBusinessReferral } from "../billing/businessReferral";
 import jwt from "jsonwebtoken";
 import { shortId } from "../utils/shortId";
 import { studioLink } from "../utils/studioLink";
@@ -152,6 +153,7 @@ export class OnboardingService extends Connection {
   public async start(input: {
     emailToken?: unknown;
     promoCode?: unknown;
+    ref?: unknown;
     name?: unknown;
     slug?: unknown;
     ownerEmail?: unknown;
@@ -261,6 +263,8 @@ export class OnboardingService extends Connection {
         ...(shopCategory ? { shopCategory } : {}),
         reference,
         ...(promo.code ? { promoCode: promo.code } : {}),
+        // An invite link from another business (checked when provisioning).
+        ...(typeof input.ref === "string" && /^[a-z0-9-]{2,60}$/.test(input.ref) ? { referralSlug: input.ref } : {}),
         status: "PENDING",
         // Recorded now, so finalize provisions exactly what was paid for even
         // if the super admin changes the fees in between.
@@ -392,6 +396,12 @@ export class OnboardingService extends Connection {
       }),
     );
     await countPromoUse(signup.promoCode);
+    // Invited by another business: link them and reward both.
+    if (signup.referralSlug && signup.referralSlug !== signup.slug) {
+      await rewardBusinessReferral(signup.referralSlug, studio.id).catch((e) =>
+        console.warn("Business referral reward failed:", (e as Error).message),
+      );
+    }
 
     await this.studioSignup.update({
       where: { id: signup.id },

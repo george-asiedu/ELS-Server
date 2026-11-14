@@ -176,8 +176,10 @@ model Studio {
   settings        StudioSettings?
   featureRequests FeatureRequest[]
 
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  // The business whose invite link this one signed up through.
+  referredByStudioId String?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
 
   @@map("studios")
 }
@@ -396,6 +398,8 @@ model StudioSignup {
   cadence           BillingCadence @default(MONTHLY)
   billingMode       BillingMode    @default(SUBSCRIPTION)
   shopCategory      String?
+  // The inviting business's address (slug), from ?ref= on the signup link.
+  referralSlug      String?
   promoCode         String?
   reference         String         @unique
   status            SignupStatus   @default(PENDING)
