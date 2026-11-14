@@ -2,6 +2,7 @@ import {
   createCipheriv,
   createDecipheriv,
   createHash,
+  createHmac,
   randomBytes,
 } from "crypto";
 import { authenticator } from "otplib";
@@ -10,7 +11,7 @@ import { createTenantClient } from "../tenant/tenantClient";
 import { env } from "../config/env.config";
 import { ApiError } from "../middleware/apiError";
 import { HttpCode } from "../models/status_codes";
-import { getPasswordHash, verifyPassword } from "../utils/helper";
+import { verifyPassword } from "../utils/helper";
 import { recordLoginFailure } from "./loginLockout";
 
 // Authenticator-app two-factor sign-in (TOTP, RFC 6238), as in the Westend
@@ -49,6 +50,11 @@ const decrypt = (payload: string): string => {
     "utf8",
   );
 };
+
+// Recovery codes carry ~50 bits of randomness, so a keyed hash is enough (no
+// slow password hash needed) and a code can be looked up directly.
+const hashRecoveryCode = (code: string) =>
+  createHmac("sha256", env.JWT_SECRET).update(`recovery:${code}`).digest("hex");
 
 const bad = (message: string) => new ApiError(message, HttpCode.BAD_REQUEST);
 
@@ -94,20 +100,13 @@ const acceptCode = async (
 const useRecoveryCode = async (userId: string, input: string) => {
   const clean = input.toLowerCase().replace(/[^a-z0-9]/g, "");
   if (clean.length !== 10) return false;
-  const formatted = `${clean.slice(0, 5)}-${clean.slice(5)}`;
-  const codes = await raw.recoveryCode.findMany({
-    where: { userId, usedAt: null },
+  const codeHash = hashRecoveryCode(`${clean.slice(0, 5)}-${clean.slice(5)}`);
+  // Conditional update: a code is spent once, even by two racing sign-ins.
+  const res = await raw.recoveryCode.updateMany({
+    where: { userId, codeHash, usedAt: null },
+    data: { usedAt: new Date() },
   });
-  for (const c of codes) {
-    if (await verifyPassword(formatted, c.codeHash)) {
-      const res = await raw.recoveryCode.updateMany({
-        where: { id: c.id, usedAt: null },
-        data: { usedAt: new Date() },
-      });
-      return res.count === 1;
-    }
-  }
-  return false;
+  return res.count === 1;
 };
 
 /** Login's second step: an authenticator code or a recovery code. */
@@ -196,7 +195,7 @@ export const confirmTwoFactorSetup = async (userId: string, code: unknown) => {
   if (typeof code !== "string" || !(await acceptCode(u, code.trim())))
     throw bad("That code isn't right. Check the time on your phone and try the newest code.");
   const codes = newRecoveryCodes();
-  const hashes = await Promise.all(codes.map((c) => getPasswordHash(c)));
+  const hashes = codes.map(hashRecoveryCode);
   await raw.$transaction([
     raw.recoveryCode.deleteMany({ where: { userId } }),
     raw.recoveryCode.createMany({
@@ -236,7 +235,7 @@ export const regenerateRecoveryCodes = async (userId: string, code: unknown) => 
   if (typeof code !== "string" || !(await acceptCode(u, code.trim())))
     throw bad("That code isn't right");
   const codes = newRecoveryCodes();
-  const hashes = await Promise.all(codes.map((c) => getPasswordHash(c)));
+  const hashes = codes.map(hashRecoveryCode);
   await raw.$transaction([
     raw.recoveryCode.deleteMany({ where: { userId } }),
     raw.recoveryCode.createMany({
