@@ -1,3 +1,4 @@
+import { checkStockAlerts } from "../product/stockAlerts";
 import { VoucherService } from "../vouchers/voucherService";
 import { randomUUID } from "crypto";
 import { Connection } from "../db/dbConnection";
@@ -1135,6 +1136,14 @@ export class OrderService extends Connection {
       occurredAt: data.paid_at ? new Date(data.paid_at) : null,
       ...(attempt ? { paymentAttemptId: attempt.id } : {}),
     });
+
+    // Tell admins about anything this order left running low or sold out.
+    if (paid.studioId) {
+      void checkStockAlerts(
+        paid.studioId,
+        paid.items.map((i) => i.productId).filter((x): x is string => Boolean(x)),
+      ).catch((e) => console.warn("Stock alert failed:", (e as Error).message));
+    }
 
     // Per-studio payment audit trail (best-effort).
     await this.audit.record({

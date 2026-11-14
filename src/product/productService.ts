@@ -1,3 +1,4 @@
+import { resetStockAlert } from "./stockAlerts";
 import { Connection } from "../db/dbConnection";
 import { ApiError } from "../middleware/apiError";
 import { S3BucketService } from "../bucket/s3BucketService";
@@ -251,6 +252,7 @@ export class ProductService extends Connection {
         ...this.options(data),
       },
     });
+    if (data.stock !== undefined) await resetStockAlert(id);
     return { message: "Product updated successfully", data: product };
   }
 

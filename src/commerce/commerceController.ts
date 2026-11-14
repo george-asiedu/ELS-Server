@@ -9,7 +9,7 @@ export class CommerceController {
   };
 
   public static updateSettings = async (req: Request, res: Response) => {
-    const { enabled, enablePickup, enableDelivery, deliveryFee } =
+    const { enabled, enablePickup, enableDelivery, deliveryFee, lowStockThreshold } =
       req.body ?? {};
     return res.status(200).json(
       await service.update({
@@ -17,6 +17,7 @@ export class CommerceController {
         enablePickup,
         enableDelivery,
         deliveryFee,
+        lowStockThreshold,
       }),
     );
   };

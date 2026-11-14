@@ -5,6 +5,7 @@ export interface CommerceSettingsInput {
   enablePickup?: boolean;
   enableDelivery?: boolean;
   deliveryFee?: number;
+  lowStockThreshold?: number;
 }
 
 export class CommerceSettingsService extends Connection {
@@ -42,6 +43,9 @@ export class CommerceSettingsService extends Connection {
           ? { enableDelivery: data.enableDelivery }
           : {}),
         ...(deliveryFee !== undefined ? { deliveryFee } : {}),
+        ...(data.lowStockThreshold !== undefined && Number.isFinite(Number(data.lowStockThreshold))
+          ? { lowStockThreshold: Math.max(0, Math.min(1000, Math.trunc(Number(data.lowStockThreshold)))) }
+          : {}),
       },
     });
     return { message: "Commerce settings updated successfully", data: updated };

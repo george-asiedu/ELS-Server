@@ -1155,8 +1155,10 @@ model Product {
   wishlist   WishlistItem[]
   reviews    Review[]
 
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  // When admins were last told it was running low; cleared on restock.
+  lowStockAlertedAt DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
 
   @@index([studioId])
   @@map("products")
@@ -1322,12 +1324,14 @@ model ReferralOrderReward {
 
 // Per-studio shop policy (one document per studio).
 model CommerceSettings {
-  id             String  @id @default(cuid())
-  studioId       String? @unique
-  enabled        Boolean @default(true) // show the shop publicly
-  enablePickup   Boolean @default(true)
-  enableDelivery Boolean @default(true)
-  deliveryFee    Float   @default(0)
+  id                String  @id @default(cuid())
+  studioId          String? @unique
+  enabled           Boolean @default(true) // show the shop publicly
+  enablePickup      Boolean @default(true)
+  enableDelivery    Boolean @default(true)
+  deliveryFee       Float   @default(0)
+  // Admins are told when a product's stock falls to this or below.
+  lowStockThreshold Int     @default(3)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
