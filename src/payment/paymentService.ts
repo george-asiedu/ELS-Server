@@ -52,6 +52,7 @@ const appointmentInclude = {
 interface PaymentWithAppointment {
   amount: number;
   totalAmount: number;
+  processingFee?: number;
   type: string;
   reference: string | null;
   studioId: string | null;
@@ -132,6 +133,7 @@ export class PaymentService extends Connection {
     if (!email) throw new ApiError("An email is required to pay", 400);
 
     const reference = await this.makeReference("APT");
+    const split = await this.paystackChargeFor(charge);
 
     // One payment per appointment — reuse the row and refresh the reference so a
     // previously abandoned attempt gets a clean Paystack transaction.
@@ -139,6 +141,7 @@ export class PaymentService extends Connection {
       where: { appointmentId },
       update: {
         amount: charge,
+        processingFee: split.processingFee,
         totalAmount: amountDue,
         type,
         status: "PENDING",
@@ -148,6 +151,7 @@ export class PaymentService extends Connection {
       create: {
         appointmentId,
         amount: charge,
+        processingFee: split.processingFee,
         totalAmount: amountDue,
         type,
         status: "PENDING",
@@ -167,6 +171,7 @@ export class PaymentService extends Connection {
     await this.ledger.openAttempt({
       reference,
       expectedAmount: charge,
+      processingFee: split.processingFee,
       currency: "GHS",
       ...(payment ? { paymentId: payment.id } : {}),
       appointmentId,
@@ -174,7 +179,7 @@ export class PaymentService extends Connection {
       customerName: appointment.fullName,
     });
 
-    return { reference, charge, email, appointmentId, type };
+    return { reference, charge, email, appointmentId, type, split };
   }
 
   // Start a Paystack transaction for a customer's own booking. Returns the data
@@ -187,20 +192,19 @@ export class PaymentService extends Connection {
     userId: string,
     origin?: string,
   ) {
-    const { reference, charge, email } = await this.prepareBookingCharge(
+    const { reference, email, split } = await this.prepareBookingCharge(
       appointmentId,
       type,
       userId,
     );
-    const subaccount = await this.currentStudioSubaccount();
+    const { subaccount } = split;
 
     const init = await paystack.initialize({
       email,
-      amountPesewas: Math.round(charge * 100),
       reference,
       callbackUrl: `${safeClientOrigin(origin)}/payment/callback`,
       metadata: { appointmentId, type },
-      subaccount,
+      ...split,
     });
 
     return {
@@ -209,7 +213,9 @@ export class PaymentService extends Connection {
         authorizationUrl: init.authorization_url,
         accessCode: init.access_code,
         reference,
-        amount: charge,
+        // What the customer is charged: the price plus any processing fee.
+        amount: split.amountPesewas / 100,
+        processingFee: split.processingFee,
         email,
         subaccount,
         publicKey: env.paystack.publicKey,
@@ -227,21 +233,19 @@ export class PaymentService extends Connection {
     phone: string,
     provider: string,
   ) {
-    const { reference, charge, email } = await this.prepareBookingCharge(
+    const { reference, email, split } = await this.prepareBookingCharge(
       appointmentId,
       type,
       userId,
     );
-    const subaccount = await this.currentStudioSubaccount();
 
     const res = await paystack.chargeMobileMoney({
       email,
-      amountPesewas: Math.round(charge * 100),
       reference,
       phone,
       provider,
-      subaccount,
       metadata: { appointmentId, type },
+      ...split,
     });
 
     return {
@@ -250,7 +254,8 @@ export class PaymentService extends Connection {
         reference,
         status: res.status,
         displayText: res.display_text ?? res.message ?? null,
-        amount: charge,
+        amount: split.amountPesewas / 100,
+        processingFee: split.processingFee,
       },
     };
   }
@@ -501,7 +506,8 @@ export class PaymentService extends Connection {
       // Never trust `status: "success"` alone — confirm Paystack charged the
       // amount and currency we asked for before crediting anything.
       const check = this.ledger.assertAmountMatches(
-        expectedAmount,
+        // The customer was charged the price plus any processing fee.
+        expectedAmount + (attempt?.processingFee ?? 0),
         expectedCurrency,
         data,
       );
@@ -759,11 +765,15 @@ export class PaymentService extends Connection {
     try {
       const balance = Math.max(0, payment.totalAmount - payment.amount);
       const isPartial = payment.type === "PARTIAL";
+      // The fee the customer paid on top, when the studio has them pay it.
+      const fee = payment.processingFee ?? 0;
+      const paidNow = Math.round((payment.amount + fee) * 100) / 100;
       const lines: MoneyLine[] = [
         { label: "Total", value: ghs(payment.totalAmount) },
+        ...(fee > 0 ? [{ label: "Payment processing fee", value: ghs(fee), muted: true }] : []),
         {
           label: isPartial ? "Deposit paid" : "Amount paid",
-          value: ghs(payment.amount),
+          value: ghs(paidNow),
         },
         ...(balance > 0
           ? [
@@ -794,7 +804,7 @@ export class PaymentService extends Connection {
           transactionId: payment.transactionId ?? null,
           paidTo,
           paidToEmail: paidToEmail ?? null,
-          amountPaid: ghs(payment.amount),
+          amountPaid: ghs(paidNow),
           balanceDue: balance > 0 ? ghs(balance) : null,
         },
         ...(brand.kind === "studio" && brand.studio.bookingUrl
@@ -819,13 +829,14 @@ export class PaymentService extends Connection {
             value: `${receiptDayOnly(appt.appointmentDate)} · ${appt.appointmentTime}`,
           },
           { label: "Total", value: ghs(payment.totalAmount) },
+          ...(fee > 0 ? [{ label: "Payment processing fee", value: ghs(fee) }] : []),
           {
             label: isPartial ? "Deposit paid" : "Amount paid",
-            value: ghs(payment.amount),
+            value: ghs(paidNow),
             strong: true,
           },
         ],
-        amountPaid: ghs(payment.amount),
+        amountPaid: ghs(paidNow),
         balanceDue: balance > 0 ? ghs(balance) : null,
         reference: payment.reference ?? payment.id,
         transactionId: payment.transactionId ?? null,

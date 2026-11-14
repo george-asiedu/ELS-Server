@@ -44,6 +44,8 @@ export interface PostEntry {
 export interface AttemptInput {
   reference: string;
   expectedAmount: number;
+  /** Paystack fee the customer pays on top (charged = expected + this). */
+  processingFee?: number;
   currency?: string;
   studioId?: string | null;
   paymentId?: string | null;
@@ -71,6 +73,7 @@ export class LedgerService extends Connection {
         ...(input.studioId ? { studioId: input.studioId } : {}),
         reference: input.reference,
         expectedAmount: input.expectedAmount,
+        processingFee: input.processingFee ?? 0,
         currency: input.currency ?? "GHS",
         status: "PENDING",
         ...(input.paymentId ? { paymentId: input.paymentId } : {}),

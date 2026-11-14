@@ -206,6 +206,9 @@ export class StudioService extends Connection {
         onlinePayments: studio.settings?.onlinePayments ?? false,
         productsInBooking: studio.settings?.productsInBooking ?? false,
         loyaltyCapPercent: studio.settings?.loyaltyCapPercent ?? 30,
+        // So checkout can show the fee before the customer pays.
+        customerPaysFee: (studio.settings?.paystackFeePayer ?? "CUSTOMER") === "CUSTOMER",
+        processingFeePercent: env.paystack.feePercent,
       },
     };
   }
@@ -1117,6 +1120,36 @@ export class StudioService extends Connection {
             : null,
       },
     };
+  }
+
+  // ---- Admin: who pays Paystack's fee -------------------------------------
+
+  public async getFeePayer(studioId: string | null | undefined) {
+    const id = this.requireStudioId(studioId);
+    const settings = await this.studioSettings.findUnique({
+      where: { studioId: id },
+      select: { paystackFeePayer: true },
+    });
+    return {
+      message: "Fee settings",
+      data: {
+        payer: settings?.paystackFeePayer ?? "CUSTOMER",
+        feePercent: env.paystack.feePercent,
+      },
+    };
+  }
+
+  public async setFeePayer(studioId: string | null | undefined, payer: unknown) {
+    const id = this.requireStudioId(studioId);
+    if (payer !== "CUSTOMER" && payer !== "BUSINESS") {
+      throw new ApiError("Choose who pays the fee: CUSTOMER or BUSINESS", HttpCode.BAD_REQUEST);
+    }
+    await this.studioSettings.upsert({
+      where: { studioId: id },
+      update: { paystackFeePayer: payer },
+      create: { studioId: id, paystackFeePayer: payer },
+    });
+    return this.getFeePayer(id);
   }
 
   // ---- Admin: payout (Paystack subaccount for split settlement) ---------

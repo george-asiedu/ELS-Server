@@ -120,6 +120,9 @@ export const env = {
     | "none"
     | "lax",
   paystack: {
+    // Paystack's fee on a local Ghana payment, in percent. Used to add the fee
+    // for customers when a business has them pay it.
+    feePercent: Number(process.env.PAYSTACK_FEE_PERCENT) || 1.95,
     secretKey: process.env.PAYSTACK_SECRET_KEY as string,
     publicKey: process.env.PAYSTACK_PUBLIC_KEY as string,
     // Subscription plan codes (created once on Paystack). Retained for reference

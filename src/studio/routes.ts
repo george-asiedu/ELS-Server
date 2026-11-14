@@ -100,6 +100,9 @@ router.put(
   StudioController.updateLoyalty,
 );
 router.get("/payout", authenticate, requireAdmin, StudioController.getPayout);
+// Who pays Paystack's fee on customer payments: the customer or the business.
+router.get("/fee-payer", authenticate, requireAdmin, StudioController.getFeePayer);
+router.put("/fee-payer", authenticate, requireAdmin, StudioController.setFeePayer);
 router.get(
   "/payout/resolve",
   authenticate,

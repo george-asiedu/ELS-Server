@@ -130,6 +130,14 @@ export class StudioController {
 
   // ---- Admin: payout ----------------------------------------------------
 
+  public static getFeePayer = async (req: Request, res: Response) => {
+    return res.status(200).json(await studioService.getFeePayer(req.studioId));
+  };
+
+  public static setFeePayer = async (req: Request, res: Response) => {
+    return res.status(200).json(await studioService.setFeePayer(req.studioId, req.body?.payer));
+  };
+
   public static getPayout = async (req: Request, res: Response) => {
     const result = await studioService.getPayout(req.studioId);
     return res.status(200).json(result);

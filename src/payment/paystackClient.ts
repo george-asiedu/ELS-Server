@@ -12,6 +12,10 @@ interface InitializeArgs {
   // Split settlement: the studio's subaccount. When set, Paystack routes the
   // studio's share to it and keeps the platform's percentage_charge.
   subaccount?: string | null;
+  // With a subaccount: who pays Paystack's fee ("subaccount" = the studio's
+  // share) and the platform's exact cut in pesewas (overrides the split %).
+  bearer?: "account" | "subaccount";
+  transactionChargePesewas?: number;
 }
 
 interface InitializeResult {
@@ -88,6 +92,23 @@ const call = async <T>(path: string, init?: RequestInit): Promise<T> => {
   return json.data;
 };
 
+// The split fields Paystack takes on a transaction, only when there's a
+// subaccount to split with.
+const splitParams = (args: {
+  subaccount?: string | null;
+  bearer?: "account" | "subaccount";
+  transactionChargePesewas?: number;
+}) =>
+  args.subaccount
+    ? {
+        subaccount: args.subaccount,
+        ...(args.bearer ? { bearer: args.bearer } : {}),
+        ...(args.transactionChargePesewas !== undefined
+          ? { transaction_charge: args.transactionChargePesewas }
+          : {}),
+      }
+    : {};
+
 export const paystack = {
   async initialize(args: InitializeArgs): Promise<InitializeResult> {
     return call<InitializeResult>("/transaction/initialize", {
@@ -99,7 +120,7 @@ export const paystack = {
         reference: args.reference,
         callback_url: args.callbackUrl,
         metadata: args.metadata ?? {},
-        ...(args.subaccount ? { subaccount: args.subaccount } : {}),
+        ...splitParams(args),
       }),
     });
   },
@@ -163,6 +184,8 @@ export const paystack = {
     phone: string;
     provider: string; // "mtn" | "vod" | "tgo"
     subaccount?: string | null;
+    bearer?: "account" | "subaccount";
+    transactionChargePesewas?: number;
     metadata?: Record<string, unknown>;
   }): Promise<PaystackChargeData> {
     return call<PaystackChargeData>("/charge", {
@@ -174,7 +197,7 @@ export const paystack = {
         reference: args.reference,
         mobile_money: { phone: args.phone, provider: args.provider },
         metadata: args.metadata ?? {},
-        ...(args.subaccount ? { subaccount: args.subaccount } : {}),
+        ...splitParams(args),
       }),
     });
   },

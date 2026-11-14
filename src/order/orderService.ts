@@ -293,22 +293,24 @@ export class OrderService extends Connection {
       });
     }
 
+    const split = await this.paystackChargeFor(total);
+    await this.order.update({ where: { id: order.id }, data: { processingFee: split.processingFee } });
     await this.ledger.openAttempt({
       reference,
       expectedAmount: total,
+      processingFee: split.processingFee,
       orderId: order.id,
       customerEmail: params.contact.email,
       customerName: params.contact.name ?? null,
     });
 
-    const subaccount = await this.currentStudioSubaccount();
+    const { subaccount } = split;
     const init = await paystack.initialize({
       email: params.contact.email,
-      amountPesewas: Math.round(total * 100),
       reference,
       callbackUrl: `${safeClientOrigin(params.origin)}${params.callbackPath}`,
       metadata: { orderId: order.id, orderNumber, kind: "order" },
-      subaccount,
+      ...split,
     });
 
     return {
@@ -319,7 +321,9 @@ export class OrderService extends Connection {
         reference,
         orderId: order.id,
         orderNumber,
-        total,
+        // Charged now: the order total plus any processing fee.
+        total: split.amountPesewas / 100,
+        processingFee: split.processingFee,
         email: params.contact.email,
         subaccount,
         publicKey: env.paystack.publicKey,
@@ -554,9 +558,13 @@ export class OrderService extends Connection {
       where: { appointmentId: appt.id },
       select: { id: true },
     });
+    // The processing fee covers the whole charge; it's kept on the order.
+    const split = await this.paystackChargeFor(combined);
+    await this.order.update({ where: { id: order.id }, data: { processingFee: split.processingFee } });
     await this.ledger.openAttempt({
       reference,
       expectedAmount: combined,
+      processingFee: split.processingFee,
       orderId: order.id,
       appointmentId: appt.id,
       ...(combinedPayment ? { paymentId: combinedPayment.id } : {}),
@@ -564,14 +572,13 @@ export class OrderService extends Connection {
       customerName: order.customerName ?? null,
     });
 
-    const subaccount = await this.currentStudioSubaccount();
+    const { subaccount } = split;
     const init = await paystack.initialize({
       email,
-      amountPesewas: Math.round(combined * 100),
       reference,
       callbackUrl: `${safeClientOrigin(origin)}/booking/callback`,
       metadata: { orderId: order.id, appointmentId: appt.id, kind: "booking" },
-      subaccount,
+      ...split,
     });
 
     return {
@@ -583,7 +590,8 @@ export class OrderService extends Connection {
         orderId: order.id,
         serviceDueNow,
         productSubtotal,
-        total: combined,
+        total: split.amountPesewas / 100,
+        processingFee: split.processingFee,
         serviceType,
         email,
         subaccount,
@@ -715,10 +723,9 @@ export class OrderService extends Connection {
     if (!email) throw new ApiError("An email is required to pay", 400);
 
     const reference = await this.makeReference("ORD");
-    const subaccount = await this.currentStudioSubaccount();
+    const split = await this.paystackChargeFor(order.total);
     const init = await paystack.initialize({
       email,
-      amountPesewas: Math.round(order.total * 100),
       reference,
       callbackUrl: `${safeClientOrigin(origin)}/order/callback`,
       metadata: {
@@ -726,17 +733,18 @@ export class OrderService extends Connection {
         orderNumber: order.orderNumber,
         kind: "order",
       },
-      subaccount,
+      ...split,
     });
     await this.order.update({
       where: { id: order.id },
-      data: { reference },
+      data: { reference, processingFee: split.processingFee },
     });
     // The Order row's reference has just been rotated; the attempt preserves the
     // old one so a late completion of the previous checkout is still resolvable.
     await this.ledger.openAttempt({
       reference,
       expectedAmount: order.total,
+      processingFee: split.processingFee,
       orderId: order.id,
       customerEmail: email,
       customerName: order.customerName ?? null,
@@ -793,7 +801,8 @@ export class OrderService extends Connection {
       // Confirm Paystack charged what we asked before releasing stock/loyalty.
       const expectedAmount = attempt?.expectedAmount ?? order.total;
       const check = this.ledger.assertAmountMatches(
-        expectedAmount,
+        // The customer was charged the total plus any processing fee.
+        expectedAmount + (attempt?.processingFee ?? 0),
         attempt?.currency ?? "GHS",
         data,
       );
@@ -1097,6 +1106,9 @@ export class OrderService extends Connection {
     if (paid.customerEmail) {
       try {
         const brand = await this.studioEmailBrand(paid.studioId);
+        // The fee the customer paid on top, when the studio has them pay it.
+        const fee = paid.processingFee ?? 0;
+        const paidNow = Math.round((paid.total + fee) * 100) / 100;
         const lines: MoneyLine[] = [
           { label: "Subtotal", value: ghs(paid.subtotal) },
           ...(paid.discountAmount > 0
@@ -1111,7 +1123,10 @@ export class OrderService extends Connection {
           ...(paid.deliveryFee > 0
             ? [{ label: "Delivery", value: ghs(paid.deliveryFee) }]
             : []),
-          { label: "Total", value: ghs(paid.total), emphasis: true },
+          ...(fee > 0
+            ? [{ label: "Payment processing fee", value: ghs(fee), muted: true }]
+            : []),
+          { label: "Total paid", value: ghs(paidNow), emphasis: true },
         ];
         const paidTo =
           brand.kind === "studio" ? brand.studio.name : brand.zuri.name;
@@ -1135,7 +1150,7 @@ export class OrderService extends Connection {
             transactionId: paid.transactionId ?? null,
             paidTo,
             paidToEmail: paidToEmail ?? null,
-            amountPaid: ghs(paid.total),
+            amountPaid: ghs(paidNow),
             balanceDue: null,
           },
           fulfillment: paid.fulfillment as "PICKUP" | "DELIVERY",
@@ -1167,7 +1182,10 @@ export class OrderService extends Connection {
             ...(paid.deliveryFee > 0
               ? [{ label: "Delivery", value: ghs(paid.deliveryFee) }]
               : []),
-            { label: "Total", value: ghs(paid.total), strong: true },
+            ...(fee > 0
+              ? [{ label: "Payment processing fee", value: ghs(fee) }]
+              : []),
+            { label: "Total paid", value: ghs(paidNow), strong: true },
             {
               label: "Fulfilment",
               value:
@@ -1176,7 +1194,7 @@ export class OrderService extends Connection {
                   : "Pickup at studio",
             },
           ],
-          amountPaid: ghs(paid.total),
+          amountPaid: ghs(paidNow),
           balanceDue: null,
           reference: paid.reference ?? paid.orderNumber,
           transactionId: paid.transactionId ?? null,
