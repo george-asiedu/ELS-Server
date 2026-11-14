@@ -14,8 +14,6 @@ import { EmailBrand, MoneyLine } from "../types";
 const INK = "#2A1B1F"; // deep espresso — body text
 const MUTED = "#7A6A6E"; // muted mauve-grey — secondary text
 const BORDER = "#EDE3E5";
-const IVORY = "#FBF6F3"; // outer background
-const CARD = "#FFFFFF";
 const EMPHASIS = "#947400"; // Zuri yellow, darkened to read on white — highlighted totals
 
 // Escape any data we interpolate (customer names, notes, service names) —
@@ -61,14 +59,14 @@ const textOn = (hex: string): string => {
   return (L + 0.05) / 0.0614 > 1.05 / (L + 0.05) ? "#101720" : "#ffffff";
 };
 
+// One solid block button, centred (as in the Westend City Church emails). The
+// data-cta marker lets the shell repeat the link under "Button not working?".
 export const button = (label: string, url: string, color: string): string => `
-  <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin: 28px auto 0;">
+  <table role="presentation" cellpadding="0" cellspacing="0" border="0" align="center" style="margin: 28px auto;">
     <tr>
-      <td style="border-radius: 8px; background-color: ${color};">
-        <a href="${esc(url)}" target="_blank"
-           style="display: inline-block; padding: 13px 32px; font-family: Arial, Helvetica, sans-serif; font-size: 15px; font-weight: 600; color: ${textOn(color)}; text-decoration: none; border-radius: 8px;">
-          ${esc(label)}
-        </a>
+      <td align="center" bgcolor="${color}" style="background: ${color};">
+        <a href="${esc(url)}" target="_blank" data-cta="1"
+           style="display: inline-block; padding: 14px 48px; font-family: Arial, Helvetica, sans-serif; font-size: 15px; font-weight: bold; color: ${textOn(color)}; text-decoration: none;">${esc(label)}</a>
       </td>
     </tr>
   </table>`;
@@ -270,49 +268,54 @@ export const itemsTable = (
       .join("")}
   </table>`;
 
-const footer = (brand: EmailBrand): string => {
-  if (brand.kind === "zuri") {
-    return `
-      <p style="margin: 0 0 4px; font-family: Arial, Helvetica, sans-serif; font-size: 13px; font-weight: 600; color: ${INK};">Zuri Studios</p>
-      <p class="muted" style="margin: 0; font-family: Arial, Helvetica, sans-serif; font-size: 12px; color: ${MUTED};">
-        <a class="muted" href="mailto:${esc(brand.zuri.supportEmail)}" style="color: ${MUTED};">${esc(brand.zuri.supportEmail)}</a>
-        &nbsp;&middot;&nbsp;
-        <a class="muted" href="${esc(brand.zuri.websiteUrl)}" style="color: ${MUTED};">${esc(brand.zuri.websiteUrl.replace(/^https?:\/\//, ""))}</a>
-      </p>`;
-  }
+const PAGE = "#F2F3F3";
+const BAND = "#16191F";
+const SOFT = "#545B64";
+const FAINT = "#7D8998";
+
+// The line under the divider: how to get help, in the brand's own words.
+const supportLine = (brand: EmailBrand): string => {
+  if (brand.kind === "zuri")
+    return `Need a hand with anything? Just reply to this email or write to <a href="mailto:${esc(brand.zuri.supportEmail)}" style="color: #0972D3;">${esc(brand.zuri.supportEmail)}</a> and our team will get back to you.`;
   const s = brand.studio;
-  const contactLine = [s.phone, s.email].filter(Boolean).join("  &middot;  ");
-  return `
-      <p style="margin: 0 0 4px; font-family: Arial, Helvetica, sans-serif; font-size: 13px; font-weight: 600; color: ${INK};">${esc(s.name)}</p>
-      ${s.address ? `<p class="muted" style="margin: 0 0 2px; font-family: Arial, Helvetica, sans-serif; font-size: 12px; color: ${MUTED};">${esc(s.address)}</p>` : ""}
-      ${contactLine ? `<p class="muted" style="margin: 0 0 10px; font-family: Arial, Helvetica, sans-serif; font-size: 12px; color: ${MUTED};">${contactLine}</p>` : ""}
-      <p class="muted" style="margin: 0; font-family: Arial, Helvetica, sans-serif; font-size: 11px; color: ${MUTED};">Powered by Zuri Studios</p>`;
+  const ways = [s.phone ? esc(s.phone) : null, s.email ? `<a href="mailto:${esc(s.email)}" style="color: #0972D3;">${esc(s.email)}</a>` : null].filter(Boolean);
+  return `Questions? Just reply to this email${ways.length ? ` or contact ${esc(s.name)} on ${ways.join(" or ")}` : ""}.`;
+};
+
+// The small grey footer under the card.
+const legalFooter = (brand: EmailBrand): string => {
+  if (brand.kind === "zuri")
+    return `Zuri Studios &middot; <a href="${esc(brand.zuri.websiteUrl)}" style="color: ${FAINT};">${esc(brand.zuri.websiteUrl.replace(/^https?:\/\//, ""))}</a><br>You're getting this email because of something on your account.`;
+  const s = brand.studio;
+  return `${esc(s.name)}${s.address ? ` &middot; ${esc(s.address)}` : ""}<br>Powered by Zuri Studios. You're getting this email because of something on your account.`;
 };
 
 /**
- * Wraps a template's inner content in the shared shell: brand header, the
- * content passed in, and a brand-appropriate footer. Every template in
- * notifications/templates/* renders through this, so studio-branded and
- * Zuri-branded mail look distinct but structurally consistent.
+ * Wraps a template's content in the shared layout, modelled on the Westend City
+ * Church emails: a dark header band with the logo and name, a white card with
+ * left-aligned text and one block button, a sign-off, a support line and the
+ * button's link under a divider, and a small grey footer. Table-based with
+ * inline styles so it looks the same in Gmail, Outlook and Apple Mail.
  */
 export const renderShell = (args: {
   brand: EmailBrand;
   previewText: string;
   bodyHtml: string;
-  // Short label shown opposite the brand ("PAYMENT RECEIPT", "BOOKING
-  // REQUEST"). Gives the header the two-sided structure of a real document
-  // instead of a bare wordmark. Omitted for conversational mail where a
-  // document label would be wrong (a welcome note isn't a document).
+  // Short label shown in the header band ("Payment receipt"). Omitted for
+  // conversational mail.
   documentType?: string;
 }): string => {
-  const { brand, previewText, bodyHtml, documentType } = args;
+  const { brand, previewText, documentType } = args;
   const name = brandName(brand);
   const logo = brandLogo(brand);
   const site = brandSiteUrl(brand);
-
-  const headerLogo = logo
-    ? `<img src="${esc(logo)}" alt="${esc(name)}" width="40" height="40" style="border-radius: 8px; display: block;" />`
-    : "";
+  // Templates were written centred; this layout reads left-aligned, in one
+  // sans-serif face, like the church emails.
+  const bodyHtml = args.bodyHtml
+    .replace(/text-align:\s*center;?/g, "text-align: left;")
+    .replace(/margin: 0 auto 20px;/g, "margin: 0 0 20px;")
+    .replace(/font-family: Georgia, serif; font-size: 22px;/g, "font-family: Arial, Helvetica, sans-serif; font-size: 20px; font-weight: bold;");
+  const cta = /<a href="([^"]+)"[^>]*data-cta="1"/.exec(bodyHtml)?.[1];
 
   return `<!DOCTYPE html>
 <html lang="en" xmlns="http://www.w3.org/1999/xhtml">
@@ -321,109 +324,67 @@ export const renderShell = (args: {
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <meta http-equiv="X-UA-Compatible" content="IE=edge" />
 <title>${esc(name)}</title>
-<!--[if mso]>
-<style>table {border-collapse: collapse;} .fallback-font {font-family: Arial, sans-serif !important;}</style>
-<![endif]-->
 <style>
-  body { margin: 0; padding: 0; background-color: ${IVORY}; }
+  body { margin: 0; padding: 0; background-color: ${PAGE}; }
   img { border: 0; outline: none; text-decoration: none; }
-  a { color: inherit; }
   @media (max-width: 620px) {
     .email-container { width: 100% !important; }
     .email-padding { padding-left: 20px !important; padding-right: 20px !important; }
   }
-  /*
-   * Dark mode. Every colour in this system is an INLINE style (email clients
-   * strip most everything else), and an inline style beats a class — so these
-   * rules must use !important and must match by descendant, not by hoping each
-   * element carries a class. The previous version defined .email-ink/.email-muted
-   * but applied them to nothing, so dark-mode Gmail darkened the background and
-   * left the text dark on top of it: invisible.
-   */
   @media (prefers-color-scheme: dark) {
-    .email-bg { background-color: #1C1416 !important; }
-    .email-card {
-      background-color: #241A1D !important;
-      border-color: #3A2C2F !important;
-    }
-    /* Body copy inside the card. */
-    .email-card td,
-    .email-card p,
-    .email-card span,
-    .email-card div,
-    .email-card h1,
-    .email-card h2,
-    .email-card strong { color: #F3E9EA !important; }
-    /* Header and footer sit outside the card, on the page background. */
-    .email-outer td,
-    .email-outer p,
-    .email-outer span,
-    .email-outer a { color: #E8DDDF !important; }
-    /* Re-establish the hierarchy the blanket rule above flattens. */
-    .email-card .muted, .email-outer .muted { color: #B6A2A6 !important; }
-    .email-card .accent { color: #F7A8C4 !important; }
-    /*
-     * The status pill is light-background/dark-text by design, so the blanket
-     * rule above would paint its text near-white on a pale pill — invisible.
-     * Give it a dark-mode palette of its own instead of exempting it.
-     */
-    .email-card .badge,
-    .email-card .badge .badge-text { color: #14100F !important; }
-    .email-card .badge-success { background-color: #7BE0AE !important; }
-    .email-card .badge-error { background-color: #FFA8A8 !important; }
-    .email-card .badge-warning { background-color: #FFD79A !important; }
-    .email-card .badge-info,
-    .email-card .badge-pending { background-color: #C9D7F5 !important; }
-    /* Hairlines are near-invisible against a dark card otherwise. */
-    .email-card table[style*="border"],
-    .email-card td[style*="border"] { border-color: #3A2C2F !important; }
+    .email-bg { background-color: #0F1114 !important; }
+    .email-card { background-color: #1B1E23 !important; }
+    .email-card td, .email-card p, .email-card span, .email-card div, .email-card h1, .email-card h2, .email-card strong { color: #E9ECEF !important; }
+    .email-card .muted { color: #A3ACB7 !important; }
+    .email-card table[style*="border"], .email-card td[style*="border"] { border-color: #2C3138 !important; }
   }
 </style>
 </head>
-<body class="email-bg" style="margin:0; padding:0; background-color: ${IVORY};">
-  <!-- Preheader (hidden, sets the inbox preview text) -->
-  <div style="display:none; max-height:0; overflow:hidden; opacity:0;">${esc(previewText)}</div>
-  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" class="email-bg" style="background-color: ${IVORY};">
+<body class="email-bg" style="margin: 0; padding: 0; background-color: ${PAGE}; font-family: Arial, Helvetica, sans-serif;">
+  <div style="display: none; max-height: 0; overflow: hidden; opacity: 0;">${esc(previewText)}</div>
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" class="email-bg" bgcolor="${PAGE}" style="background: ${PAGE};">
     <tr>
-      <td align="center" style="padding: 32px 16px;">
-        <table role="presentation" class="email-container" width="600" cellpadding="0" cellspacing="0" border="0" style="width: 600px; max-width: 100%;">
-          <!-- Header -->
+      <td align="center" style="padding: 24px 12px;">
+        <table role="presentation" class="email-container" width="600" cellpadding="0" cellspacing="0" border="0" style="width: 100%; max-width: 600px;">
+          <!-- Header band -->
           <tr>
-            <td align="center" class="email-padding email-outer" style="padding: 8px 32px 24px;">
+            <td bgcolor="${BAND}" class="email-padding" style="background: ${BAND}; padding: 20px 24px;">
               <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
                 <tr>
-                  ${headerLogo ? `<td style="padding-right: 10px; vertical-align: middle; width: 50px;">${headerLogo}</td>` : ""}
-                  <td align="left" style="vertical-align: middle;">
+                  <td style="vertical-align: middle;">
+                    ${logo ? `<img src="${esc(logo)}" width="44" height="44" alt="" style="display: inline-block; vertical-align: middle; border-radius: 50%; background: #ffffff;" />` : ""}
                     ${
                       site
-                        ? `<a href="${esc(site)}" target="_blank" style="font-family: Georgia, 'Times New Roman', serif; font-size: 20px; font-weight: 700; color: ${INK}; text-decoration: none;">${esc(name)}</a>`
-                        : `<span style="font-family: Georgia, 'Times New Roman', serif; font-size: 20px; font-weight: 700; color: ${INK};">${esc(name)}</span>`
+                        ? `<a href="${esc(site)}" target="_blank" style="display: inline-block; vertical-align: middle; ${logo ? "margin-left: 12px; " : ""}color: #ffffff; font-size: 18px; font-weight: bold; letter-spacing: 0.3px; text-decoration: none;">${esc(name)}</a>`
+                        : `<span style="display: inline-block; vertical-align: middle; ${logo ? "margin-left: 12px; " : ""}color: #ffffff; font-size: 18px; font-weight: bold; letter-spacing: 0.3px;">${esc(name)}</span>`
                     }
                   </td>
-                  ${
-                    documentType
-                      ? `<td align="right" style="vertical-align: middle;">
-                    <span class="muted" style="font-family: Arial, Helvetica, sans-serif; font-size: 11px; font-weight: 700; letter-spacing: 0.08em; color: ${MUTED}; text-transform: uppercase;">${esc(documentType)}</span>
-                  </td>`
-                      : ""
-                  }
+                  ${documentType ? `<td align="right" style="vertical-align: middle; color: #AEB5BF; font-size: 12px;">${esc(documentType)}</td>` : ""}
                 </tr>
-              </table>
-              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
-                <tr><td style="padding-top: 14px; border-bottom: 2px solid ${brandColor(brand)}; font-size: 0; line-height: 0;">&nbsp;</td></tr>
               </table>
             </td>
           </tr>
           <!-- Card -->
           <tr>
-            <td class="email-card email-padding" style="background-color: ${CARD}; border: 1px solid ${BORDER}; border-radius: 16px; padding: 36px 40px;">
+            <td bgcolor="#ffffff" class="email-card email-padding" style="background: #ffffff; padding: 32px 32px 8px; font-size: 15px; line-height: 1.55; color: #333333;">
               ${bodyHtml}
+              <p style="margin: 28px 0 0; font-size: 15px; line-height: 1.55; color: #333333;">Kind regards,</p>
+              <p style="margin: 2px 0 24px; font-size: 16px; line-height: 1.5; color: ${BAND};">The ${esc(name)} team</p>
+            </td>
+          </tr>
+          <tr>
+            <td bgcolor="#ffffff" class="email-card" style="background: #ffffff; padding: 0 32px;"><div style="border-top: 1px solid #E3E6E8; font-size: 0; line-height: 0;">&nbsp;</div></td>
+          </tr>
+          <tr>
+            <td bgcolor="#ffffff" class="email-card email-padding" style="background: #ffffff; padding: 20px 32px 28px; font-size: 12px; line-height: 1.5; color: ${SOFT};">
+              ${supportLine(brand)}
+              ${cta ? `<br><br><span class="muted" style="color: ${FAINT};">Button not working? Paste this link into your browser:<br><a href="${cta}" style="color: #0972D3; word-break: break-all;">${cta}</a></span>` : ""}
             </td>
           </tr>
           <!-- Footer -->
           <tr>
-            <td align="center" class="email-padding email-outer" style="padding: 24px 32px 8px;">
-              ${footer(brand)}
+            <td align="center" style="padding: 20px 24px; font-size: 11px; line-height: 1.5; color: ${FAINT};">
+              ${legalFooter(brand)}
             </td>
           </tr>
         </table>

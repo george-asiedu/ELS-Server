@@ -2,7 +2,7 @@ import { Connection } from "../db/dbConnection";
 import { runAsSuperAdmin } from "../tenant/context";
 import { NotificationService } from "../notifications/notificationService";
 import { NotificationTemplate } from "../notifications/registry";
-import { brandFromStudio, firstName, platformBrand } from "../notifications/brand";
+import { firstName, platformBrand } from "../notifications/brand";
 import { monthlyReport, ReportFigure } from "../notifications/templates/report";
 import { studioLink } from "../utils/studioLink";
 
@@ -161,8 +161,8 @@ export class MonthlyReportService extends Connection {
             ...(product ? [`Best seller: ${product.name} (${product.count} sold)`] : []),
           ];
 
-          const branding = await this.currentStudioBranding(studio.id);
-          const brand = brandFromStudio(branding, platformBrand);
+          // From the platform to the business, so it signs off as Zuri Studios.
+          const brand = platformBrand;
           for (const admin of admins) {
             const { subject, html } = monthlyReport(brand, {
               adminFirstName: firstName(admin.profile?.fullName ?? "there"),
