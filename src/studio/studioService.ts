@@ -5,6 +5,7 @@ import { ApiError } from "../middleware/apiError";
 import { HttpCode } from "../models/status_codes";
 import { paystack } from "../payment/paystackClient";
 import { env } from "../config/env.config";
+import { whatsappConfigured } from "../whatsapp/whatsappService";
 import { randomUUID } from "crypto";
 import { shortId } from "../utils/shortId";
 import { promises as dns } from "dns";
@@ -1120,6 +1121,37 @@ export class StudioService extends Connection {
             : null,
       },
     };
+  }
+
+  // ---- Admin: WhatsApp messages to customers ------------------------------
+
+  public async getMessaging(studioId: string | null | undefined) {
+    const id = this.requireStudioId(studioId);
+    const settings = await this.studioSettings.findUnique({
+      where: { studioId: id },
+      select: { whatsappMessages: true },
+    });
+    return {
+      message: "Messaging settings",
+      data: {
+        // Whether the platform has WhatsApp set up at all.
+        whatsappAvailable: whatsappConfigured,
+        whatsappMessages: settings?.whatsappMessages ?? false,
+      },
+    };
+  }
+
+  public async setMessaging(studioId: string | null | undefined, whatsappMessages: unknown) {
+    const id = this.requireStudioId(studioId);
+    if (typeof whatsappMessages !== "boolean") throw new ApiError("Say whether to send WhatsApp messages", HttpCode.BAD_REQUEST);
+    if (whatsappMessages && !whatsappConfigured)
+      throw new ApiError("WhatsApp messages aren't available yet", HttpCode.BAD_REQUEST);
+    await this.studioSettings.upsert({
+      where: { studioId: id },
+      update: { whatsappMessages },
+      create: { studioId: id, whatsappMessages },
+    });
+    return this.getMessaging(id);
   }
 
   // ---- Admin: who pays Paystack's fee -------------------------------------

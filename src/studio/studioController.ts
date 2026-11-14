@@ -130,6 +130,14 @@ export class StudioController {
 
   // ---- Admin: payout ----------------------------------------------------
 
+  public static getMessaging = async (req: Request, res: Response) => {
+    return res.status(200).json(await studioService.getMessaging(req.studioId));
+  };
+
+  public static setMessaging = async (req: Request, res: Response) => {
+    return res.status(200).json(await studioService.setMessaging(req.studioId, req.body?.whatsappMessages));
+  };
+
   public static getFeePayer = async (req: Request, res: Response) => {
     return res.status(200).json(await studioService.getFeePayer(req.studioId));
   };

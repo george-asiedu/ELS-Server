@@ -101,6 +101,19 @@ export const env = {
   require2faForAdmins:
     (process.env.REQUIRE_2FA_FOR_ADMINS ?? "true").trim().toLowerCase() !== "false",
   totpEncryptionKey: (process.env.TOTP_ENCRYPTION_KEY as string) || "",
+  // WhatsApp Cloud API (Meta). Business-started messages must use templates
+  // Meta has approved; their names are configurable. Off until the token and
+  // phone number id are set.
+  whatsapp: {
+    token: (process.env.WHATSAPP_TOKEN as string) || "",
+    phoneNumberId: (process.env.WHATSAPP_PHONE_NUMBER_ID as string) || "",
+    apiVersion: (process.env.WHATSAPP_API_VERSION as string) || "v21.0",
+    language: (process.env.WHATSAPP_TEMPLATE_LANGUAGE as string) || "en",
+    templates: {
+      confirmed: (process.env.WHATSAPP_TEMPLATE_CONFIRMED as string) || "booking_confirmed",
+      reminder: (process.env.WHATSAPP_TEMPLATE_REMINDER as string) || "booking_reminder",
+    },
+  },
   // Web push (VAPID). Generate once with `npx web-push generate-vapid-keys`.
   // Without the keys, push stays off and the app says so.
   vapid: {

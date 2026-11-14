@@ -246,6 +246,9 @@ model StudioSettings {
   // Who pays Paystack's processing fee on customer payments: CUSTOMER (added
   // at checkout, the default) or BUSINESS (taken from the studio's share; the
   // customer pays the price). The platform's commission never pays it.
+  // Booking confirmations and reminders to customers on WhatsApp, when the
+  // platform has WhatsApp set up. Each message is billed by Meta.
+  whatsappMessages  Boolean @default(false)
   paystackFeePayer  String  @default("CUSTOMER")
   commerce          Boolean @default(false)
   loyalty           Boolean @default(true)

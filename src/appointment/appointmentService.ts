@@ -1,4 +1,5 @@
 import { notifyStudioAdmins } from "../push/pushService";
+import { sendBookingWhatsapp } from "../whatsapp/whatsappService";
 import { Connection, TenantTx } from "../db/dbConnection";
 import {
   CursorPage,
@@ -456,7 +457,23 @@ export class AppointmentService extends Connection {
             errors.push(`${appt.id} (admin push): ${(e as Error).message}`),
           );
         }
-        // Customers without an email (walk-ins added by the studio) get nothing.
+        // WhatsApp, when the studio has it on (whatever the email situation).
+        if (appt.studioId) {
+          const studioName =
+            (await this.studio.findUnique({ where: { id: appt.studioId }, select: { name: true } }))?.name ?? "the studio";
+          await sendBookingWhatsapp({
+            kind: window === "24H" ? "REMINDER_24H" : "REMINDER_1H",
+            studioId: appt.studioId,
+            appointmentId: appt.id,
+            phone: appt.phone,
+            firstName: firstName(appt.fullName),
+            studioName,
+            serviceName: appt.service?.name ?? "your appointment",
+            date: formatDate(appt.appointmentDate),
+            time: appt.appointmentTime,
+          });
+        }
+        // Customers without an email (walk-ins added by the studio) get nothing more.
         if (!appt.email) continue;
 
         try {
@@ -1216,6 +1233,23 @@ export class AppointmentService extends Connection {
       data: { status },
       include: serviceInclude,
     });
+
+    // A WhatsApp confirmation too, when the studio has it on.
+    if (status === "CONFIRMED" && existing.status !== "CONFIRMED" && appointment.studioId) {
+      const studioName =
+        (await this.studio.findUnique({ where: { id: appointment.studioId }, select: { name: true } }))?.name ?? "the studio";
+      void sendBookingWhatsapp({
+        kind: "CONFIRMED",
+        studioId: appointment.studioId,
+        appointmentId: appointment.id,
+        phone: appointment.phone,
+        firstName: firstName(appointment.fullName),
+        studioName,
+        serviceName: appointment.service?.name ?? "your appointment",
+        date: formatDate(appointment.appointmentDate),
+        time: appointment.appointmentTime,
+      });
+    }
 
     // Award loyalty points the first time an appointment is completed — on the
     // amount actually paid (after any loyalty discount), never the sticker price.
