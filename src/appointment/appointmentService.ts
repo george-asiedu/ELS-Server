@@ -1,6 +1,7 @@
 import { notifyStudioAdmins } from "../push/pushService";
 import { sendBookingWhatsapp } from "../whatsapp/whatsappService";
 import { WaitlistService } from "../waitlist/waitlistService";
+import { VoucherService } from "../vouchers/voucherService";
 import { Connection, TenantTx } from "../db/dbConnection";
 import {
   CursorPage,
@@ -210,7 +211,8 @@ export class AppointmentService extends Connection {
     // Points can't be combined with a promo — the price is already reduced.
     let discountAmount = 0;
     let pointsRedeemed = 0;
-    if (userId && data.applyPoints === "true" && !onPromo) {
+    // Points aren't combined with a gift card or package code.
+    if (userId && data.applyPoints === "true" && !onPromo && !data.voucherCode) {
       const balance = await this.loyaltyPoints.findUnique({
         where: { userId },
       });
@@ -268,6 +270,16 @@ export class AppointmentService extends Connection {
           await this.assertSlotBookable(slot, tx);
         }
 
+        // A gift card covers up to its balance; a package covers the price
+        // and uses a session. Taken inside the lock with the booking.
+        let voucher: { voucherId: string; covered: number } | null = null;
+        if (data.voucherCode) {
+          voucher = await new VoucherService().redeem(tx, data.voucherCode, {
+            amount: effectivePrice - discountAmount,
+            serviceId: data.serviceId,
+          });
+        }
+
         const created = await tx.appointment.create({
           data: {
             fullName: data.fullName,
@@ -277,7 +289,8 @@ export class AppointmentService extends Connection {
             appointmentTime: data.appointmentTime,
             notes: data.notes ?? null,
             totalPrice: effectivePrice,
-            discountAmount,
+            discountAmount: discountAmount + (voucher?.covered ?? 0),
+            ...(voucher ? { voucherId: voucher.voucherId, voucherAmount: voucher.covered } : {}),
             pointsRedeemed,
             serviceId: data.serviceId,
             ...(staffId ? { staffId } : {}),
@@ -1234,6 +1247,11 @@ export class AppointmentService extends Connection {
       data: { status },
       include: serviceInclude,
     });
+
+    // A cancelled booking gives back what its gift card or package covered.
+    if (status === "CANCELLED" && existing.status !== "CANCELLED" && existing.voucherId) {
+      await new VoucherService().restore(existing.voucherId, existing.voucherAmount);
+    }
 
     // A cancelled slot is free again: tell anyone waiting for that day.
     if (status === "CANCELLED" && existing.status !== "CANCELLED") {

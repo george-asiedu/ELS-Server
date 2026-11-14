@@ -91,6 +91,12 @@ export class Connection {
   get waitlistEntry() {
     return this.db.waitlistEntry;
   }
+  get packageOffer() {
+    return this.db.packageOffer;
+  }
+  get voucher() {
+    return this.db.voucher;
+  }
   get contactInfo() {
     return this.db.contactInfo;
   }

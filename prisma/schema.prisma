@@ -748,6 +748,10 @@ model Appointment {
   refundedOutsideAt     DateTime?
   refundedOutsideAmount Float?
   refundedOutsideNote   String?   @db.VarChar(300)
+  // A gift card or package used on it, and how much it covered (already
+  // included in discountAmount).
+  voucherId             String?
+  voucherAmount         Float     @default(0)
   createdAt             DateTime  @default(now())
   updatedAt             DateTime  @updatedAt
 
@@ -953,6 +957,56 @@ model WaitlistEntry {
 
   @@index([studioId, date])
   @@map("waitlist_entries")
+}
+
+// A package a studio sells: a number of sessions of one service, paid upfront.
+model PackageOffer {
+  id        String   @id @default(cuid())
+  studioId  String?
+  serviceId String
+  name      String
+  sessions  Int
+  price     Float
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([studioId])
+  @@map("package_offers")
+}
+
+// A gift card (a GHS balance) or a bought package (sessions of a service),
+// identified by a code the customer uses when booking or checking out.
+model Voucher {
+  id             String    @id @default(cuid())
+  studioId       String?
+  kind           String // GIFT_CARD | PACKAGE
+  code           String
+  status         String    @default("PENDING") // PENDING (awaiting payment) | ACTIVE | USED
+  // What was paid for it (the price), and Paystack's fee if the buyer paid it.
+  price          Float
+  processingFee  Float     @default(0)
+  reference      String    @unique
+  paidAt         DateTime?
+  // Gift card: the balance left to spend.
+  balance        Float     @default(0)
+  // Package: the service and sessions left.
+  packageOfferId String?
+  serviceId      String?
+  sessionsTotal  Int       @default(0)
+  sessionsLeft   Int       @default(0)
+  buyerUserId    String?
+  buyerName      String
+  buyerEmail     String
+  recipientName  String?
+  recipientEmail String?
+  message        String?   @db.VarChar(300)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  @@unique([studioId, code])
+  @@index([studioId])
+  @@map("vouchers")
 }
 
 model BlockedDate {
@@ -1216,6 +1270,10 @@ model Order {
   refundedOutsideNote   String?   @db.VarChar(300)
   // Paystack fee the customer paid on top of the price (0 when the business pays it).
   processingFee         Float     @default(0)
+  // A gift card or package used on it, and how much it covered (already
+  // included in discountAmount).
+  voucherId             String?
+  voucherAmount         Float     @default(0)
   createdAt             DateTime  @default(now())
   updatedAt             DateTime  @updatedAt
 

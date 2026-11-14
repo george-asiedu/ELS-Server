@@ -21,6 +21,8 @@ const SCOPED_MODELS = new Set<string>([
   "BlockedDate",
   "Staff",
   "WaitlistEntry",
+  "PackageOffer",
+  "Voucher",
   "ContactInfo",
   "LoyaltyPoints",
   "LoyaltyTransaction",

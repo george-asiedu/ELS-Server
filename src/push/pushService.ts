@@ -106,6 +106,7 @@ const PUSH_ROUTES: Partial<Record<NotificationTemplateKey, string>> = {
   REFUNDED_BY_STUDIO: "/account",
   REVIEW_REQUEST: "/account",
   WAITLIST_SLOT_OPEN: "/book",
+  VOUCHER_DELIVERED: "/account",
 };
 
 /**

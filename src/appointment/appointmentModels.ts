@@ -18,6 +18,7 @@ export interface CreateAppointmentInput {
   applyPoints?: string;
   designImageUrl?: string;
   staffId?: string | null;
+  voucherCode?: string | null;
 }
 
 export interface UpdateAppointmentStatusInput {

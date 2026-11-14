@@ -14,6 +14,7 @@ export class OrderController {
       applyPoints,
       referralCode,
       couponCode,
+      giftCardCode,
     } = req.body ?? {};
     const result = await orderService.checkout(
       req.user.id,
@@ -23,6 +24,7 @@ export class OrderController {
         deliveryPhone,
         applyPoints: applyPoints === true || applyPoints === "true",
         couponCode,
+        giftCardCode: typeof giftCardCode === "string" && giftCardCode.trim() ? giftCardCode : undefined,
         referralCode,
       },
       req.headers.origin,
@@ -51,6 +53,7 @@ export class OrderController {
       deliveryPhone,
       referralCode,
       couponCode,
+      giftCardCode,
     } = req.body ?? {};
     if (!Array.isArray(items) || items.length === 0) {
       throw new ApiError("At least one product is required", 400);
@@ -66,6 +69,7 @@ export class OrderController {
         deliveryPhone,
         referralCode,
         couponCode,
+        giftCardCode: typeof giftCardCode === "string" && giftCardCode.trim() ? giftCardCode : undefined,
       },
       req.headers.origin,
     );

@@ -31,6 +31,8 @@ const createAppointmentSchema: JSONSchemaType<CreateAppointmentInput> = {
     designImageUrl: { type: "string", nullable: true, maxLength: 2048 },
     // A staff member's id, or "any" (or absent) for whoever is free.
     staffId: { type: "string", nullable: true, maxLength: 64 },
+    // A gift card or package code to pay with.
+    voucherCode: { type: "string", nullable: true, maxLength: 40 },
   },
   required: [
     "fullName",

@@ -1,3 +1,4 @@
+import { isVoucherReference, VoucherService } from "../vouchers/voucherService";
 import crypto from "crypto";
 import { Connection } from "../db/dbConnection";
 import { ApiError } from "../middleware/apiError";
@@ -946,6 +947,9 @@ export class PaymentService extends Connection {
         if (isSignupReference(reference)) {
           // A studio-subscription first payment → provision the studio.
           await this.onboarding.finalize(reference);
+        } else if (isVoucherReference(reference)) {
+          // A gift card or package bought online.
+          await new VoucherService().finalizeByReference(reference);
         } else if (isStudioBillingReference(reference)) {
           // A studio's renewal or plan change. Applying it here means a studio
           // that paid and closed the tab is still renewed.

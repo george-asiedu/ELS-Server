@@ -1,3 +1,4 @@
+import { VoucherService } from "../vouchers/voucherService";
 import { randomUUID } from "crypto";
 import { Connection } from "../db/dbConnection";
 import {
@@ -55,6 +56,7 @@ export interface CheckoutInput {
   applyPoints?: boolean;
   referralCode?: string;
   couponCode?: string;
+  giftCardCode?: string | undefined;
 }
 
 export interface GuestCheckoutInput {
@@ -67,6 +69,7 @@ export interface GuestCheckoutInput {
   deliveryPhone?: string;
   referralCode?: string;
   couponCode?: string;
+  giftCardCode?: string | undefined;
 }
 
 const orderInclude = { items: true } as const;
@@ -169,6 +172,7 @@ export class OrderService extends Connection {
     deliveryPhone?: string | undefined;
     referralCode?: string | undefined;
     couponCode?: string | undefined;
+    giftCardCode?: string | undefined;
     applyPoints?: boolean | undefined;
     appointmentId?: string | undefined;
     callbackPath: string;
@@ -230,10 +234,21 @@ export class OrderService extends Connection {
     discountAmount = Math.round((discountAmount + couponDiscount) * 100) / 100;
 
     const deliveryFee = fulfillment === "DELIVERY" ? settings.deliveryFee : 0;
-    const total =
+    let total =
       Math.round((subtotal - discountAmount + deliveryFee) * 100) / 100;
     if (total <= 0)
       throw new ApiError("Order total must be greater than 0", 400);
+
+    // A gift card pays some or all of what's left. Taken now under a lock on
+    // the code, and given back if the order is cancelled.
+    let voucher: { voucherId: string; covered: number } | null = null;
+    if (params.giftCardCode) {
+      voucher = await this.withAdvisoryLock(`voucher-code:${params.giftCardCode.trim().toUpperCase()}`, (tx) =>
+        new VoucherService().redeem(tx, params.giftCardCode, { amount: total }),
+      );
+      discountAmount = Math.round((discountAmount + voucher.covered) * 100) / 100;
+      total = Math.round((total - voucher.covered) * 100) / 100;
+    }
 
     const reference = await this.makeReference("ORD");
     const orderNumber = await this.genOrderNumber();
@@ -258,6 +273,7 @@ export class OrderService extends Connection {
           fulfillment === "DELIVERY" ? params.deliveryPhone!.trim() : null,
         referralCode: params.referralCode?.trim() || null,
         ...(coupon ? { couponCode: coupon.code, couponDiscount } : {}),
+        ...(voucher ? { voucherId: voucher.voucherId, voucherAmount: voucher.covered } : {}),
         ...(params.appointmentId
           ? { appointmentId: params.appointmentId }
           : {}),
@@ -291,6 +307,41 @@ export class OrderService extends Connection {
           description: `Discount on order ${orderNumber}`,
         },
       });
+    }
+
+    // Paid in full by a gift card: settle it now, with nothing to charge.
+    if (total <= 0) {
+      await this.ledger.openAttempt({
+        reference,
+        expectedAmount: 0,
+        orderId: order.id,
+        customerEmail: params.contact.email,
+        customerName: params.contact.name ?? null,
+      });
+      await this.finalizeByReference(reference, {
+        status: "success",
+        amount: 0,
+        currency: "GHS",
+        id: `giftcard-${order.id}`,
+        channel: "gift_card",
+        paid_at: new Date().toISOString(),
+      } as unknown as PaystackVerifyData);
+      return {
+        message: "Order paid with a gift card",
+        data: {
+          authorizationUrl: null,
+          accessCode: null,
+          reference,
+          orderId: order.id,
+          orderNumber,
+          total: 0,
+          processingFee: 0,
+          paidWithGiftCard: true,
+          email: params.contact.email,
+          subaccount: null,
+          publicKey: env.paystack.publicKey,
+        },
+      };
     }
 
     const split = await this.paystackChargeFor(total);
@@ -397,6 +448,7 @@ export class OrderService extends Connection {
       deliveryAddress: input.deliveryAddress,
       deliveryPhone: input.deliveryPhone,
       couponCode: input.couponCode,
+      giftCardCode: input.giftCardCode,
       referralCode: input.referralCode,
       applyPoints: input.applyPoints,
       callbackPath: "/order/callback",
@@ -422,6 +474,7 @@ export class OrderService extends Connection {
       deliveryPhone: input.deliveryPhone,
       referralCode: input.referralCode,
       couponCode: input.couponCode,
+      giftCardCode: input.giftCardCode,
       callbackPath: "/order/callback",
       origin,
     });
@@ -644,6 +697,11 @@ export class OrderService extends Connection {
       include: orderInclude,
     });
 
+    // A cancelled order gives back what its gift card covered.
+    if (status === "CANCELLED" && existing.status !== "CANCELLED" && existing.voucherId) {
+      await new VoucherService().restore(existing.voucherId, existing.voucherAmount);
+    }
+
     // Refund redeemed points if a customer order is cancelled (once).
     if (
       status === "CANCELLED" &&
@@ -702,6 +760,12 @@ export class OrderService extends Connection {
   }
 
   public async verify(reference: string) {
+    // Paid entirely with a gift card: there's no Paystack transaction.
+    const own = await this.order.findFirst({ where: { reference }, select: { status: true, voucherAmount: true, total: true } });
+    if (own && own.status !== "PENDING_PAYMENT" && own.total <= 0 && own.voucherAmount > 0) {
+      const order = await this.order.findFirst({ where: { reference }, include: orderInclude });
+      return { message: "Order paid with a gift card", data: order };
+    }
     const data = await paystack.verify(reference);
     const order = await this.finalizeByReference(reference, data);
     if (!order) throw new ApiError("Order not found", 404);
