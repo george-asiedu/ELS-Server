@@ -81,6 +81,10 @@ export class PlatformController {
 
   // ---- Studios ----------------------------------------------------------
 
+  public static directory = async (req: Request, res: Response) => {
+    return res.status(200).json(await platformService.getDirectory(req.query.q, req.query.kind));
+  };
+
   public static publicStats = async (_req: Request, res: Response) => {
     const data = await platformService.getPublicStats();
     return res.status(200).json({ message: "Platform stats", data });

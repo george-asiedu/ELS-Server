@@ -26,6 +26,7 @@ router.post("/auth/reset-password", PlatformController.resetPassword);
 // Public: site details, prices and setup fees for the platform pages.
 router.get("/public-config", cachePublic(), PlatformController.publicConfig);
 router.get("/public-stats", cachePublic(300), PlatformController.publicStats);
+router.get("/directory", cachePublic(300), PlatformController.directory);
 
 // Everything below requires a signed-in super admin.
 router.use(authenticate, requireSuperAdmin);

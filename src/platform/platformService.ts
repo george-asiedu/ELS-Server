@@ -1,3 +1,4 @@
+import { S3BucketService } from "../bucket/s3BucketService";
 import { studioPriceFor } from "../billing/studioPricing";
 import { Connection } from "../db/dbConnection";
 import { ApiError } from "../middleware/apiError";
@@ -926,6 +927,65 @@ export class PlatformService extends Connection {
         pages: Math.max(1, Math.ceil(rows.length / pageSize)),
       },
     };
+  }
+
+  /**
+   * The public directory of businesses on Zuri: every active studio and store,
+   * with what customers need to choose one. Optional search over name, area
+   * and services, and a filter for studios or stores.
+   */
+  public async getDirectory(q: unknown, kind: unknown) {
+    const studios = await this.studio.findMany({
+      where: { status: "ACTIVE" },
+      select: {
+        id: true,
+        name: true,
+        slug: true,
+        shopCategory: true,
+        settings: { select: { booking: true, commerce: true } },
+        branding: { select: { logoUrl: true } },
+        content: { select: { heroImageUrl: true, aboutText: true } },
+      },
+      orderBy: { createdAt: "asc" },
+    });
+    const ids = studios.map((s) => s.id);
+    const [contacts, services, ratings, images] = await Promise.all([
+      this.contactInfo.findMany({ where: { studioId: { in: ids } }, select: { studioId: true, address: true } }),
+      this.service.findMany({ where: { studioId: { in: ids }, active: true }, select: { studioId: true, name: true, popular: true } }),
+      this.review.groupBy({ by: ["studioId"], where: { studioId: { in: ids }, approved: true }, _avg: { rating: true }, _count: { _all: true } }),
+      // A photo for businesses without a hero image: their newest product or gallery shot.
+      this.product.findMany({ where: { studioId: { in: ids }, active: true, imageUrl: { not: null } }, select: { studioId: true, imageUrl: true }, orderBy: { createdAt: "desc" } }),
+    ]);
+    const s3 = new S3BucketService();
+    const query = typeof q === "string" ? q.trim().toLowerCase() : "";
+    const data = studios
+      .map((st) => {
+        const booking = st.settings?.booking !== false;
+        const own = services.filter((x) => x.studioId === st.id);
+        const top = [...own].sort((a, b) => Number(b.popular) - Number(a.popular)).slice(0, 3).map((x) => x.name);
+        const rating = ratings.find((r) => r.studioId === st.id);
+        const photo = st.content?.heroImageUrl ?? images.find((i) => i.studioId === st.id)?.imageUrl ?? null;
+        return {
+          name: st.name,
+          slug: st.slug,
+          kind: booking ? ("studio" as const) : ("store" as const),
+          shopCategory: st.shopCategory,
+          area: contacts.find((c) => c.studioId === st.id)?.address ?? null,
+          about: st.content?.aboutText?.slice(0, 160) ?? null,
+          logoUrl: s3.deliveryUrl(st.branding?.logoUrl ?? null),
+          photoUrl: s3.deliveryUrl(photo),
+          topServices: top,
+          rating: rating?._avg.rating ?? null,
+          reviews: rating?._count._all ?? 0,
+          searchText: [st.name, contacts.find((c) => c.studioId === st.id)?.address ?? "", ...own.map((x) => x.name), st.shopCategory ?? ""]
+            .join(" ")
+            .toLowerCase(),
+        };
+      })
+      .filter((d) => (kind === "studio" || kind === "store" ? d.kind === kind : true))
+      .filter((d) => !query || query.split(/\s+/).every((w) => d.searchText.includes(w)))
+      .map(({ searchText: _searchText, ...rest }) => rest);
+    return { message: "Directory", data };
   }
 
   /**
