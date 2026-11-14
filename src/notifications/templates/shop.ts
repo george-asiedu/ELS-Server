@@ -25,14 +25,14 @@ export const orderConfirmed = (
 ) => {
   const color = brandColor(brand);
   return {
-    subject: "Your order is confirmed 🎉",
+    subject: "Your order is confirmed",
     html: renderShell({
       brand,
       previewText: `Order ${data.orderNumber} is confirmed.`,
       documentType: "Order receipt",
       bodyHtml: `
         ${statusBadge("success", "ORDER CONFIRMED")}
-        <h1 style="margin: 0 0 4px; font-family: Georgia, serif; font-size: 22px; color: #2A1B1F; text-align: center;">Thank you for your order!</h1>
+        <h1 style="margin: 0 0 4px; font-family: Georgia, serif; font-size: 22px; color: #2A1B1F; text-align: center;">Thank you for your order</h1>
         <p class="muted" style="margin: 0 0 16px; font-family: Arial, sans-serif; font-size: 13px; color: #7A6A6E; text-align: center;">
           Order ${esc(data.orderNumber)} &middot; ${data.fulfillment === "DELIVERY" ? "Delivery" : "Pickup at studio"}
         </p>
@@ -88,7 +88,7 @@ export const orderFulfilled = (
       bodyHtml: `
         ${statusBadge("info", isPickup ? "READY FOR PICKUP" : "OUT FOR DELIVERY")}
         <h1 style="margin: 0 0 12px; font-family: Georgia, serif; font-size: 22px; color: #2A1B1F; text-align: center;">
-          ${isPickup ? "Your order is ready!" : "Your order is on the way"}
+          ${isPickup ? "Your order is ready" : "Your order is on the way"}
         </h1>
         <p style="margin: 0; font-family: Arial, sans-serif; font-size: 15px; color: #2A1B1F; line-height: 1.6; text-align: center;">
           Order ${esc(data.orderNumber)} — ${isPickup ? "come by whenever suits you." : "it should arrive soon."}

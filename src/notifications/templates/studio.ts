@@ -15,14 +15,14 @@ export const studioCreated = (
     storefrontUrl: string;
   },
 ) => ({
-  subject: "Your studio is now on Zuri Studios 🎉",
+  subject: "Your studio is now live on Zuri Studios",
   html: renderShell({
     brand,
     previewText: `${data.studioName} is live.`,
     documentType: "Studio activated",
     bodyHtml: `
       ${statusBadge("success", "STUDIO LIVE")}
-      <h1 style="margin: 0 0 12px; font-family: Georgia, serif; font-size: 22px; color: #2A1B1F; text-align: center;">Welcome, ${esc(data.ownerFirstName)}!</h1>
+      <h1 style="margin: 0 0 12px; font-family: Georgia, serif; font-size: 22px; color: #2A1B1F; text-align: center;">Welcome, ${esc(data.ownerFirstName)}</h1>
       <p style="margin: 0 0 4px; font-family: Arial, sans-serif; font-size: 15px; color: #2A1B1F; line-height: 1.6; text-align: center;">
         <strong>${esc(data.studioName)}</strong> is live on Zuri Studios, on the ${esc(data.planName)} plan.
       </p>

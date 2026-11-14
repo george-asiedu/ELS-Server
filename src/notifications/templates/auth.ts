@@ -140,7 +140,7 @@ export const customerWelcome = (
       brand,
       previewText: "Your account is ready.",
       bodyHtml: `
-        <h1 style="margin: 0 0 12px; font-family: Georgia, serif; font-size: 22px; color: #2A1B1F;">${greeting}, ${esc(data.firstName)} 👋</h1>
+        <h1 style="margin: 0 0 12px; font-family: Georgia, serif; font-size: 22px; color: #2A1B1F;">${greeting}, ${esc(data.firstName)}</h1>
         <p style="margin: 0; font-family: Arial, sans-serif; font-size: 15px; color: #2A1B1F; line-height: 1.6;">
           Your account is ready. Book appointments, track your visits, and earn loyalty
           points every time you come in.

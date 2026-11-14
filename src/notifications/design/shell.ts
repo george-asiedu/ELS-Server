@@ -168,7 +168,7 @@ export const receiptAttachedNotice = (
     <tr>
       <td style="padding: 16px 20px;">
         <p style="margin: 0 0 4px; font-family: Arial, Helvetica, sans-serif; font-size: 14px; font-weight: 700; color: ${INK};">
-          📎 Your receipt is attached
+          Your receipt is attached
         </p>
         <p class="muted" style="margin: 0; font-family: Arial, Helvetica, sans-serif; font-size: 12px; color: ${MUTED}; line-height: 1.6;">
           Receipt no. <strong style="color: ${INK};">${esc(r.receiptNumber)}</strong> &middot; ${esc(r.amountPaid)} paid to ${esc(r.paidTo)} on ${esc(r.paidOn)}.<br />

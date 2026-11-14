@@ -33,7 +33,7 @@ const STATUS_COPY: Record<
   DONE: {
     badge: "success",
     label: "COMPLETED",
-    heading: "Your request is live 🎉",
+    heading: "Your request is now live",
     body: "The feature you asked for has been built and is now available in your dashboard. Thank you for the suggestion — it made the product better.",
   },
   DECLINED: {
