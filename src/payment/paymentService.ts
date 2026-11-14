@@ -49,6 +49,9 @@ const appointmentInclude = {
 } as const;
 
 // Structural type covering just what the receipt needs.
+/** Missed bookings after which a customer pays in full, not a deposit. */
+export const NO_SHOWS_FOR_FULL_PAYMENT = 2;
+
 interface PaymentWithAppointment {
   amount: number;
   totalAmount: number;
@@ -93,6 +96,11 @@ export class PaymentService extends Connection {
   // Validate a booking payment and (re)create its PENDING Payment row with a
   // fresh reference. Shared by the hosted/inline initialize and the mobile-money
   // charge so both channels behave identically.
+  /** How many of this customer's bookings at this studio were missed. */
+  public async noShowCount(userId: string) {
+    return this.appointment.count({ where: { userId, status: "NO_SHOW" } });
+  }
+
   private async prepareBookingCharge(
     appointmentId: string,
     type: PaymentType,
@@ -116,6 +124,10 @@ export class PaymentService extends Connection {
     }
     if (type === "PARTIAL" && !settings.allowPartial) {
       throw new ApiError("Partial (deposit) payment is not available", 400);
+    }
+    // Customers who've missed bookings pay in full rather than a deposit.
+    if (type === "PARTIAL" && (await this.noShowCount(userId)) >= NO_SHOWS_FOR_FULL_PAYMENT) {
+      throw new ApiError("Because of missed appointments, please pay the full amount for this booking.", 400);
     }
 
     const amountDue =

@@ -37,6 +37,8 @@ enum AppointmentStatus {
   PENDING_RESCHEDULE
   COMPLETED
   CANCELLED
+  // The customer didn't come. Any deposit stays with the studio.
+  NO_SHOW
 }
 
 enum PaymentStatus {

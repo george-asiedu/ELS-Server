@@ -61,6 +61,7 @@ const updateStatusSchema: JSONSchemaType<UpdateAppointmentStatusInput> = {
         "PENDING_RESCHEDULE",
         "COMPLETED",
         "CANCELLED",
+        "NO_SHOW",
       ],
     },
   },

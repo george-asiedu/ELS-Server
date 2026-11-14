@@ -3,7 +3,8 @@ export type AppointmentStatusInput =
   | "CONFIRMED"
   | "COMPLETED"
   | "CANCELLED"
-  | "PENDING_RESCHEDULE";
+  | "PENDING_RESCHEDULE"
+  | "NO_SHOW";
 
 export interface CreateAppointmentInput {
   fullName: string;
