@@ -21,6 +21,9 @@ export interface SendNotificationArgs {
   // Files to attach (a receipt PDF). Passed straight through to the transport,
   // and persisted in the queue job when a queue is configured.
   attachments?: EmailAttachment[];
+  // The push that goes with this email says this instead of the subject
+  // (e.g. "Your report is in your email").
+  pushBody?: string;
 }
 
 /**

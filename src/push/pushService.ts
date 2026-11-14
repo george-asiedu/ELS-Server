@@ -102,6 +102,7 @@ const PUSH_ROUTES: Partial<Record<NotificationTemplateKey, string>> = {
   SUBSCRIPTION_EXPIRED: "/admin/billing",
   FEATURE_REQUEST_STATUS_STUDIO: "/admin/feature-requests",
   FEATURE_REQUEST_SUBMITTED_PLATFORM: "/platform",
+  STUDIO_MONTHLY_REPORT: "/admin/analytics",
 };
 
 /**
@@ -115,6 +116,7 @@ export const pushForNotification = async (args: {
   subject: string;
   studioId?: string | null;
   entityId: string;
+  pushBody?: string;
 }): Promise<number> => {
   const url = PUSH_ROUTES[args.template];
   if (!url || !pushConfigured) return 0;
@@ -140,7 +142,7 @@ export const pushForNotification = async (args: {
       users.map((u) => u.id),
       {
         title: studio?.name ?? "Zuri Studios",
-        body: args.subject,
+        body: args.pushBody ?? args.subject,
         url,
         tag: `${args.template}:${args.entityId}`,
       },

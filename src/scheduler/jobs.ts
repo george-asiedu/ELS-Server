@@ -64,6 +64,19 @@ export const JOBS: JobDefinition[] = [
     },
   },
   {
+    key: "monthly-reports",
+    label: "Monthly reports",
+    description:
+      "Emails each studio's and store's admins last month's figures, with a push saying it's in their inbox. Runs daily; each studio gets each month's report once.",
+    schedule: { periodMinutes: 24 * 60, offsetMinutes: 7 * 60 },
+    scheduleLabel: "Daily at 07:00 UTC",
+    maxRunMinutes: 30,
+    run: async () => {
+      const { MonthlyReportService } = await import("../reports/monthlyReport");
+      return { ...(await new MonthlyReportService().sendDue()) };
+    },
+  },
+  {
     key: "billing-reminders",
     label: "Subscription reminders",
     description:
