@@ -10,6 +10,7 @@ import {
   renewLoginSession,
 } from "../auth/sessionService";
 import { reenterTenant } from "./tenant";
+import { createTenantClient } from "../tenant/tenantClient";
 
 interface AccessTokenPayload {
   sub: string;
@@ -85,6 +86,35 @@ export const authenticate = async (
   }
 };
 
+const { raw: rawDb } = createTenantClient();
+
+// What an admin without two-step sign-in can still reach: setting it up,
+// signing out, their own details, and their notification devices.
+const TWO_FACTOR_EXEMPT = /^\/(auth\/(2fa|logout)|me$|push)/;
+
+/**
+ * Admins and the super admin must have two-step sign-in on before they can
+ * use their dashboard (REQUIRE_2FA_FOR_ADMINS, on by default). The client
+ * shows the setup screen when it gets TWO_FACTOR_SETUP_REQUIRED.
+ */
+const requireTwoFactor = (req: Request, res: Response, next: NextFunction) => {
+  if (!env.require2faForAdmins || TWO_FACTOR_EXEMPT.test(req.path)) return next();
+  rawDb.user
+    .findUnique({ where: { id: req.user!.id }, select: { totpEnabled: true } })
+    .then((u) =>
+      u?.totpEnabled
+        ? reenterTenant(req, res, next)
+        : next(
+            new ApiError(
+              "Turn on two-step sign-in to use the dashboard",
+              HttpCode.FORBIDDEN,
+              [{ code: "TWO_FACTOR_SETUP_REQUIRED" }],
+            ),
+          ),
+    )
+    .catch(next);
+};
+
 export const requireAdmin = (
   req: Request,
   _res: Response,
@@ -98,7 +128,7 @@ export const requireAdmin = (
   if (req.user.role !== "ADMIN") {
     return next(new ApiError("Admin access required", HttpCode.FORBIDDEN));
   }
-  return next();
+  return requireTwoFactor(req, _res, next);
 };
 
 // Platform operator only — the super-admin dashboard.
@@ -117,7 +147,7 @@ export const requireSuperAdmin = (
       new ApiError("Super admin access required", HttpCode.FORBIDDEN),
     );
   }
-  return next();
+  return requireTwoFactor(req, _res, next);
 };
 
 // Booking is customer-only — admins and guests are rejected.

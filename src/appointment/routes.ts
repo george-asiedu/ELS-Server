@@ -19,6 +19,7 @@ router.get("/me", authenticate, AppointmentController.listMine);
 
 // Admin.
 router.get("/", authenticate, requireAdmin, AppointmentController.listAll);
+router.get("/calendar", authenticate, requireAdmin, AppointmentController.calendar);
 router.patch(
   "/:id/status",
   authenticate,

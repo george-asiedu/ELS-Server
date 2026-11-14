@@ -39,7 +39,7 @@ export const JOBS: JobDefinition[] = [
     key: "booking-reminders-24h",
     label: "Day-before reminders",
     description:
-      "Emails customers about appointments roughly 24 hours away. Each booking gets this reminder at most once.",
+      "Reminds customers (by push, else email) and the studio's admins (by push) about appointments roughly 24 hours away. Each booking gets this reminder at most once.",
     schedule: { periodMinutes: 60, offsetMinutes: 5 },
     scheduleLabel: "Hourly, at 5 past",
     maxRunMinutes: 10,
@@ -53,7 +53,7 @@ export const JOBS: JobDefinition[] = [
     key: "booking-reminders-1h",
     label: "Hour-before reminders",
     description:
-      "Emails customers about appointments starting in the next 30–90 minutes. Each booking gets this reminder at most once.",
+      "Reminds customers (by push, else email) and the studio's admins (by push) about appointments starting in the next 30–90 minutes. Each booking gets this reminder at most once.",
     schedule: { periodMinutes: 15, offsetMinutes: 0 },
     scheduleLabel: "Every 15 minutes",
     maxRunMinutes: 10,

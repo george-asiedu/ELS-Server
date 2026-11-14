@@ -96,6 +96,10 @@ export const env = {
   // Encrypts authenticator-app secrets (32 random bytes, base64). Optional:
   // without it a key is derived from JWT_SECRET. Set it in production, and
   // never change it once set, or everyone's two-step sign-in stops working.
+  // Studio admins and the super admin must turn on two-step sign-in before
+  // using their dashboards. On unless REQUIRE_2FA_FOR_ADMINS=false.
+  require2faForAdmins:
+    (process.env.REQUIRE_2FA_FOR_ADMINS ?? "true").trim().toLowerCase() !== "false",
   totpEncryptionKey: (process.env.TOTP_ENCRYPTION_KEY as string) || "",
   // Web push (VAPID). Generate once with `npx web-push generate-vapid-keys`.
   // Without the keys, push stays off and the app says so.

@@ -32,6 +32,11 @@ export class AppointmentController {
     return res.status(200).json(result);
   };
 
+  public static calendar = async (req: Request, res: Response) => {
+    const result = await appointmentService.listRange(req.query.from, req.query.to);
+    return res.status(200).json(result);
+  };
+
   public static listAll = async (req: Request, res: Response) => {
     const page = parseCursorPage(req.query.cursor, req.query.limit);
     const result = await appointmentService.listAll(page);

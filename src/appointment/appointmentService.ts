@@ -1,3 +1,4 @@
+import { pushToStudioAdmins } from "../push/pushService";
 import { Connection, TenantTx } from "../db/dbConnection";
 import {
   CursorPage,
@@ -385,7 +386,6 @@ export class AppointmentService extends Connection {
         where: {
           appointmentDate: { gte: dayStart, lte: dayEnd },
           status: { in: ["PENDING", "CONFIRMED"] },
-          email: { not: null },
         },
         include: serviceInclude,
       });
@@ -409,6 +409,30 @@ export class AppointmentService extends Connection {
           skipped++;
           continue;
         }
+
+        // The studio's admins get a push for every booking (walk-ins too).
+        if (appt.studioId) {
+          await pushToStudioAdmins(
+            appt.studioId,
+            {
+              template:
+                window === "24H"
+                  ? NotificationTemplate.BOOKING_REMINDER_24H
+                  : NotificationTemplate.BOOKING_REMINDER_1H,
+              entityId: `${appt.id}:${window}:admin`,
+            },
+            {
+              title: window === "24H" ? "Booking tomorrow" : "Booking in about an hour",
+              body: `${appt.fullName ?? "A client"} · ${appt.service?.name ?? "Appointment"} at ${appt.appointmentTime}`,
+              url: `/admin/calendar?date=${appt.appointmentDate.toISOString().slice(0, 10)}`,
+              tag: `admin-reminder:${appt.id}:${window}`,
+            },
+          ).catch((e) =>
+            errors.push(`${appt.id} (admin push): ${(e as Error).message}`),
+          );
+        }
+        // Customers without an email (walk-ins added by the studio) get nothing.
+        if (!appt.email) continue;
 
         try {
           const studio = await this.currentStudioBranding(
@@ -519,6 +543,30 @@ export class AppointmentService extends Connection {
       message: "Appointments retrieved successfully",
       ...cursorPageResult(appointments, page),
     };
+  }
+
+  /** Every booking between two dates (inclusive), for the admin calendar. */
+  public async listRange(fromRaw: unknown, toRaw: unknown) {
+    const parse = (v: unknown) =>
+      typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v)
+        ? new Date(`${v}T00:00:00.000Z`)
+        : null;
+    const from = parse(fromRaw);
+    const to = parse(toRaw);
+    if (!from || !to || to < from)
+      throw new ApiError("Give a from and to date (YYYY-MM-DD)", 400);
+    // A calendar shows at most about six weeks.
+    if (to.getTime() - from.getTime() > 45 * 24 * 60 * 60 * 1000)
+      throw new ApiError("Ask for 45 days or fewer", 400);
+    const appointments = await this.appointment.findMany({
+      where: { appointmentDate: { gte: from, lte: to } },
+      orderBy: [{ appointmentDate: "asc" }, { appointmentTime: "asc" }],
+      include: serviceInclude,
+    });
+    appointments.forEach((item) => {
+      item.designImageUrl = this.s3.deliveryUrl(item.designImageUrl);
+    });
+    return { message: "Appointments retrieved successfully", data: appointments };
   }
 
   public async listAll(page: CursorPage) {

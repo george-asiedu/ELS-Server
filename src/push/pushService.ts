@@ -115,9 +115,9 @@ export const pushForNotification = async (args: {
   subject: string;
   studioId?: string | null;
   entityId: string;
-}) => {
+}): Promise<number> => {
   const url = PUSH_ROUTES[args.template];
-  if (!url || !pushConfigured) return;
+  if (!url || !pushConfigured) return 0;
   try {
     const users = await raw.user.findMany({
       where: {
@@ -129,14 +129,14 @@ export const pushForNotification = async (args: {
       },
       select: { id: true },
     });
-    if (!users.length) return;
+    if (!users.length) return 0;
     const studio = args.studioId
       ? await raw.studio.findUnique({
           where: { id: args.studioId },
           select: { name: true },
         })
       : null;
-    await pushToUsers(
+    const { sent } = await pushToUsers(
       users.map((u) => u.id),
       {
         title: studio?.name ?? "Zuri Studios",
@@ -145,7 +145,54 @@ export const pushForNotification = async (args: {
         tag: `${args.template}:${args.entityId}`,
       },
     );
+    return sent;
   } catch (e) {
     console.warn(`Push for ${args.template} failed:`, (e as Error).message);
+    return 0;
   }
+};
+
+/** Reminders: a push when the person has a device on, else the email. */
+export const PUSH_FIRST = new Set<NotificationTemplateKey>([
+  "BOOKING_REMINDER_24H",
+  "BOOKING_REMINDER_1H",
+  "SUBSCRIPTION_EXPIRING_SOON",
+]);
+
+/**
+ * A push to every admin of a studio (with devices on), sent once per `key`:
+ * the notification log's unique key stops a second sweep repeating it.
+ */
+export const pushToStudioAdmins = async (
+  studioId: string,
+  key: { template: NotificationTemplateKey; entityId: string },
+  payload: PushPayload,
+) => {
+  if (!pushConfigured) return 0;
+  const admins = await raw.user.findMany({
+    where: { studioId, role: "ADMIN", pushSubscriptions: { some: {} } },
+    select: { id: true },
+  });
+  if (!admins.length) return 0;
+  try {
+    await raw.notificationLog.create({
+      data: {
+        studioId,
+        template: key.template,
+        recipient: `admins:${studioId}`,
+        entityType: "Appointment",
+        entityId: key.entityId,
+        status: "PUSHED",
+        sentAt: new Date(),
+      },
+    });
+  } catch (e) {
+    if ((e as { code?: string }).code === "P2002") return 0; // already sent
+    throw e;
+  }
+  const { sent } = await pushToUsers(
+    admins.map((a) => a.id),
+    payload,
+  );
+  return sent;
 };

@@ -3,7 +3,7 @@ import { emailQueue } from "../queue/queues";
 import { sendEmailNow } from "../email/emailService";
 import { NotificationTemplateKey } from "./registry";
 import type { EmailAttachment } from "../email/emailService";
-import { pushForNotification } from "../push/pushService";
+import { PUSH_FIRST, pushForNotification } from "../push/pushService";
 
 export interface SendNotificationArgs {
   template: NotificationTemplateKey;
@@ -49,10 +49,6 @@ export class NotificationService extends Connection {
     });
     if (existing) return; // already notified for this exact event — no-op
 
-    // The same event as a push to the recipient's devices (if they turned it
-    // on). Not awaited and never throws, so it can't hold up or break the email.
-    void pushForNotification(args);
-
     const queued = Boolean(emailQueue);
     let log: { id: string };
     try {
@@ -73,6 +69,23 @@ export class NotificationService extends Connection {
       // the same no-op as finding it already logged.
       if ((error as { code?: string }).code === "P2002") return;
       throw error;
+    }
+
+    // Reminders go to the recipient's devices first; the email is only the
+    // fallback for someone with no device switched on.
+    if (PUSH_FIRST.has(args.template)) {
+      const pushed = await pushForNotification(args);
+      if (pushed > 0) {
+        await this.notificationLog.update({
+          where: { id: log.id },
+          data: { status: "PUSHED", sentAt: new Date() },
+        });
+        return;
+      }
+    } else {
+      // Everything else: the email, plus the same event as a push. Not awaited
+      // and never throws, so it can't hold up or break the email.
+      void pushForNotification(args);
     }
 
     try {
