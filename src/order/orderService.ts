@@ -1,3 +1,7 @@
+import { randomBytes, randomInt } from "crypto";
+import { ORDER_STATUSES, PAID_ORDER_STATUSES } from "./orderStatus";
+import { orderStageUpdate } from "../notifications/templates/shop";
+import { studioLink } from "../utils/studioLink";
 import { checkStockAlerts } from "../product/stockAlerts";
 import { VoucherService } from "../vouchers/voucherService";
 import { randomUUID } from "crypto";
@@ -58,6 +62,7 @@ export interface CheckoutInput {
   referralCode?: string;
   couponCode?: string;
   giftCardCode?: string | undefined;
+  deliveryNote?: string | undefined;
 }
 
 export interface GuestCheckoutInput {
@@ -71,6 +76,7 @@ export interface GuestCheckoutInput {
   referralCode?: string;
   couponCode?: string;
   giftCardCode?: string | undefined;
+  deliveryNote?: string | undefined;
 }
 
 const orderInclude = { items: true } as const;
@@ -174,6 +180,7 @@ export class OrderService extends Connection {
     referralCode?: string | undefined;
     couponCode?: string | undefined;
     giftCardCode?: string | undefined;
+  deliveryNote?: string | undefined;
     applyPoints?: boolean | undefined;
     appointmentId?: string | undefined;
     callbackPath: string;
@@ -272,6 +279,8 @@ export class OrderService extends Connection {
           fulfillment === "DELIVERY" ? params.deliveryAddress!.trim() : null,
         deliveryPhone:
           fulfillment === "DELIVERY" ? params.deliveryPhone!.trim() : null,
+        deliveryNote:
+          fulfillment === "DELIVERY" && params.deliveryNote?.trim() ? params.deliveryNote.trim().slice(0, 300) : null,
         referralCode: params.referralCode?.trim() || null,
         ...(coupon ? { couponCode: coupon.code, couponDiscount } : {}),
         ...(voucher ? { voucherId: voucher.voucherId, voucherAmount: voucher.covered } : {}),
@@ -450,6 +459,7 @@ export class OrderService extends Connection {
       deliveryPhone: input.deliveryPhone,
       couponCode: input.couponCode,
       giftCardCode: input.giftCardCode,
+      deliveryNote: input.deliveryNote,
       referralCode: input.referralCode,
       applyPoints: input.applyPoints,
       callbackPath: "/order/callback",
@@ -476,6 +486,7 @@ export class OrderService extends Connection {
       referralCode: input.referralCode,
       couponCode: input.couponCode,
       giftCardCode: input.giftCardCode,
+      deliveryNote: input.deliveryNote,
       callbackPath: "/order/callback",
       origin,
     });
@@ -661,9 +672,12 @@ export class OrderService extends Connection {
       include: orderInclude,
       ...cursorPageArgs(page),
     });
+    // The handover code is the customer's proof of receipt, so the shop's
+    // own list never shows it.
+    const hidden = orders.map(({ handoverCode: _code, riderToken: _token, ...o }) => o);
     return {
       message: "Orders retrieved successfully",
-      ...cursorPageResult(orders, page),
+      ...cursorPageResult(hidden as typeof orders, page),
     };
   }
 
@@ -684,19 +698,49 @@ export class OrderService extends Connection {
     };
   }
 
-  public async updateStatus(id: string, status: string) {
-    const allowed = ["PENDING_PAYMENT", "PAID", "FULFILLED", "CANCELLED"];
-    if (!allowed.includes(status)) {
+  public async updateStatus(id: string, status: string, opts: { eta?: unknown } = {}) {
+    if (!(ORDER_STATUSES as readonly string[]).includes(status)) {
       throw new ApiError("Invalid order status", 400);
     }
     const existing = await this.order.findUnique({ where: { id } });
     if (!existing) throw new ApiError("Order not found", 404);
+    const delivery = existing.fulfillment === "DELIVERY";
+    if (status === "OUT_FOR_DELIVERY" && !delivery)
+      throw new ApiError("This is a pickup order. Mark it Ready for pickup instead.", 400);
+    if (status === "READY_FOR_PICKUP" && delivery)
+      throw new ApiError("This is a delivery order. Mark it Out for delivery instead.", 400);
+    if (existing.status === "PENDING_PAYMENT" && (PAID_ORDER_STATUSES as readonly string[]).includes(status) && status !== "PAID")
+      throw new ApiError("This order hasn't been paid yet", 400);
 
+    const eta = typeof opts.eta === "string" && opts.eta.trim() ? opts.eta.trim().slice(0, 60) : undefined;
+    // The handover code: given to the rider or at the counter to confirm it.
+    const needsCode = (status === "OUT_FOR_DELIVERY" || status === "READY_FOR_PICKUP") && !existing.handoverCode;
     const order = await this.order.update({
       where: { id },
-      data: { status: status as never },
+      data: {
+        status: status as never,
+        ...(status !== existing.status ? { statusUpdatedAt: new Date() } : {}),
+        ...(eta !== undefined ? { deliveryEta: eta } : {}),
+        ...(needsCode ? { handoverCode: String(randomInt(1000, 10000)) } : {}),
+        // A fresh rider link each time it goes out, valid for three days.
+        ...(status === "OUT_FOR_DELIVERY"
+          ? {
+              riderToken: randomBytes(18).toString("base64url"),
+              riderTokenExpires: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000),
+              deliveryFailedAt: null,
+              deliveryFailReason: null,
+            }
+          : {}),
+        ...(status === "FULFILLED" ? { deliveredAt: existing.deliveredAt ?? new Date(), riderToken: null } : {}),
+        ...(status === "CANCELLED" ? { riderToken: null } : {}),
+      },
       include: orderInclude,
     });
+
+    // Keep the customer posted at each stage before the handover.
+    if (status !== existing.status && ["PREPARING", "READY_FOR_PICKUP", "OUT_FOR_DELIVERY"].includes(status)) {
+      void this.notifyStage(order).catch((e) => console.warn("Order stage notice failed:", (e as Error).message));
+    }
 
     // A cancelled order gives back what its gift card covered.
     if (status === "CANCELLED" && existing.status !== "CANCELLED" && existing.voucherId) {
@@ -757,7 +801,54 @@ export class OrderService extends Connection {
       }
     }
 
-    return { message: "Order status updated", data: order };
+    const { handoverCode: _code, riderToken: _token, ...shown } = order;
+    return {
+      message: "Order status updated",
+      data: shown,
+      // For the admin to send to the rider (WhatsApp or SMS).
+      ...(status === "OUT_FOR_DELIVERY" && order.riderToken && order.studioId
+        ? { riderLink: await this.riderLink(order.studioId, order.riderToken) }
+        : {}),
+    };
+  }
+
+  private async riderLink(studioId: string, token: string) {
+    const studio = await this.studio.findUnique({ where: { id: studioId }, select: { slug: true } });
+    return studioLink(studio?.slug ?? "", `/delivery/${token}`);
+  }
+
+  /** Email and push to the customer for preparing, ready and out for delivery. */
+  private async notifyStage(order: {
+    id: string;
+    orderNumber: string;
+    status: string;
+    studioId: string | null;
+    customerEmail: string | null;
+    customerName: string | null;
+    deliveryEta: string | null;
+    handoverCode: string | null;
+  }) {
+    if (!order.customerEmail) return;
+    const brand = await this.studioEmailBrand(order.studioId);
+    const { subject, html, pushBody } = orderStageUpdate(brand, {
+      orderNumber: order.orderNumber,
+      customerFirstName: (order.customerName ?? "there").split(" ")[0] || "there",
+      stage: order.status as "PREPARING" | "READY_FOR_PICKUP" | "OUT_FOR_DELIVERY",
+      eta: order.deliveryEta,
+      handoverCode: order.handoverCode,
+      ...(brand.kind === "studio" && brand.studio.bookingUrl ? { viewUrl: brand.studio.bookingUrl } : {}),
+    });
+    await this.notifications.send({
+      template: NotificationTemplate.SHOP_ORDER_STAGE,
+      to: order.customerEmail,
+      subject,
+      html,
+      studioId: order.studioId,
+      entityType: "Order",
+      entityId: `${order.id}:${order.status}`,
+      pushBody,
+      pushUrl: "/account?tab=orders",
+    });
   }
 
   public async verify(reference: string) {
@@ -913,7 +1004,7 @@ export class OrderService extends Connection {
       }
 
       // Already settled by a different reference — a real second charge.
-      if (order.status === "PAID" && order.reference !== reference) {
+      if ((PAID_ORDER_STATUSES as readonly string[]).includes(order.status) && order.reference !== reference) {
         await this.ledger.settleAttempt(reference, data, { status: "SUCCESS" });
         await this.audit.record({
           actor: { email: order.customerEmail ?? "system", role: "system" },

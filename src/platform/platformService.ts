@@ -1,3 +1,4 @@
+import { PAID_ORDER_STATUSES } from "../order/orderStatus";
 import { S3BucketService } from "../bucket/s3BucketService";
 import { studioPriceFor } from "../billing/studioPricing";
 import { Connection } from "../db/dbConnection";
@@ -557,7 +558,7 @@ export class PlatformService extends Connection {
       }),
       this.order.findMany({
         where: {
-          status: { in: ["PAID", "FULFILLED"] },
+          status: { in: [...PAID_ORDER_STATUSES] },
           ...(paidAt
             ? { OR: [{ paidAt }, { paidAt: null, createdAt: paidAt }] }
             : {}),
@@ -800,7 +801,7 @@ export class PlatformService extends Connection {
         this.order.findMany({
           where: {
             studioId: { in: ids },
-            status: { in: ["PAID", "FULFILLED"] },
+            status: { in: [...PAID_ORDER_STATUSES] },
             ...(paidAt
               ? { OR: [{ paidAt }, { paidAt: null, createdAt: paidAt }] }
               : {}),
@@ -1011,7 +1012,7 @@ export class PlatformService extends Connection {
       }),
       this.user.count({ where: { role: "CUSTOMER" } }),
       // Shop orders customers paid for (and those already handed over).
-      this.order.count({ where: { status: { in: ["PAID", "FULFILLED"] } } }),
+      this.order.count({ where: { status: { in: [...PAID_ORDER_STATUSES] } } }),
     ]);
     return {
       studiosLive: studios,

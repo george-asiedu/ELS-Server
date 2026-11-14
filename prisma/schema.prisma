@@ -70,6 +70,13 @@ enum MediaType {
 enum OrderStatus {
   PENDING_PAYMENT
   PAID
+  // Being packed or made.
+  PREPARING
+  // Pickup orders: ready to collect.
+  READY_FOR_PICKUP
+  // Delivery orders: with the rider.
+  OUT_FOR_DELIVERY
+  // Delivered or collected.
   FULFILLED
   CANCELLED
 }
@@ -1306,6 +1313,19 @@ model Order {
   // included in discountAmount).
   voucherId             String?
   voucherAmount         Float     @default(0)
+  // Delivery and pickup: the customer's note for the rider, the expected time
+  // the shop gives, and when the stage last changed (to spot stuck orders).
+  deliveryNote          String?   @db.VarChar(300)
+  deliveryEta           String?   @db.VarChar(60)
+  statusUpdatedAt       DateTime?
+  // The customer's code, given to the rider (or at the counter) to confirm
+  // the handover. The rider's link works with riderToken until it's used.
+  handoverCode          String?
+  riderToken            String?   @unique
+  riderTokenExpires     DateTime?
+  deliveredAt           DateTime?
+  deliveryFailedAt      DateTime?
+  deliveryFailReason    String?   @db.VarChar(200)
   createdAt             DateTime  @default(now())
   updatedAt             DateTime  @updatedAt
 

@@ -1,3 +1,4 @@
+import { PAID_ORDER_STATUSES } from "../order/orderStatus";
 import { resetStockAlert } from "./stockAlerts";
 import { Connection } from "../db/dbConnection";
 import { ApiError } from "../middleware/apiError";
@@ -124,7 +125,7 @@ export class ProductService extends Connection {
     const bought = await this.orderItem.findFirst({
       where: {
         productId,
-        order: { userId, status: { in: ["PAID", "FULFILLED"] } },
+        order: { userId, status: { in: [...PAID_ORDER_STATUSES] } },
       },
       select: { id: true },
     });

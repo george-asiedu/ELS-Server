@@ -98,6 +98,7 @@ const PUSH_ROUTES: Partial<Record<NotificationTemplateKey, string>> = {
   SHOP_ORDER_CONFIRMED: "/account?tab=orders",
   SHOP_ORDER_PAYMENT_FAILED: "/account?tab=orders",
   SHOP_ORDER_FULFILLED: "/account?tab=orders",
+  SHOP_ORDER_STAGE: "/account?tab=orders",
   SUBSCRIPTION_EXPIRING_SOON: "/admin/billing",
   SUBSCRIPTION_EXPIRED: "/admin/billing",
   FEATURE_REQUEST_STATUS_STUDIO: "/admin/feature-requests",

@@ -1,3 +1,4 @@
+import { PAID_ORDER_STATUSES } from "../order/orderStatus";
 import { Connection } from "../db/dbConnection";
 import { studioLink } from "../utils/studioLink";
 import { S3BucketService } from "../bucket/s3BucketService";
@@ -1009,7 +1010,7 @@ export class StudioService extends Connection {
         select: { amount: true, refundedAmount: true, paidAt: true },
       }),
       this.order.findMany({
-        where: { status: { in: ["PAID", "FULFILLED"] } },
+        where: { status: { in: [...PAID_ORDER_STATUSES] } },
         select: {
           total: true,
           refundedAmount: true,

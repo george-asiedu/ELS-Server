@@ -15,6 +15,7 @@ export class OrderController {
       referralCode,
       couponCode,
       giftCardCode,
+      deliveryNote,
     } = req.body ?? {};
     const result = await orderService.checkout(
       req.user.id,
@@ -25,6 +26,7 @@ export class OrderController {
         applyPoints: applyPoints === true || applyPoints === "true",
         couponCode,
         giftCardCode: typeof giftCardCode === "string" && giftCardCode.trim() ? giftCardCode : undefined,
+        deliveryNote: typeof deliveryNote === "string" ? deliveryNote : undefined,
         referralCode,
       },
       req.headers.origin,
@@ -54,6 +56,7 @@ export class OrderController {
       referralCode,
       couponCode,
       giftCardCode,
+      deliveryNote,
     } = req.body ?? {};
     if (!Array.isArray(items) || items.length === 0) {
       throw new ApiError("At least one product is required", 400);
@@ -70,6 +73,7 @@ export class OrderController {
         referralCode,
         couponCode,
         giftCardCode: typeof giftCardCode === "string" && giftCardCode.trim() ? giftCardCode : undefined,
+        deliveryNote: typeof deliveryNote === "string" ? deliveryNote : undefined,
       },
       req.headers.origin,
     );
@@ -125,8 +129,8 @@ export class OrderController {
   public static updateStatus = async (req: Request, res: Response) => {
     const { id } = req.params;
     if (!id) throw new ApiError("Order ID is required", 400);
-    const { status } = req.body ?? {};
+    const { status, eta } = req.body ?? {};
     if (!status) throw new ApiError("status is required", 400);
-    return res.status(200).json(await orderService.updateStatus(id, status));
+    return res.status(200).json(await orderService.updateStatus(id, status, { eta }));
   };
 }

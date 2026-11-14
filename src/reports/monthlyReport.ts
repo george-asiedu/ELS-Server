@@ -1,3 +1,4 @@
+import { PAID_ORDER_STATUSES } from "../order/orderStatus";
 import { Connection } from "../db/dbConnection";
 import { runAsSuperAdmin } from "../tenant/context";
 import { NotificationService } from "../notifications/notificationService";
@@ -52,7 +53,7 @@ export class MonthlyReportService extends Connection {
         select: { amount: true, refundedAmount: true },
       }),
       this.order.findMany({
-        where: { studioId, paidAt: { gte: from, lt: to }, status: { in: ["PAID", "FULFILLED"] } },
+        where: { studioId, paidAt: { gte: from, lt: to }, status: { in: [...PAID_ORDER_STATUSES] } },
         select: { total: true, refundedAmount: true },
       }),
       this.user.count({ where: { studioId, role: "CUSTOMER", createdAt: { gte: from, lt: to } } }),
@@ -83,7 +84,7 @@ export class MonthlyReportService extends Connection {
   private async topProduct(studioId: string, from: Date, to: Date) {
     const rows = await this.orderItem.groupBy({
       by: ["name"],
-      where: { studioId, order: { paidAt: { gte: from, lt: to }, status: { in: ["PAID", "FULFILLED"] } } },
+      where: { studioId, order: { paidAt: { gte: from, lt: to }, status: { in: [...PAID_ORDER_STATUSES] } } },
       _sum: { quantity: true },
       orderBy: { _sum: { quantity: "desc" } },
       take: 1,

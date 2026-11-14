@@ -118,7 +118,9 @@ export class CancellationService extends Connection {
   public async requestOrderCancel(userId: string, id: string, reason: unknown) {
     const order = await this.order.findUnique({ where: { id } });
     if (!order || order.userId !== userId) throw bad("Order not found", 404);
-    if (order.status !== "PAID") throw bad("Only paid orders that haven't been sent or collected can be cancelled");
+    // Before it's on its way or ready to collect.
+    if (order.status !== "PAID" && order.status !== "PREPARING")
+      throw bad("Only orders that haven't been sent or made ready to collect can be cancelled");
     if (order.cancelRequestedAt) throw bad("You've already asked to cancel this order");
     await this.order.update({
       where: { id },

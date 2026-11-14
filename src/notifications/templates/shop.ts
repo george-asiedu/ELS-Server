@@ -97,3 +97,64 @@ export const orderFulfilled = (
     }),
   };
 };
+
+/**
+ * Sent to the CUSTOMER as their order moves: being prepared, ready to collect,
+ * or out for delivery. The handover code goes with the last two, so they can
+ * confirm they've received it.
+ */
+export const orderStageUpdate = (
+  brand: EmailBrand,
+  data: {
+    orderNumber: string;
+    customerFirstName: string;
+    stage: "PREPARING" | "READY_FOR_PICKUP" | "OUT_FOR_DELIVERY";
+    eta?: string | null;
+    handoverCode?: string | null;
+    viewUrl?: string;
+  },
+) => {
+  const copy = {
+    PREPARING: {
+      subject: `Your order ${data.orderNumber} is being prepared`,
+      heading: "We're getting your order ready",
+      body: "We've started preparing your order. We'll let you know when it's on its way or ready to collect.",
+      push: `Order ${data.orderNumber} is being prepared.`,
+    },
+    READY_FOR_PICKUP: {
+      subject: `Your order ${data.orderNumber} is ready to collect`,
+      heading: "Your order is ready",
+      body: "Your order is ready to collect. Show the code below when you pick it up.",
+      push: `Order ${data.orderNumber} is ready to collect.`,
+    },
+    OUT_FOR_DELIVERY: {
+      subject: `Your order ${data.orderNumber} is on its way`,
+      heading: "Your order is on its way",
+      body: "Your order is out for delivery. Give the rider the code below when it arrives, so we know it reached you.",
+      push: `Order ${data.orderNumber} is on its way${data.eta ? ` (${data.eta})` : ""}.`,
+    },
+  }[data.stage];
+  const code =
+    data.stage !== "PREPARING" && data.handoverCode
+      ? `<p style="margin: 20px 0 6px; font-family: Arial, sans-serif; font-size: 13px; color: #545B64;">Your handover code</p>
+         <p style="margin: 0 0 8px; padding: 14px 18px; border: 1px dashed #C9CED6; display: inline-block; font-family: 'Courier New', monospace; font-size: 28px; font-weight: bold; letter-spacing: 8px;">${esc(data.handoverCode)}</p>`
+      : "";
+  return {
+    subject: copy.subject,
+    pushBody: copy.push,
+    html: renderShell({
+      brand,
+      previewText: copy.push,
+      documentType: "Order update",
+      bodyHtml: `
+        <h1 style="margin: 0 0 12px; font-family: Georgia, serif; font-size: 22px; color: #2A1B1F;">${esc(copy.heading)}</h1>
+        <p style="margin: 0; font-family: Arial, sans-serif; font-size: 15px; color: #2A1B1F; line-height: 1.6;">
+          Hi ${esc(data.customerFirstName)}, ${esc(copy.body.charAt(0).toLowerCase() + copy.body.slice(1))}
+        </p>
+        ${data.eta && data.stage !== "PREPARING" ? `<p style="margin: 12px 0 0; font-family: Arial, sans-serif; font-size: 15px; color: #2A1B1F;">Expected: <strong>${esc(data.eta)}</strong></p>` : ""}
+        ${code}
+        <p class="muted" style="margin: 14px 0 0; font-family: Arial, sans-serif; font-size: 13px; color: #7A6A6E;">Order ${esc(data.orderNumber)}</p>
+        ${data.viewUrl ? button("View your order", data.viewUrl, brandColor(brand)) : ""}`,
+    }),
+  };
+};

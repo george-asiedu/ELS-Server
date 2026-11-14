@@ -1,3 +1,4 @@
+import { PAID_ORDER_STATUSES } from "../order/orderStatus";
 import { Connection } from "../db/dbConnection";
 import { ApiError } from "../middleware/apiError";
 import { HttpCode } from "../models/status_codes";
@@ -371,7 +372,7 @@ export class UserDirectoryService extends Connection {
         },
       }),
       this.order.findMany({
-        where: { userId: { in: ids }, status: { in: ["PAID", "FULFILLED"] } },
+        where: { userId: { in: ids }, status: { in: [...PAID_ORDER_STATUSES] } },
         select: { userId: true, total: true, refundedAmount: true },
       }),
     ]);
