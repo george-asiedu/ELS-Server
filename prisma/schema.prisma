@@ -1013,6 +1013,20 @@ model Voucher {
   @@map("vouchers")
 }
 
+// Money a business spent (rent, products, salaries…), so it can see profit.
+model Expense {
+  id          String   @id @default(cuid())
+  studioId    String?
+  date        DateTime
+  category    String
+  description String?  @db.VarChar(200)
+  amount      Float
+  createdAt   DateTime @default(now())
+
+  @@index([studioId, date])
+  @@map("expenses")
+}
+
 model BlockedDate {
   id       String   @id @default(cuid())
   studioId String?

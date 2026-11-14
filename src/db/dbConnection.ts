@@ -97,6 +97,9 @@ export class Connection {
   get voucher() {
     return this.db.voucher;
   }
+  get expense() {
+    return this.db.expense;
+  }
   get contactInfo() {
     return this.db.contactInfo;
   }

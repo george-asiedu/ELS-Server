@@ -27,7 +27,7 @@ const changeOf = (now: number, before: number): { change: string | null; up?: bo
   return { change: `${pct > 0 ? "+" : "−"}${Math.abs(pct)}%`, up: pct > 0 };
 };
 
-interface MonthFigures {
+export interface MonthFigures {
   bookings: number;
   cancelled: number;
   bookingRevenue: number;
@@ -39,7 +39,7 @@ interface MonthFigures {
 export class MonthlyReportService extends Connection {
   private notifications = new NotificationService();
 
-  private async figures(studioId: string, from: Date, to: Date): Promise<MonthFigures> {
+  public async figures(studioId: string, from: Date, to: Date): Promise<MonthFigures> {
     const [bookings, cancelled, payments, orders, newCustomers] = await Promise.all([
       this.appointment.count({
         where: { studioId, appointmentDate: { gte: from, lt: to }, status: { in: ["CONFIRMED", "COMPLETED"] } },
@@ -155,6 +155,19 @@ export class MonthlyReportService extends Connection {
               ? [{ label: "Cancellations", value: String(cur.cancelled), ...changeOf(cur.cancelled, prev.cancelled), ...(cur.cancelled !== prev.cancelled ? { up: cur.cancelled < prev.cancelled } : {}) }]
               : []),
           ];
+
+          // Expenses and profit, once the business records its spending.
+          const spent = Math.round(
+            (await this.expense.aggregate({ where: { studioId: studio.id, date: { gte: from, lt: thisMonth } }, _sum: { amount: true } }))._sum
+              .amount ?? 0,
+          );
+          if (spent > 0) {
+            const profit = Math.round(cur.bookingRevenue + cur.shopRevenue - spent);
+            figures.push(
+              { label: "Expenses", value: money(spent), change: null },
+              { label: "Profit", value: money(profit), change: null, up: profit >= 0 },
+            );
+          }
 
           const highlights = [
             ...(service ? [`Most booked: ${service.name} (${service.count} ${service.count === 1 ? "booking" : "bookings"})`] : []),
