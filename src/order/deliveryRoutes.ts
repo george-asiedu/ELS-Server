@@ -39,6 +39,8 @@ router.get("/:token", async (req: Request, res: Response) => {
       address: o.deliveryAddress,
       note: o.deliveryNote,
       eta: o.deliveryEta,
+      zone: o.deliveryZone,
+      slot: o.deliverySlot,
       items: o.items.map((i) => ({ name: i.name, quantity: i.quantity, size: i.size, color: i.color })),
       status: o.status,
       failedReason: o.deliveryFailReason,

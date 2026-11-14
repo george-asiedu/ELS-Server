@@ -170,7 +170,7 @@ export const twoFactorStatus = async (userId: string) => {
     load(userId),
     raw.recoveryCode.count({ where: { userId, usedAt: null } }),
   ]);
-  return { enabled: u.totpEnabled, recoveryCodesLeft: u.totpEnabled ? left : 0 };
+  return { enabled: u.totpEnabled, recoveryCodesLeft: u.totpEnabled ? left : 0, required: env.require2faForAdmins };
 };
 
 /** Step 1: a fresh secret and the QR code to scan. Not on until confirmed. */

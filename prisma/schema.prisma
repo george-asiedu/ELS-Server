@@ -1277,6 +1277,9 @@ model Order {
   fulfillment     FulfillmentType @default(PICKUP)
   deliveryAddress String?
   deliveryPhone   String?
+  deliveryZone    String?
+  // The day and window the customer chose, e.g. "Sat 15 Nov, Morning (9am–12pm)".
+  deliverySlot    String?
 
   // A referral code used at checkout (rewards the code owner once per buyer).
   referralCode String?
@@ -1376,6 +1379,10 @@ model CommerceSettings {
   enablePickup      Boolean @default(true)
   enableDelivery    Boolean @default(true)
   deliveryFee       Float   @default(0)
+  // Delivery areas with their own fee: [{ id, name, fee }]. Empty = the flat fee above.
+  deliveryZones     Json    @default("[]")
+  // Time windows customers pick from: ["Morning (9am–12pm)", ...]. Empty = no choice.
+  deliverySlots     Json    @default("[]")
   // Admins are told when a product's stock falls to this or below.
   lowStockThreshold Int     @default(3)
 

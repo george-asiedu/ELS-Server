@@ -16,6 +16,9 @@ export class OrderController {
       couponCode,
       giftCardCode,
       deliveryNote,
+      deliveryZoneId,
+      deliveryDate,
+      deliveryWindow,
     } = req.body ?? {};
     const result = await orderService.checkout(
       req.user.id,
@@ -27,6 +30,9 @@ export class OrderController {
         couponCode,
         giftCardCode: typeof giftCardCode === "string" && giftCardCode.trim() ? giftCardCode : undefined,
         deliveryNote: typeof deliveryNote === "string" ? deliveryNote : undefined,
+        deliveryZoneId: typeof deliveryZoneId === "string" ? deliveryZoneId : undefined,
+        deliveryDate: typeof deliveryDate === "string" ? deliveryDate : undefined,
+        deliveryWindow: typeof deliveryWindow === "string" ? deliveryWindow : undefined,
         referralCode,
       },
       req.headers.origin,
@@ -57,6 +63,9 @@ export class OrderController {
       couponCode,
       giftCardCode,
       deliveryNote,
+      deliveryZoneId,
+      deliveryDate,
+      deliveryWindow,
     } = req.body ?? {};
     if (!Array.isArray(items) || items.length === 0) {
       throw new ApiError("At least one product is required", 400);
@@ -74,6 +83,9 @@ export class OrderController {
         couponCode,
         giftCardCode: typeof giftCardCode === "string" && giftCardCode.trim() ? giftCardCode : undefined,
         deliveryNote: typeof deliveryNote === "string" ? deliveryNote : undefined,
+        deliveryZoneId: typeof deliveryZoneId === "string" ? deliveryZoneId : undefined,
+        deliveryDate: typeof deliveryDate === "string" ? deliveryDate : undefined,
+        deliveryWindow: typeof deliveryWindow === "string" ? deliveryWindow : undefined,
       },
       req.headers.origin,
     );

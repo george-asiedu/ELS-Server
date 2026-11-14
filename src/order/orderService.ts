@@ -27,6 +27,19 @@ import {
 import { MoneyLine } from "../notifications/types";
 import { ghs, receiptDate, receiptNumber } from "../notifications/format";
 import { buildReceiptPdf } from "../notifications/receiptPdf";
+import { cleanSlots, cleanZones } from "../commerce/commerceSettingsService";
+
+/** The day and window a customer chose, checked against the shop's windows. */
+const pickSlot = (windows: string[], date: string | undefined, window: string | undefined): string | null => {
+  if (!windows.length) return null;
+  if (!window || !windows.includes(window)) throw new ApiError("Choose a delivery time", 400);
+  const day = date && /^\d{4}-\d{2}-\d{2}$/.test(date) ? new Date(`${date}T12:00:00Z`) : null;
+  const today = new Date(new Date().toISOString().slice(0, 10) + "T12:00:00Z");
+  const ahead = day ? Math.round((day.getTime() - today.getTime()) / 86_400_000) : -1;
+  if (!day || ahead < 0 || ahead > 13) throw new ApiError("Choose a delivery day within the next two weeks", 400);
+  const label = day.toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short", timeZone: "UTC" });
+  return `${label}, ${window}`;
+};
 import { receiptMethodLabel } from "../notifications/design/shell";
 
 type FulfillmentType = "PICKUP" | "DELIVERY";
@@ -63,6 +76,9 @@ export interface CheckoutInput {
   couponCode?: string;
   giftCardCode?: string | undefined;
   deliveryNote?: string | undefined;
+  deliveryZoneId?: string | undefined;
+  deliveryDate?: string | undefined;
+  deliveryWindow?: string | undefined;
 }
 
 export interface GuestCheckoutInput {
@@ -77,6 +93,9 @@ export interface GuestCheckoutInput {
   couponCode?: string;
   giftCardCode?: string | undefined;
   deliveryNote?: string | undefined;
+  deliveryZoneId?: string | undefined;
+  deliveryDate?: string | undefined;
+  deliveryWindow?: string | undefined;
 }
 
 const orderInclude = { items: true } as const;
@@ -181,6 +200,9 @@ export class OrderService extends Connection {
     couponCode?: string | undefined;
     giftCardCode?: string | undefined;
   deliveryNote?: string | undefined;
+  deliveryZoneId?: string | undefined;
+  deliveryDate?: string | undefined;
+  deliveryWindow?: string | undefined;
     applyPoints?: boolean | undefined;
     appointmentId?: string | undefined;
     callbackPath: string;
@@ -241,7 +263,12 @@ export class OrderService extends Connection {
       : 0;
     discountAmount = Math.round((discountAmount + couponDiscount) * 100) / 100;
 
-    const deliveryFee = fulfillment === "DELIVERY" ? settings.deliveryFee : 0;
+    // Delivery areas price the trip; without any, the flat fee applies.
+    const zones = cleanZones(settings.deliveryZones);
+    const zone = fulfillment === "DELIVERY" && zones.length ? zones.find((z) => z.id === params.deliveryZoneId) : undefined;
+    if (fulfillment === "DELIVERY" && zones.length && !zone) throw new ApiError("Choose your delivery area", 400);
+    const deliveryFee = fulfillment !== "DELIVERY" ? 0 : zone ? zone.fee : settings.deliveryFee;
+    const deliverySlot = fulfillment === "DELIVERY" ? pickSlot(cleanSlots(settings.deliverySlots), params.deliveryDate, params.deliveryWindow) : null;
     let total =
       Math.round((subtotal - discountAmount + deliveryFee) * 100) / 100;
     if (total <= 0)
@@ -279,6 +306,8 @@ export class OrderService extends Connection {
           fulfillment === "DELIVERY" ? params.deliveryAddress!.trim() : null,
         deliveryPhone:
           fulfillment === "DELIVERY" ? params.deliveryPhone!.trim() : null,
+        deliveryZone: zone?.name ?? null,
+        deliverySlot,
         deliveryNote:
           fulfillment === "DELIVERY" && params.deliveryNote?.trim() ? params.deliveryNote.trim().slice(0, 300) : null,
         referralCode: params.referralCode?.trim() || null,
@@ -460,6 +489,9 @@ export class OrderService extends Connection {
       couponCode: input.couponCode,
       giftCardCode: input.giftCardCode,
       deliveryNote: input.deliveryNote,
+      deliveryZoneId: input.deliveryZoneId,
+      deliveryDate: input.deliveryDate,
+      deliveryWindow: input.deliveryWindow,
       referralCode: input.referralCode,
       applyPoints: input.applyPoints,
       callbackPath: "/order/callback",
@@ -487,6 +519,9 @@ export class OrderService extends Connection {
       couponCode: input.couponCode,
       giftCardCode: input.giftCardCode,
       deliveryNote: input.deliveryNote,
+      deliveryZoneId: input.deliveryZoneId,
+      deliveryDate: input.deliveryDate,
+      deliveryWindow: input.deliveryWindow,
       callbackPath: "/order/callback",
       origin,
     });
