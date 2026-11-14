@@ -959,7 +959,9 @@ export class PlatformService extends Connection {
       this.productCategory.findMany({ where: { studioId: { in: ids }, active: true }, select: { studioId: true, name: true }, orderBy: { order: "asc" } }),
     ]);
     const s3 = new S3BucketService();
-    const query = typeof q === "string" ? q.trim().toLowerCase() : "";
+    // Searches start at 3 characters; shorter is treated as no search.
+    const raw = typeof q === "string" ? q.trim().toLowerCase().slice(0, 80) : "";
+    const query = raw.length >= 3 ? raw : "";
     const data = studios
       .map((st) => {
         const booking = st.settings?.booking !== false;
