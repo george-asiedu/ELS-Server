@@ -120,6 +120,9 @@ const paymentView = (
 export interface SlotCheck {
   date: Date;
   time: string;
+  // The staff member the booking is with. Set: only their bookings (and ones
+  // with nobody assigned) clash. Null: every booking clashes, as before staff.
+  staffId?: string | null;
   // Excluded from the clash check — the booking being moved must not collide
   // with itself.
   ignoreAppointmentId?: string | undefined;
@@ -136,6 +139,7 @@ export interface SlotCheck {
 }
 
 const serviceInclude = {
+  staff: { select: { id: true, name: true } },
   service: {
     select: {
       id: true,
@@ -228,19 +232,39 @@ export class AppointmentService extends Connection {
         // Same gate a reschedule passes through. Until this existed the server
         // accepted any well-formatted date/time, including one in the past, on
         // a closed day, or already taken by someone else.
-        await this.assertSlotBookable(
-          {
-            date: appointmentDate,
-            time: data.appointmentTime,
-            enforceOpeningHours: true,
-            // Booking for "in a few minutes" is legitimate (a walk-in the
-            // studio enters), so creation has no notice floor beyond not
-            // being in the past.
-            minNoticeHours: 0,
-            durationMinutes: parseDurationMinutes(service.duration),
-          },
-          tx,
-        );
+        const slot = {
+          date: appointmentDate,
+          time: data.appointmentTime,
+          enforceOpeningHours: true,
+          // Booking for "in a few minutes" is legitimate (a walk-in the
+          // studio enters), so creation has no notice floor beyond not
+          // being in the past.
+          minNoticeHours: 0,
+          durationMinutes: parseDurationMinutes(service.duration),
+        };
+        // With staff: the chosen person, or the first one free who does
+        // this service. Without staff, the studio-wide check as before.
+        let staffId: string | null = null;
+        const qualified = await this.qualifiedStaff(data.serviceId);
+        if (qualified.length) {
+          const wanted = data.staffId && data.staffId !== "any" ? data.staffId : null;
+          if (wanted && !qualified.includes(wanted)) {
+            throw new ApiError("That person doesn't do this service. Pick someone else or Anyone.", 400);
+          }
+          for (const candidate of wanted ? [wanted] : qualified) {
+            try {
+              await this.assertSlotBookable({ ...slot, staffId: candidate }, tx);
+              staffId = candidate;
+              break;
+            } catch (e) {
+              // Only "taken" moves on to the next person; anything else stands.
+              if (!(e instanceof ApiError) || e.statusCode !== 409) throw e;
+            }
+          }
+          if (!staffId) throw new ApiError("That slot is already taken", 409);
+        } else {
+          await this.assertSlotBookable(slot, tx);
+        }
 
         const created = await tx.appointment.create({
           data: {
@@ -254,6 +278,7 @@ export class AppointmentService extends Connection {
             discountAmount,
             pointsRedeemed,
             serviceId: data.serviceId,
+            ...(staffId ? { staffId } : {}),
             ...(designImageUrl ? { designImageUrl } : {}),
             ...(userId ? { userId } : {}),
           },
@@ -493,6 +518,18 @@ export class AppointmentService extends Connection {
    * booking — without it the UI would offer an 11:00 slot that the server
    * rejects because a 4-hour service started at 10:00.
    */
+  /** Active staff who do this service, in display order. Empty: no staff. */
+  private async qualifiedStaff(serviceId: string): Promise<string[]> {
+    const staff = await this.staff.findMany({
+      where: { active: true },
+      orderBy: [{ order: "asc" }, { createdAt: "asc" }],
+      select: { id: true, serviceIds: true },
+    });
+    return staff
+      .filter((s) => !s.serviceIds.length || s.serviceIds.includes(serviceId))
+      .map((s) => s.id);
+  }
+
   public async takenSlots(date: string) {
     const appointments = await this.appointment.findMany({
       where: {
@@ -501,6 +538,7 @@ export class AppointmentService extends Connection {
       },
       select: {
         appointmentTime: true,
+        staffId: true,
         service: { select: { duration: true } },
       },
     });
@@ -516,10 +554,12 @@ export class AppointmentService extends Connection {
               start: formatTimeHHMM(mins),
               label: a.appointmentTime,
               minutes: parseDurationMinutes(a.service?.duration) ?? 0,
+              // Who it's with, so a picker can tell when someone else is free.
+              staffId: a.staffId,
             };
       })
       .filter(
-        (b): b is { start: string; label: string; minutes: number } =>
+        (b): b is { start: string; label: string; minutes: number; staffId: string | null } =>
           b !== null,
       );
     return {
@@ -707,6 +747,7 @@ export class AppointmentService extends Connection {
       select: {
         id: true,
         appointmentTime: true,
+        staffId: true,
         service: { select: { duration: true } },
       },
     });
@@ -717,6 +758,8 @@ export class AppointmentService extends Connection {
     const newEnd = newStart + (check.durationMinutes ?? 0);
 
     for (const other of sameDay) {
+      // Different staff can be booked at the same time.
+      if (check.staffId && other.staffId && other.staffId !== check.staffId) continue;
       const otherStart = parseTimeMinutes(other.appointmentTime);
       if (otherStart === null) continue;
       const otherEnd =
@@ -817,6 +860,7 @@ export class AppointmentService extends Connection {
             date,
             time,
             ignoreAppointmentId: id,
+            staffId: existing.staffId,
             enforceOpeningHours: byCustomer,
             minNoticeHours,
             durationMinutes: parseDurationMinutes(existing.service?.duration),
@@ -988,6 +1032,7 @@ export class AppointmentService extends Connection {
             date: existing.appointmentDate,
             time: existing.appointmentTime,
             ignoreAppointmentId: id,
+            staffId: existing.staffId,
             enforceOpeningHours: true,
             minNoticeHours: 0,
             durationMinutes: parseDurationMinutes(next.duration),

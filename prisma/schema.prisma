@@ -717,6 +717,10 @@ model Appointment {
 
   // Nullable so guests (not logged in) can book
   userId    String?
+  // Who it's with, when the studio has staff. Null on older bookings and at
+  // studios without staff; such bookings hold the slot for everyone.
+  staffId   String?
+  staff     Staff?  @relation(fields: [staffId], references: [id], onDelete: SetNull)
   serviceId String
 
   user    User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
@@ -906,6 +910,26 @@ model BusinessHours {
   @@unique([studioId, dayOfWeek])
   @@index([studioId])
   @@map("business_hours")
+}
+
+// A stylist (or chair) at a studio. Bookings can be made with a particular
+// person; two staff can be booked at the same time.
+model Staff {
+  id           String        @id @default(cuid())
+  studioId     String?
+  name         String
+  role         String?
+  photoUrl     String?
+  // Services this person does; empty means all of them.
+  serviceIds   String[]      @default([])
+  active       Boolean       @default(true)
+  order        Int           @default(0)
+  appointments Appointment[]
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  @@index([studioId])
+  @@map("staff")
 }
 
 model BlockedDate {

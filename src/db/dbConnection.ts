@@ -85,6 +85,9 @@ export class Connection {
   get blockedDate() {
     return this.db.blockedDate;
   }
+  get staff() {
+    return this.db.staff;
+  }
   get contactInfo() {
     return this.db.contactInfo;
   }

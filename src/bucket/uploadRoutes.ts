@@ -11,6 +11,7 @@ const scopes = new Set([
   "products",
   "appointments",
   "studio",
+  "staff",
   "profiles",
   "reviews",
   "misc",
