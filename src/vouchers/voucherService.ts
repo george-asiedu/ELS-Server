@@ -318,6 +318,49 @@ export class VoucherService extends Connection {
     });
   }
 
+  /**
+   * A customer's own gift cards and packages: ones they bought and ones sent
+   * to their email. The code is shown only to the person who can use it, so a
+   * gift bought for someone else lists who it went to, not its code.
+   */
+  public async mine(userId: string, userEmail: string) {
+    const email = userEmail.toLowerCase();
+    const rows = await this.voucher.findMany({
+      where: {
+        status: { not: "PENDING" },
+        OR: [{ buyerUserId: userId }, { buyerEmail: email }, { recipientEmail: email }],
+      },
+      orderBy: { createdAt: "desc" },
+    });
+    const services = new Map(
+      (await this.service.findMany({ where: { id: { in: rows.map((r) => r.serviceId).filter((x): x is string => Boolean(x)) } }, select: { id: true, name: true } })).map(
+        (sv) => [sv.id, sv.name],
+      ),
+    );
+    return {
+      data: rows.map((v) => {
+        const forSomeoneElse = v.kind === "GIFT_CARD" && Boolean(v.recipientEmail) && v.recipientEmail !== email;
+        const received = v.recipientEmail === email && v.buyerEmail !== email;
+        return {
+          id: v.id,
+          kind: v.kind,
+          status: v.status,
+          code: forSomeoneElse ? null : v.code,
+          price: v.price,
+          balance: v.balance,
+          sessionsLeft: v.sessionsLeft,
+          sessionsTotal: v.sessionsTotal,
+          serviceId: v.serviceId,
+          serviceName: v.serviceId ? (services.get(v.serviceId) ?? null) : null,
+          sentTo: forSomeoneElse ? (v.recipientName ?? v.recipientEmail) : null,
+          from: received ? v.buyerName : null,
+          message: received ? v.message : null,
+          createdAt: v.createdAt,
+        };
+      }),
+    };
+  }
+
   // ---- Admin
 
   public async list() {

@@ -21,6 +21,11 @@ router.get("/check", async (req: Request, res: Response) =>
   res.status(200).json(await service.check(req.query.code, req.query.serviceId)),
 );
 
+// Customers: their own gift cards and packages.
+router.get("/mine", authenticate, async (req: Request, res: Response) =>
+  res.status(200).json(await service.mine(req.user!.id, req.user!.email)),
+);
+
 // Admin.
 router.get("/", authenticate, requireAdmin, async (_req: Request, res: Response) => res.status(200).json(await service.list()));
 router.post("/:id/redeem", authenticate, requireAdmin, async (req: Request, res: Response) =>
