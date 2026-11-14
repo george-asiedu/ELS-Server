@@ -22,6 +22,9 @@ export interface CreateProductInput {
   images?: string[];
   sizes?: string[];
   colors?: string[];
+  audience?: string;
+  brand?: string | null;
+  attributes?: string[];
 }
 
 export type UpdateProductInput = Partial<CreateProductInput>;
@@ -67,12 +70,25 @@ export class ProductService extends Connection {
     if (colors?.some((c) => !/^[^|]{1,40}\|#[0-9a-fA-F]{6}$/.test(c))) {
       throw new ApiError("Each colour needs a name and a colour value", 400);
     }
+    const attributes = this.cleanList(data.attributes);
+    if (attributes?.some((a) => !/^[^|]{1,30}\|[^|]{1,60}$/.test(a))) {
+      throw new ApiError("Each detail needs a label and a value", 400);
+    }
+    if (
+      data.audience !== undefined &&
+      !["MEN", "WOMEN", "UNISEX"].includes(data.audience)
+    ) {
+      throw new ApiError("Choose who it's for: men, women or everyone", 400);
+    }
     const images = this.cleanList(data.images)?.map((u) =>
       this.s3.assertOwnedMediaUrl(u, "products"),
     );
     return {
       ...(sizes ? { sizes } : {}),
       ...(colors ? { colors } : {}),
+      ...(attributes ? { attributes: attributes.slice(0, 12) } : {}),
+      ...(data.audience !== undefined ? { audience: data.audience } : {}),
+      ...(data.brand !== undefined ? { brand: data.brand } : {}),
       ...(images ? { images: images.slice(0, 8) } : {}),
     };
   }

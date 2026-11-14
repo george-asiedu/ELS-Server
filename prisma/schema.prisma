@@ -1003,6 +1003,11 @@ model Product {
   // "Name|#hex", e.g. "Sand|#C2B280".
   colors      String[] @default([])
   category    String // ProductCategory slug
+  // Who it's for, so a shop can show Men and Women sections: MEN | WOMEN | UNISEX.
+  audience    String   @default("UNISEX")
+  brand       String?
+  // Facts shown as a table on the product page, "Label|Value" (e.g. "Fabric|Cotton").
+  attributes  String[] @default([])
   stock       Int      @default(0)
   trackStock  Boolean  @default(true)
   active      Boolean  @default(true)

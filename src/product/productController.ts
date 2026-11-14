@@ -14,7 +14,7 @@ const toBool = (v: unknown): boolean | undefined =>
 
 const parseBody = (body: Record<string, unknown>): UpdateProductInput => {
   const out: UpdateProductInput = {};
-  for (const key of ["images", "sizes", "colors"] as const) {
+  for (const key of ["images", "sizes", "colors", "attributes"] as const) {
     if (Array.isArray(body[key]))
       out[key] = (body[key] as unknown[]).map(String);
   }
@@ -30,6 +30,9 @@ const parseBody = (body: Record<string, unknown>): UpdateProductInput => {
     out.promoPrice = p === undefined ? null : p;
   }
   if (body.category !== undefined) out.category = String(body.category);
+  if (body.audience !== undefined) out.audience = String(body.audience);
+  if (body.brand !== undefined)
+    out.brand = body.brand === null || body.brand === "" ? null : String(body.brand).trim().slice(0, 60);
   const stock = toNum(body.stock);
   if (stock !== undefined) out.stock = stock;
   const trackStock = toBool(body.trackStock);
