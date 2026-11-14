@@ -11,7 +11,14 @@ import { env } from "../config/env.config";
  */
 export const studioLink = (slug: string, path = ""): string => {
   const page = path && !path.startsWith("/") ? `/${path}` : path;
-  if (env.rootDomain) return `https://${slug}.${env.rootDomain}${page}`;
+  if (env.rootDomain) {
+    // ROOT_DOMAIN may be written with a scheme ("http://localhost:8080" in
+    // development); keep its scheme and port, otherwise use https.
+    const m = /^(https?):\/\/(.+)$/.exec(env.rootDomain.replace(/\/$/, ""));
+    const scheme = m ? m[1] : "https";
+    const host = m ? m[2] : env.rootDomain.replace(/\/$/, "");
+    return `${scheme}://${slug}.${host}${page}`;
+  }
   const entry = `${env.clientUrl.replace(/\/$/, "")}/s/${slug}`;
   return page ? `${entry}?next=${encodeURIComponent(page)}` : entry;
 };
