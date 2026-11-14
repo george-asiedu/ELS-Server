@@ -1,5 +1,6 @@
 import { notifyStudioAdmins } from "../push/pushService";
 import { sendBookingWhatsapp } from "../whatsapp/whatsappService";
+import { WaitlistService } from "../waitlist/waitlistService";
 import { Connection, TenantTx } from "../db/dbConnection";
 import {
   CursorPage,
@@ -1233,6 +1234,13 @@ export class AppointmentService extends Connection {
       data: { status },
       include: serviceInclude,
     });
+
+    // A cancelled slot is free again: tell anyone waiting for that day.
+    if (status === "CANCELLED" && existing.status !== "CANCELLED") {
+      void new WaitlistService().slotOpened(appointment.appointmentDate).catch((e) =>
+        console.warn("Waitlist check failed:", (e as Error).message),
+      );
+    }
 
     // A WhatsApp confirmation too, when the studio has it on.
     if (status === "CONFIRMED" && existing.status !== "CONFIRMED" && appointment.studioId) {

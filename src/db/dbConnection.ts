@@ -88,6 +88,9 @@ export class Connection {
   get staff() {
     return this.db.staff;
   }
+  get waitlistEntry() {
+    return this.db.waitlistEntry;
+  }
   get contactInfo() {
     return this.db.contactInfo;
   }

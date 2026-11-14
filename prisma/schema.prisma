@@ -937,6 +937,24 @@ model Staff {
   @@map("staff")
 }
 
+// Customers waiting for a slot on a full day. When a booking that day is
+// cancelled, everyone waiting is told and the first to book gets it.
+model WaitlistEntry {
+  id         String    @id @default(cuid())
+  studioId   String?
+  serviceId  String
+  date       DateTime
+  userId     String?
+  name       String
+  email      String?
+  phone      String?
+  notifiedAt DateTime?
+  createdAt  DateTime  @default(now())
+
+  @@index([studioId, date])
+  @@map("waitlist_entries")
+}
+
 model BlockedDate {
   id       String   @id @default(cuid())
   studioId String?

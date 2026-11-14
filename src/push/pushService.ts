@@ -105,6 +105,7 @@ const PUSH_ROUTES: Partial<Record<NotificationTemplateKey, string>> = {
   STUDIO_MONTHLY_REPORT: "/admin/analytics",
   REFUNDED_BY_STUDIO: "/account",
   REVIEW_REQUEST: "/account",
+  WAITLIST_SLOT_OPEN: "/book",
 };
 
 /**
