@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { guestLimiter, requireGuestKey } from "../middleware/guestKey";
+import { requireCaptcha } from "../middleware/captcha";
 import { AppointmentController } from "./appointmentController";
 import {
   authenticate,
@@ -16,7 +17,7 @@ router.get("/availability", AppointmentController.availability);
 router.post("/", authenticate, requireCustomer, AppointmentController.create);
 
 // Guest — book without an account. Returns a private token for paying.
-router.post("/guest", guestLimiter, requireGuestKey, AppointmentController.createGuest);
+router.post("/guest", guestLimiter, requireGuestKey, requireCaptcha, AppointmentController.createGuest);
 
 // Logged-in user's own appointments.
 router.get("/me", authenticate, AppointmentController.listMine);

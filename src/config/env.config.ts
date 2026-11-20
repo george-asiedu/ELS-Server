@@ -100,6 +100,8 @@ export const env = {
   // using their dashboards. On unless REQUIRE_2FA_FOR_ADMINS=false.
   require2faForAdmins:
     (process.env.REQUIRE_2FA_FOR_ADMINS ?? "true").trim().toLowerCase() !== "false",
+  // Cloudflare Turnstile (the security check on guest actions). Required in production.
+  turnstileSecret: (process.env.TURNSTILE_SECRET_KEY as string) || "",
   // Optional extra fixed guest keys (the live key is managed in the super admin).
   guestApiKeys: (process.env.GUEST_API_KEYS ?? "").split(",").map((k) => k.trim()).filter(Boolean),
   totpEncryptionKey: (process.env.TOTP_ENCRYPTION_KEY as string) || "",

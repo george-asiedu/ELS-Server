@@ -551,7 +551,7 @@ model PlatformConfig {
   // and the size and monthly price of an extra block.
   storageStandardMb         Int     @default(500)
   storagePremiumMb          Int     @default(1024)
-  storageBlockMb            Int     @default(50)
+  storageBlockMb            Int     @default(500)
   storageBlockPrice         Float   @default(5)
   // Guest key: the web app sends it to book, pay or buy without an account.
   // Rotating moves the old one to "previous", which keeps working for a day so

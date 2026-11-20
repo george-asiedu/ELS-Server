@@ -13,6 +13,16 @@ export const platformBrand: EmailBrand = {
   },
 };
 
+// Zuri's name depends on who it is writing to: just "Zuri" for the platform in
+// general, "Zuri Studios" to a booking business and "Zuri Stores" to a shop.
+export type ZuriName = "Zuri" | "Zuri Studios" | "Zuri Stores";
+export const zuriNameForPlan = (plan?: string | null): ZuriName =>
+  plan === "STOREFRONT" ? "Zuri Stores" : plan === "STANDARD" || plan === "PREMIUM" ? "Zuri Studios" : "Zuri";
+export const platformBrandForPlan = (plan?: string | null): EmailBrand => ({
+  kind: "zuri",
+  zuri: { name: zuriNameForPlan(plan), websiteUrl: env.clientUrl, supportEmail: env.senderEmail },
+});
+
 // Used for customer-facing storefront mail (bookings, payments, orders) on the
 // rare path where the studio's own branding can't be resolved. Points at the
 // public marketing site and the customer-support inbox rather than the app.

@@ -36,7 +36,8 @@ export const brandColor = (brand: EmailBrand): string =>
   (brand.kind === "studio" && brand.studio.primaryColor) || "#FBC500";
 // The Zuri mark, served from the public site's /public folder. Email clients
 // need an absolute URL, and PNG rather than SVG.
-const ZURI_LOGO_URL = "https://zuristudios.com/zuri-mark-square.png";
+// The version tag makes mail clients fetch the current logo instead of a cached old one.
+const ZURI_LOGO_URL = "https://zuristudios.com/zuri-mark-square.png?v=3";
 const brandLogo = (brand: EmailBrand) =>
   brand.kind === "studio" ? brand.studio.logoUrl : ZURI_LOGO_URL;
 const brandSiteUrl = (brand: EmailBrand) =>
@@ -66,7 +67,7 @@ export const button = (label: string, url: string, color: string): string => `
     <tr>
       <td align="center" bgcolor="${color}" style="background: ${color};">
         <a href="${esc(url)}" target="_blank" data-cta="1"
-           style="display: inline-block; padding: 14px 48px; font-family: Arial, Helvetica, sans-serif; font-size: 15px; font-weight: bold; color: ${textOn(color)}; text-decoration: none;">${esc(label)}</a>
+           style="display: inline-block; padding: 14px 56px; font-family: Arial, Helvetica, sans-serif; font-size: 15px; font-weight: bold; color: ${textOn(color)}; text-decoration: none;">${esc(label)}</a>
       </td>
     </tr>
   </table>`;
@@ -285,7 +286,7 @@ const supportLine = (brand: EmailBrand): string => {
 // The small grey footer under the card.
 const legalFooter = (brand: EmailBrand): string => {
   if (brand.kind === "zuri")
-    return `Zuri &middot; <a href="${esc(brand.zuri.websiteUrl)}" style="color: ${FAINT};">${esc(brand.zuri.websiteUrl.replace(/^https?:\/\//, ""))}</a><br>You're getting this email because of something on your account.`;
+    return `${esc(brand.zuri.name)} &middot; <a href="${esc(brand.zuri.websiteUrl)}" style="color: ${FAINT};">${esc(brand.zuri.websiteUrl.replace(/^https?:\/\//, ""))}</a><br>You're getting this email because of something on your account.`;
   const s = brand.studio;
   return `${esc(s.name)}${s.address ? ` &middot; ${esc(s.address)}` : ""}<br>Powered by Zuri. You're getting this email because of something on your account.`;
 };
@@ -305,16 +306,18 @@ export const renderShell = (args: {
   // conversational mail.
   documentType?: string;
 }): string => {
-  const { brand, previewText, documentType } = args;
+  const { brand, previewText } = args;
   const name = brandName(brand);
   const logo = brandLogo(brand);
   const site = brandSiteUrl(brand);
   // Templates were written centred; this layout reads left-aligned, in one
   // sans-serif face, like the church emails.
   const bodyHtml = args.bodyHtml
+    // The church emails have no status pills: the headline says it.
+    .replace(/<table[^>]*>\s*<tr>\s*<td class="badge[\s\S]*?<\/table>/g, "")
     .replace(/text-align:\s*center;?/g, "text-align: left;")
     .replace(/margin: 0 auto 20px;/g, "margin: 0 0 20px;")
-    .replace(/font-family: Georgia, serif; font-size: 22px;/g, "font-family: Arial, Helvetica, sans-serif; font-size: 20px; font-weight: bold;");
+    .replace(/font-family: Georgia, serif; font-size: 22px;/g, "font-family: Arial, Helvetica, sans-serif; font-size: 16px; font-weight: bold;");
   const cta = /<a href="([^"]+)"[^>]*data-cta="1"/.exec(bodyHtml)?.[1];
 
   return `<!DOCTYPE html>
@@ -348,20 +351,13 @@ export const renderShell = (args: {
         <table role="presentation" class="email-container" width="600" cellpadding="0" cellspacing="0" border="0" style="width: 100%; max-width: 600px;">
           <!-- Header band -->
           <tr>
-            <td bgcolor="${BAND}" class="email-padding" style="background: ${BAND}; padding: 20px 24px;">
-              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
-                <tr>
-                  <td style="vertical-align: middle;">
-                    ${logo ? `<img src="${esc(logo)}" width="44" height="44" alt="" style="display: inline-block; vertical-align: middle; border-radius: 50%; background: #ffffff;" />` : ""}
-                    ${
-                      site
-                        ? `<a href="${esc(site)}" target="_blank" style="display: inline-block; vertical-align: middle; ${logo ? "margin-left: 12px; " : ""}color: #ffffff; font-size: 18px; font-weight: bold; letter-spacing: 0.3px; text-decoration: none;">${esc(name)}</a>`
-                        : `<span style="display: inline-block; vertical-align: middle; ${logo ? "margin-left: 12px; " : ""}color: #ffffff; font-size: 18px; font-weight: bold; letter-spacing: 0.3px;">${esc(name)}</span>`
-                    }
-                  </td>
-                  ${documentType ? `<td align="right" style="vertical-align: middle; color: #AEB5BF; font-size: 12px;">${esc(documentType)}</td>` : ""}
-                </tr>
-              </table>
+            <td align="center" bgcolor="${BAND}" class="email-padding" style="background: ${BAND}; padding: 20px 24px;">
+              ${logo ? `<img src="${esc(logo)}" width="56" height="56" alt="" style="display: inline-block; vertical-align: middle; border: 0; border-radius: 50%; background: #ffffff;" />` : ""}
+              ${
+                site
+                  ? `<a href="${esc(site)}" target="_blank" style="display: inline-block; vertical-align: middle; ${logo ? "margin-left: 12px; " : ""}color: #ffffff; font-size: 18px; font-weight: bold; letter-spacing: 0.3px; text-decoration: none;">${esc(name)}</a>`
+                  : `<span style="display: inline-block; vertical-align: middle; ${logo ? "margin-left: 12px; " : ""}color: #ffffff; font-size: 18px; font-weight: bold; letter-spacing: 0.3px;">${esc(name)}</span>`
+              }
             </td>
           </tr>
           <!-- Card -->
@@ -369,7 +365,7 @@ export const renderShell = (args: {
             <td bgcolor="#ffffff" class="email-card email-padding" style="background: #ffffff; padding: 32px 32px 8px; font-size: 15px; line-height: 1.55; color: #333333;">
               ${bodyHtml}
               <p style="margin: 28px 0 0; font-size: 15px; line-height: 1.55; color: #333333;">Kind regards,</p>
-              <p style="margin: 2px 0 24px; font-size: 16px; line-height: 1.5; color: ${BAND};">${esc(name)}</p>
+              <p style="margin: 2px 0 24px; font-size: 16px; line-height: 1.5; color: #16191F;">${esc(name)}</p>
             </td>
           </tr>
           <tr>

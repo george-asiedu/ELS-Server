@@ -23,11 +23,17 @@ export const sendEmailNow = async ({
   subject,
   html,
   attachments,
+  fromName,
+  replyTo,
 }: {
   to: string;
   subject: string;
   html: string;
   attachments?: EmailAttachment[];
+  /** The name the email comes from: the business's, or Zuri's. */
+  fromName?: string;
+  /** Where a reply goes (the business's own email, for customer mail). */
+  replyTo?: string;
 }): Promise<void> => {
   // Drop anything oversized rather than failing the whole send: the email body
   // already states what was paid, so a customer is better off with the mail and
@@ -69,6 +75,8 @@ export const sendEmailNow = async ({
       subject,
       body: html,
       from: env.senderEmail,
+      ...(fromName ? { name: fromName.slice(0, 80) } : {}),
+      ...(replyTo ? { reply: replyTo } : {}),
       ...(safeAttachments?.length ? { attachments: safeAttachments } : {}),
     }),
   });

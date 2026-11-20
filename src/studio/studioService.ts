@@ -40,8 +40,8 @@ import {
   subscriptionExpiringSoon,
   subscriptionExpired,
 } from "../notifications/templates/subscription";
-import { platformBrand } from "../notifications/brand";
 import { markExtrasBilled, pendingExtras, reserveExtras } from "../billing/extraCharges";
+import { platformBrandForPlan } from "../notifications/brand";
 import { ghs } from "../notifications/format";
 
 const DOMAIN_RE = /^(?!-)[a-z0-9-]{1,63}(\.[a-z0-9-]{1,63})+$/;
@@ -1582,7 +1582,7 @@ export class StudioService extends Connection {
 
         try {
           if (lapsed) {
-            const { subject, html } = subscriptionExpired(platformBrand, {
+            const { subject, html } = subscriptionExpired(platformBrandForPlan(studio.plan), {
               planName,
               expiredOn: studio.currentPeriodEnd.toLocaleDateString("en-GB", {
                 day: "numeric",
@@ -1610,7 +1610,7 @@ export class StudioService extends Connection {
                 billingConfig,
               ).amount,
             );
-            const { subject, html } = subscriptionExpiringSoon(platformBrand, {
+            const { subject, html } = subscriptionExpiringSoon(platformBrandForPlan(studio.plan), {
               planName,
               renewsOn: studio.currentPeriodEnd.toLocaleDateString("en-GB", {
                 day: "numeric",

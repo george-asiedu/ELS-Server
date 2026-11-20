@@ -1,13 +1,14 @@
 import { Router } from "express";
 import { authenticate, requireAdmin } from "../middleware/auth";
 import { BillService } from "./billService";
+import { requireCaptcha } from "../middleware/captcha";
 
 const router: Router = Router();
 const bills = new BillService();
 
 // Public: the customer's pay page. The secret token in the link is the key.
 router.get("/pay/:token", async (req, res) => res.status(200).json(await bills.publicView(String(req.params.token))));
-router.post("/pay/:token/start", async (req, res) =>
+router.post("/pay/:token/start", requireCaptcha, async (req, res) =>
   res.status(200).json(await bills.startPayment(String(req.params.token), req.body?.email, req.headers.origin)),
 );
 router.get("/pay/:token/verify", async (req, res) =>

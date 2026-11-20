@@ -35,6 +35,7 @@ import { NotificationTemplate } from "../notifications/registry";
 import { studioCreated } from "../notifications/templates/studio";
 import { confirmEmailCode, sendEmailCode } from "../auth/emailCode";
 import { countPromoUse, promoPercent } from "../billing/studioPricing";
+import { platformBrandForPlan } from "../notifications/brand";
 import { platformBrand } from "../notifications/brand";
 
 type BillingMode = "SUBSCRIPTION" | "REVENUE_SHARE";
@@ -437,7 +438,7 @@ export class OnboardingService extends Connection {
 
     try {
       const websiteUrl = studioLink(studio.slug);
-      const { subject, html } = studioCreated(platformBrand, {
+      const { subject, html } = studioCreated(platformBrandForPlan(plan), {
         ownerFirstName: signup.ownerFullName?.split(" ")[0] || "there",
         studioName: studio.name,
         planName: planName(plan),

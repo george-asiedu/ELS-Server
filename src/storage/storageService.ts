@@ -167,3 +167,31 @@ export const billStorageForMonth = async () => {
   for (const s of studios) await chargeMonth(s.id, s.storageExtraBlocks, cfg.storageBlockMb, cfg.storageBlockPrice);
   return { studiosBilled: studios.length };
 };
+
+// ---- Super admin: what each plan includes and what an extra block costs.
+
+export const platformStorageSettings = async () => {
+  const c = await config();
+  return { standardMb: c.storageStandardMb, premiumMb: c.storagePremiumMb, blockMb: c.storageBlockMb, blockPrice: c.storageBlockPrice };
+};
+
+export const savePlatformStorageSettings = async (input: Record<string, unknown>) => {
+  const whole = (v: unknown, label: string, min: number, max: number) => {
+    const n = Math.trunc(Number(v));
+    if (!Number.isFinite(n) || n < min || n > max) throw new ApiError(`${label} should be between ${min} and ${max}`, 400);
+    return n;
+  };
+  const price = Math.round(Number(input.blockPrice) * 100) / 100;
+  if (!Number.isFinite(price) || price < 0 || price > 10000) throw new ApiError("The block price should be between 0 and 10,000", 400);
+  const c = await config();
+  await raw.platformConfig.update({
+    where: { id: c.id },
+    data: {
+      storageStandardMb: whole(input.standardMb, "Standard storage (MB)", 50, 1_000_000),
+      storagePremiumMb: whole(input.premiumMb, "Premium storage (MB)", 50, 1_000_000),
+      storageBlockMb: whole(input.blockMb, "Block size (MB)", 10, 100_000),
+      storageBlockPrice: price,
+    },
+  });
+  return platformStorageSettings();
+};

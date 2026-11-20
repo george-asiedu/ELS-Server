@@ -4,6 +4,8 @@ import { sendEmailNow } from "../email/emailService";
 import { NotificationTemplateKey } from "./registry";
 import type { EmailAttachment } from "../email/emailService";
 import { PUSH_FIRST, pushForNotification } from "../push/pushService";
+import { runAsSuperAdmin } from "../tenant/context";
+import { zuriNameForPlan } from "./brand";
 
 export interface SendNotificationArgs {
   template: NotificationTemplateKey;
@@ -41,7 +43,45 @@ export interface SendNotificationArgs {
  * about it, and email delivery trouble must never roll that back. See
  * notifications/README.md.
  */
+// Mail from Zuri to a business (not from a business to its customers): these go
+// out under Zuri's name, the one that fits the business's product.
+const FROM_ZURI = new Set<string>([
+  "STUDIO_CREATED",
+  "STUDIO_ACCOUNT_SUSPENDED",
+  "STUDIO_MONTHLY_REPORT",
+  "SUBSCRIPTION_EXPIRING_SOON",
+  "SUBSCRIPTION_EXPIRED",
+  "FEATURE_REQUEST_SUBMITTED_PLATFORM",
+  "FEATURE_REQUEST_STATUS_STUDIO",
+  "FEATURE_REQUEST_FEE_STUDIO",
+]);
+const senderCache = new Map<string, { at: number; value: { fromName: string; replyTo?: string } }>();
+
 export class NotificationService extends Connection {
+  /**
+   * Who the email is from. A business's customers see the business's own name,
+   * so they know where it comes from, and replies go to the business. Mail
+   * from the platform says Zuri, Zuri Studios or Zuri Stores to match.
+   */
+  private async senderFor(args: SendNotificationArgs): Promise<{ fromName: string; replyTo?: string }> {
+    const key = `${args.studioId ?? "-"}:${FROM_ZURI.has(args.template) ? "z" : "s"}`;
+    const hit = senderCache.get(key);
+    if (hit && Date.now() - hit.at < 5 * 60_000) return hit.value;
+    let value: { fromName: string; replyTo?: string } = { fromName: "Zuri" };
+    if (args.studioId) {
+      const studio = await runAsSuperAdmin(() => this.studio.findUnique({ where: { id: args.studioId! }, select: { name: true, plan: true } })).catch(() => null);
+      if (studio) {
+        if (FROM_ZURI.has(args.template)) value = { fromName: zuriNameForPlan(studio.plan) };
+        else {
+          const contact = await runAsSuperAdmin(() => this.contactInfo.findFirst({ where: { studioId: args.studioId! }, select: { email: true } })).catch(() => null);
+          value = { fromName: studio.name, ...(contact?.email ? { replyTo: contact.email } : {}) };
+        }
+      }
+    }
+    senderCache.set(key, { at: Date.now(), value });
+    return value;
+  }
+
   public async send(args: SendNotificationArgs): Promise<void> {
     const existing = await this.notificationLog.findUnique({
       where: {
@@ -93,9 +133,11 @@ export class NotificationService extends Connection {
       void pushForNotification(args);
     }
 
+    const sender = await this.senderFor(args);
     try {
       if (emailQueue) {
         await emailQueue.add("send", {
+          ...sender,
           to: args.to,
           subject: args.subject,
           html: args.html,
@@ -108,6 +150,7 @@ export class NotificationService extends Connection {
         // follow-up in notifications/README.md).
       } else {
         await sendEmailNow({
+          ...sender,
           to: args.to,
           subject: args.subject,
           html: args.html,

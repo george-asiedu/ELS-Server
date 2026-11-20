@@ -7,7 +7,7 @@ import { LedgerService } from "../ledger/ledgerService";
 import { safeClientOrigin } from "../utils/helper";
 import { NotificationService } from "../notifications/notificationService";
 import { NotificationTemplate } from "../notifications/registry";
-import { billReceipt } from "../notifications/templates/shop";
+import { billIssued, billReceipt } from "../notifications/templates/shop";
 import { brandFromStudio, firstName, storefrontFallbackBrand } from "../notifications/brand";
 import { ghs } from "../notifications/format";
 import { notifyStudioAdmins } from "../push/pushService";
@@ -81,7 +81,38 @@ export class BillService extends Connection {
         ...(createdByUserId ? { createdByUserId } : {}),
       },
     });
-    return { message: "Bill created", data: await this.withLink(bill) };
+    const withLink = await this.withLink(bill);
+    await this.emailBill(bill, withLink.payUrl);
+    return { message: bill.customerEmail ? "Bill created and emailed to the customer" : "Bill created", data: withLink };
+  }
+
+  /** The bill goes to the customer's inbox too, when they gave an email. */
+  private async emailBill(bill: { id: string; number: string; customerName: string; customerEmail: string | null; items: unknown; total: number; note: string | null; studioId: string | null }, payUrl: string | null) {
+    if (!bill.customerEmail || !payUrl) return;
+    try {
+      const studio = await this.currentStudioBranding();
+      const lines = (bill.items as { name: string; quantity: number; unitPrice: number }[]).map((i) => ({ name: i.name, quantity: i.quantity, total: ghs(i.unitPrice * i.quantity) }));
+      const { subject, html } = billIssued(brandFromStudio(studio, storefrontFallbackBrand), {
+        customerFirstName: firstName(bill.customerName),
+        studioName: studio?.name ?? "the business",
+        number: bill.number,
+        lines,
+        total: ghs(bill.total),
+        note: bill.note,
+        payUrl,
+      });
+      await this.notifications.send({
+        template: NotificationTemplate.BILL_ISSUED,
+        to: bill.customerEmail,
+        subject,
+        html,
+        studioId: bill.studioId,
+        entityType: "Bill",
+        entityId: bill.id,
+      });
+    } catch (e) {
+      console.warn("Couldn't email the bill:", (e as Error).message);
+    }
   }
 
   /** The pay link for a bill, on the business's own address. */
@@ -209,8 +240,26 @@ export class BillService extends Connection {
     }
     const check = this.ledger.assertAmountMatches(attempt.expectedAmount + attempt.processingFee, attempt.currency, data);
     if (!check.ok) {
-      await this.ledger.settleAttempt(reference, data, { status: "FAILED", failureReason: check.reason });
-      throw bad("The amount paid doesn't match this bill. Please contact the business.");
+      // Anything other than the exact amount is refused, over or under. The
+      // bill stays unpaid; what Paystack took has to be sorted out by hand.
+      const wanted = Math.round((attempt.expectedAmount + attempt.processingFee) * 100);
+      const over = Number(data.amount) > wanted;
+      await this.ledger.settleAttempt(reference, data, { status: "FAILED", failureReason: `${over ? "Overpaid" : "Underpaid"}: ${check.reason}` });
+      if (bill.studioId)
+        await notifyStudioAdmins(
+          bill.studioId,
+          { template: "BILL_AMOUNT_MISMATCH", entityId: `${bill.id}:${reference}`, entityType: "Bill" },
+          {
+            title: over ? "Bill overpaid" : "Bill underpaid",
+            body: `${bill.number}: Paystack took GHS ${(Number(data.amount) / 100).toFixed(2)} but the bill is GHS ${(wanted / 100).toFixed(2)}. It was not marked paid. Refund it from Paystack (reference ${reference}).`,
+            url: "/admin/bills",
+          },
+        ).catch(() => 0);
+      throw bad(
+        over
+          ? "You paid more than this bill. It wasn't counted, and the business has been told to refund you. Please don't pay again."
+          : "The amount paid doesn't match this bill, so it wasn't counted. Please contact the business.",
+      );
     }
     await this.ledger.settleAttempt(reference, data, { status: "SUCCESS" });
     // Claim it once: a webhook and the customer's return can race.

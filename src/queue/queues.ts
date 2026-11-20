@@ -12,6 +12,8 @@ export interface EmailJobData {
   // them in the job payload is fine; anything large should be uploaded to S3
   // and linked instead of persisted into Redis.
   attachments?: EmailAttachment[];
+  fromName?: string;
+  replyTo?: string;
 }
 
 const QUEUE_NAMES = {

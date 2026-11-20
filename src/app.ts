@@ -132,6 +132,7 @@ app.use(
       "Idempotency-Key",
       "X-Zuri-Client",
       "X-Guest-Key",
+      "X-Captcha-Token",
     ],
     credentials: true,
     maxAge: 600,

@@ -187,3 +187,33 @@ export const billReceipt = (
     }),
   };
 };
+
+/** A bill sent to the customer, with the button to pay it. */
+export const billIssued = (
+  brand: EmailBrand,
+  data: {
+    customerFirstName: string;
+    studioName: string;
+    number: string;
+    lines: { name: string; quantity: number; total: string }[];
+    total: string;
+    note: string | null;
+    payUrl: string;
+  },
+) => ({
+  subject: `Your bill from ${data.studioName}: ${data.total}`,
+  html: renderShell({
+    brand,
+    previewText: `${data.studioName} sent you a bill for ${data.total}`,
+    documentType: "Bill",
+    bodyHtml: `
+      <p style="margin: 0 0 12px; font-family: Arial, sans-serif; font-size: 15px; color: #2A1B1F; line-height: 1.6;">Hello ${esc(data.customerFirstName)},</p>
+      <p style="margin: 0 0 8px; font-family: Arial, sans-serif; font-size: 15px; color: #2A1B1F; line-height: 1.6;">
+        ${esc(data.studioName)} sent you bill <strong>${esc(data.number)}</strong>. You can pay it by Mobile Money or card.
+      </p>
+      ${itemsTable(data.lines)}
+      ${moneyTable([{ label: "Total", value: data.total, emphasis: true }])}
+      ${data.note ? `<p class="muted" style="margin: 0 0 8px; font-family: Arial, sans-serif; font-size: 13px; color: #7A6A6E;">${esc(data.note)}</p>` : ""}
+      ${button("Pay now", data.payUrl, brandColor(brand))}`,
+  }),
+});

@@ -13,6 +13,7 @@ import { notifyStudioAdmins } from "../push/pushService";
 import { platformBrand } from "../notifications/brand";
 import { env } from "../config/env.config";
 import { S3BucketService } from "../bucket/s3BucketService";
+import { platformBrandForPlan } from "../notifications/brand";
 import { runAsSuperAdmin } from "../tenant/context";
 
 export const FEATURE_REQUEST_STATUSES = [
@@ -33,6 +34,12 @@ type FeatureRequestStatus = (typeof FEATURE_REQUEST_STATUSES)[number];
 export class FeatureRequestService extends Connection {
   private notifications = new NotificationService();
   private s3 = new S3BucketService();
+
+  /** Zuri, Zuri Studios or Zuri Stores, to match the studio being written to. */
+  private async brandFor(studioId: string) {
+    const studio = await runAsSuperAdmin(() => this.studio.findUnique({ where: { id: studioId }, select: { plan: true } })).catch(() => null);
+    return platformBrandForPlan(studio?.plan);
+  }
 
   /** Image addresses ready to show. */
   private shown<T extends { images?: string[] }>(r: T): T {
@@ -210,7 +217,7 @@ export class FeatureRequestService extends Connection {
     try {
       const to = await this.studioNotifyEmail(studioId);
       if (!to) return;
-      const { subject, html } = featureRequestStatusChanged(platformBrand, {
+      const { subject, html } = featureRequestStatusChanged(await this.brandFor(studioId), {
         title,
         status,
         dashboardUrl: await this.linkToStudio(
@@ -268,7 +275,7 @@ export class FeatureRequestService extends Connection {
       const to = await this.studioNotifyEmail(studioId);
       const dashboardUrl = await this.linkToStudio("/admin/feature-requests", studioId);
       if (to) {
-        const { subject, html } = featureRequestFeeSet(platformBrand, { title, amount, dashboardUrl });
+        const { subject, html } = featureRequestFeeSet(await this.brandFor(studioId), { title, amount, dashboardUrl });
         await this.notifications.send({
           template: NotificationTemplate.FEATURE_REQUEST_FEE_STUDIO,
           to,

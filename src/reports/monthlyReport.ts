@@ -3,8 +3,9 @@ import { Connection } from "../db/dbConnection";
 import { runAsSuperAdmin } from "../tenant/context";
 import { NotificationService } from "../notifications/notificationService";
 import { NotificationTemplate } from "../notifications/registry";
-import { firstName, platformBrand } from "../notifications/brand";
+import { firstName } from "../notifications/brand";
 import { monthlyReport, ReportFigure } from "../notifications/templates/report";
+import { platformBrandForPlan } from "../notifications/brand";
 import { studioLink } from "../utils/studioLink";
 
 // The monthly report: on the first days of a month, every admin of every
@@ -107,7 +108,7 @@ export class MonthlyReportService extends Connection {
 
       const studios = await this.studio.findMany({
         where: { status: "ACTIVE", createdAt: { lt: thisMonth } },
-        select: { id: true, name: true, slug: true },
+        select: { id: true, name: true, slug: true, plan: true },
       });
       let sent = 0;
       const errors: string[] = [];
@@ -176,7 +177,7 @@ export class MonthlyReportService extends Connection {
           ];
 
           // From the platform to the business, so it signs off as Zuri.
-          const brand = platformBrand;
+          const brand = platformBrandForPlan(studio.plan);
           for (const admin of admins) {
             const { subject, html } = monthlyReport(brand, {
               adminFirstName: firstName(admin.profile?.fullName ?? "there"),

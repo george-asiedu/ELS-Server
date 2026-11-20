@@ -21,6 +21,7 @@ import { env } from "../config/env.config";
 import { createTenantClient } from "../tenant/tenantClient";
 import { randomBytes, createHash } from "crypto";
 import { passwordResetRequested } from "../notifications/templates/auth";
+import { platformBrandForPlan } from "../notifications/brand";
 import { AuditService } from "../audit/auditService";
 
 // Slugs that can never belong to a studio: they collide with platform routes,
@@ -1462,7 +1463,7 @@ export class PlatformService extends Connection {
           select: { email: true },
         });
         if (owner?.email) {
-          const { subject, html } = studioAccountSuspended(platformBrand, {
+          const { subject, html } = studioAccountSuspended(platformBrandForPlan(studio.plan), {
             studioName: studio.name,
             supportEmail: env.senderEmail,
           });
