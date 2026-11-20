@@ -26,6 +26,8 @@ export interface PushPayload {
   url: string;
   /** Same tag replaces the earlier notification instead of stacking. */
   tag?: string;
+  /** Added when sending: the person's unread count, for the app icon badge. */
+  unread?: number;
 }
 
 const CONCURRENCY = 20;
@@ -37,7 +39,14 @@ export const pushToUsers = async (userIds: string[], payload: PushPayload) => {
   const subs = await raw.pushSubscription.findMany({
     where: { userId: { in: [...new Set(userIds)] } },
   });
-  const body = JSON.stringify(payload);
+  // Each device also gets its person's unread count, for the number on the
+  // installed app's icon (it updates even when the app is closed).
+  const unreadRows = await raw.notification.groupBy({
+    by: ["userId"],
+    where: { userId: { in: [...new Set(userIds)] }, readAt: null },
+    _count: { _all: true },
+  });
+  const unread = new Map(unreadRows.map((r) => [r.userId, r._count._all]));
   const ok: string[] = [];
   const dead: string[] = [];
   let next = 0;
@@ -48,7 +57,7 @@ export const pushToUsers = async (userIds: string[], payload: PushPayload) => {
         try {
           await webpush.sendNotification(
             { endpoint: s.endpoint, keys: { p256dh: s.p256dh, auth: s.auth } },
-            body,
+            JSON.stringify({ ...payload, unread: unread.get(s.userId) ?? 0 }),
             { TTL: 6 * 3600, urgency: "normal", topic: payload.tag?.slice(0, 32) },
           );
           ok.push(s.id);
