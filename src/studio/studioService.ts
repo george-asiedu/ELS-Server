@@ -41,6 +41,7 @@ import {
   subscriptionExpired,
 } from "../notifications/templates/subscription";
 import { platformBrand } from "../notifications/brand";
+import { markExtrasBilled, pendingExtras, reserveExtras } from "../billing/extraCharges";
 import { ghs } from "../notifications/format";
 
 const DOMAIN_RE = /^(?!-)[a-z0-9-]{1,63}(\.[a-z0-9-]{1,63})+$/;
@@ -449,9 +450,12 @@ export class StudioService extends Connection {
     // the platform earns its cut per transaction instead.
     const revenueShare = s.billingMode === "REVENUE_SHARE";
     const lapsed = revenueShare ? false : isLapsed(s.currentPeriodEnd);
+    const extras = await pendingExtras(id);
     return {
       message: "Billing",
       data: {
+        // On top of the plan: added to the next renewal.
+        extras,
         plan: s.plan,
         cadence: s.billingCadence,
         billingMode: s.billingMode,
@@ -502,6 +506,10 @@ export class StudioService extends Connection {
         HttpCode.BAD_REQUEST,
       );
     }
+    // A renewal also settles what the studio owes on top of its plan (feature
+    // request fees, extra storage, training), added after any promo discount.
+    const extras = kind === "RENEWAL" ? await pendingExtras(studioId) : { items: [], total: 0 };
+    const chargeAmount = Math.round((amount + extras.total) * 100) / 100;
     const email = await this.ownerEmail(studioId);
     const reference = `${kind === "RENEWAL" ? "ZURI-RENEW-" : "ZURI-BILLING-"}${shortId()}`;
     await this.studioBillingCharge.create({
@@ -511,13 +519,14 @@ export class StudioService extends Connection {
         kind,
         plan,
         cadence,
-        amount,
+        amount: chargeAmount,
         ...(promo.code ? { promoCode: promo.code } : {}),
       },
     });
+    if (extras.items.length) await reserveExtras(studioId, reference);
     const init = await paystack.initialize({
       email,
-      amountPesewas: toPesewas(amount),
+      amountPesewas: toPesewas(chargeAmount),
       reference,
       // Back to the studio's own site, where its admin is signed in.
       callbackUrl: await this.linkToStudio("/admin/billing", studioId),
@@ -610,6 +619,45 @@ export class StudioService extends Connection {
     return { message: "Renewal started", data };
   }
 
+  /**
+   * Pay what's owed on top of the plan (feature request fees, storage,
+   * training) now rather than at the next renewal. This is also how a studio
+   * that pays per transaction, and so has no renewal, settles them.
+   */
+  public async startExtrasPayment(studioId: string | null | undefined) {
+    const id = this.requireStudioId(studioId);
+    const studio = await this.studio.findUnique({
+      where: { id },
+      select: { plan: true, billingCadence: true },
+    });
+    if (!studio) throw new ApiError("Studio not found", HttpCode.NOT_FOUND);
+    const extras = await pendingExtras(id);
+    if (!(extras.total > 0)) throw new ApiError("There's nothing to pay right now", HttpCode.BAD_REQUEST);
+    const email = await this.ownerEmail(id);
+    const reference = `ZURI-BILLING-${shortId()}`;
+    await this.studioBillingCharge.create({
+      data: { reference, studioId: id, kind: "EXTRAS", plan: studio.plan, cadence: studio.billingCadence, amount: extras.total },
+    });
+    await reserveExtras(id, reference);
+    const init = await paystack.initialize({
+      email,
+      amountPesewas: toPesewas(extras.total),
+      reference,
+      callbackUrl: await this.linkToStudio("/admin/billing", id),
+      metadata: { kind: "extras", studioId: id },
+    });
+    return {
+      message: "Payment started",
+      data: { reference, accessCode: init.access_code, publicKey: env.paystack.publicKey },
+    };
+  }
+
+  public async applyExtrasPayment(studioId: string | null | undefined, reference: string) {
+    const id = this.requireStudioId(studioId);
+    await this.applyBillingCharge(reference, { studioId: id, kind: "EXTRAS" });
+    return this.getBilling(id);
+  }
+
   // The studio admin's return from checkout. The plan and cadence come from
   // the charge recorded at start, never from the request.
   public async applyBillingChange(
@@ -699,7 +747,7 @@ export class StudioService extends Connection {
    */
   public async applyBillingCharge(
     reference: string,
-    expect: { studioId?: string; kind?: "RENEWAL" | "PLAN_CHANGE" } = {},
+    expect: { studioId?: string; kind?: "RENEWAL" | "PLAN_CHANGE" | "EXTRAS" } = {},
   ): Promise<"applied" | "already_applied"> {
     const charge = await this.studioBillingCharge.findUnique({
       where: { reference },
@@ -734,8 +782,13 @@ export class StudioService extends Connection {
     if (claimed.count === 0) return "already_applied";
 
     try {
-      if (charge.kind === "RENEWAL") await this.renewFromCharge(charge);
-      else await this.changePlanFromCharge(charge);
+      if (charge.kind === "RENEWAL") {
+        await this.renewFromCharge(charge);
+        await markExtrasBilled(charge.studioId, charge.reference);
+      } else if (charge.kind === "EXTRAS") {
+        // No change to the plan or period: this only settles what's owed on top.
+        await markExtrasBilled(charge.studioId, charge.reference);
+      } else await this.changePlanFromCharge(charge);
       await countPromoUse(charge.promoCode);
     } catch (error) {
       // Nothing changed for the studio, so release the claim for a retry.

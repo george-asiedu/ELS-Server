@@ -38,4 +38,16 @@ export class FeatureRequestController {
     const result = await service.updateStatus(id, status);
     return res.status(200).json(result);
   };
+
+  public static platformSetFee = async (req: Request, res: Response) => {
+    const { id } = req.params;
+    if (!id) throw new ApiError("Request id is required", HttpCode.BAD_REQUEST);
+    return res.status(200).json(await service.setFee(id, req.body?.fee));
+  };
+
+  public static withdraw = async (req: Request, res: Response) => {
+    const { id } = req.params;
+    if (!id) throw new ApiError("Request id is required", HttpCode.BAD_REQUEST);
+    return res.status(200).json(await service.withdraw(req.studioId, id));
+  };
 }

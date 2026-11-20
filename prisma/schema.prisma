@@ -293,6 +293,10 @@ model FeatureRequest {
   description     String
   status          FeatureRequestStatus @default(NEW)
   createdByUserId String?
+  // A one-off fee the super admin sets for building it (GHS). Null until
+  // decided; 0 means free. Added to the studio's next renewal.
+  feeAmount       Float?
+  feeSetAt        DateTime?
 
   studio Studio @relation(fields: [studioId], references: [id], onDelete: Cascade)
 
@@ -436,6 +440,8 @@ enum ScheduledJobStatus {
 enum StudioBillingChargeKind {
   RENEWAL
   PLAN_CHANGE
+  // Just the extras (feature request fees, storage, training), paid now.
+  EXTRAS
 }
 
 enum StudioBillingChargeStatus {
@@ -447,6 +453,43 @@ enum StudioBillingChargeStatus {
 // when it starts. Applying it uses these stored values (never ones sent by the
 // browser), checks Paystack collected `amount`, and flips PENDING -> APPLIED
 // once, so a paid reference can't be applied twice or for a different plan.
+enum ExtraChargeKind {
+  FEATURE_REQUEST
+  STORAGE_OVERAGE
+  TRAINING
+  OTHER
+}
+
+enum ExtraChargeStatus {
+  PENDING
+  BILLED
+  WAIVED
+}
+
+// Money a studio owes on top of its plan: a feature request fee, extra storage,
+// in-person training. Pending ones are added to the next renewal and marked
+// billed when that renewal is paid. One row per thing (kind + refId).
+model StudioExtraCharge {
+  id          String            @id @default(cuid())
+  studioId    String
+  kind        ExtraChargeKind
+  // What it's for, in words the studio sees on its bill.
+  description String
+  amount      Float
+  status      ExtraChargeStatus @default(PENDING)
+  // The thing it belongs to: a feature request id, a "2026-11" storage month.
+  refId       String
+  // The renewal that billed it.
+  billedReference String?
+  billedAt        DateTime?
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+
+  @@unique([studioId, kind, refId])
+  @@index([studioId, status])
+  @@map("studio_extra_charges")
+}
+
 model StudioBillingCharge {
   id        String                    @id @default(cuid())
   reference String                    @unique

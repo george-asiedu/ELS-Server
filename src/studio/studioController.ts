@@ -92,6 +92,16 @@ export class StudioController {
     return res.status(200).json(result);
   };
 
+  public static startExtrasPayment = async (req: Request, res: Response) => {
+    return res.status(200).json(await studioService.startExtrasPayment(req.studioId));
+  };
+
+  public static applyExtrasPayment = async (req: Request, res: Response) => {
+    const reference = String(req.body?.reference ?? "");
+    if (!reference) throw new ApiError("reference is required", 400);
+    return res.status(200).json(await studioService.applyExtrasPayment(req.studioId, reference));
+  };
+
   public static applyRenewal = async (req: Request, res: Response) => {
     const reference = String(req.body?.reference ?? "");
     const result = await studioService.applyRenewal(req.studioId, reference);

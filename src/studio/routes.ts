@@ -87,6 +87,8 @@ router.post(
   requireAdmin,
   StudioController.startRenewal,
 );
+router.post("/billing/extras", authenticate, requireAdmin, StudioController.startExtrasPayment);
+router.post("/billing/extras/apply", authenticate, requireAdmin, StudioController.applyExtrasPayment);
 router.post(
   "/billing/renew/apply",
   authenticate,

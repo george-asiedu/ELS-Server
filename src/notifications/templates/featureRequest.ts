@@ -130,3 +130,35 @@ export const featureRequestStatusChanged = (
     }),
   };
 };
+
+/** Sent to the studio admin when the platform sets what a feature request costs. */
+export const featureRequestFeeSet = (
+  brand: EmailBrand,
+  data: { title: string; amount: number; dashboardUrl?: string },
+) => {
+  const color = brandColor(brand);
+  const free = data.amount <= 0;
+  return {
+    subject: free ? `No fee for your feature request: ${data.title}` : `A fee for your feature request: ${data.title}`,
+    html: renderShell({
+      brand,
+      previewText: free ? `${data.title} is free` : `${data.title}: GHS ${data.amount.toFixed(2)}`,
+      documentType: "Feature request",
+      bodyHtml: `
+        <h1 style="margin: 0 0 12px; font-family: Georgia, serif; font-size: 22px; color: #2A1B1F; text-align: center;">${free ? "This one is free" : "Here's what it will cost"}</h1>
+        <p style="margin: 0 0 16px; font-family: Arial, sans-serif; font-size: 15px; color: #2A1B1F; line-height: 1.6; text-align: center;">
+          ${free ? "There's no charge for building this." : `Building this carries a one-off fee of <strong>GHS ${data.amount.toFixed(2)}</strong>. It will be added to your next renewal, and you can see it on your Billing page.`}
+          If you'd rather not go ahead, you can withdraw the request before work starts and the fee is removed.
+        </p>
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin: 0 0 8px; border: 1px solid #EADFE1; border-radius: 12px; border-left: 4px solid ${color};">
+          <tr>
+            <td style="padding: 16px 20px;">
+              <p class="muted" style="margin: 0 0 2px; font-family: Arial, sans-serif; font-size: 11px; color: #7A6A6E; letter-spacing: 0.04em;">YOUR REQUEST</p>
+              <p style="margin: 0; font-family: Georgia, serif; font-size: 17px; font-weight: 700; color: #2A1B1F;">${esc(data.title)}</p>
+            </td>
+          </tr>
+        </table>
+        ${data.dashboardUrl ? button("Open Dashboard", data.dashboardUrl, color) : ""}`,
+    }),
+  };
+};

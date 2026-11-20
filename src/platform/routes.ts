@@ -148,6 +148,7 @@ router.post("/jobs/:key/run", SchedulerController.runNow);
 
 // Feature-request triage across all studios.
 router.get("/feature-requests", FeatureRequestController.platformList);
+router.patch("/feature-requests/:id/fee", FeatureRequestController.platformSetFee);
 router.patch(
   "/feature-requests/:id",
   FeatureRequestController.platformUpdateStatus,

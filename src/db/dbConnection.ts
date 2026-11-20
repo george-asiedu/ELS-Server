@@ -434,6 +434,9 @@ export class Connection {
   get platformReview() {
     return this.db.platformReview;
   }
+  get studioExtraCharge() {
+    return this.db.studioExtraCharge;
+  }
   get studioBillingCharge() {
     return this.db.studioBillingCharge;
   }
