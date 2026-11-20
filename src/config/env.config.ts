@@ -88,11 +88,20 @@ export const env = {
   // default only in production, so a laptop pointed at a shared database
   // doesn't start sending reminder emails. Set SCHEDULER_ENABLED=true|false to
   // override. Each job can also be switched off from the platform console.
+  // Which part of the app this process runs. "api" answers requests and only
+  // adds jobs to the queues; "worker" runs the queue workers and the scheduler
+  // and answers no requests; "all" (the default, for development) does both.
+  // In production they are two services so background work can never slow the API.
+  appRole: (["api", "worker"].includes((process.env.APP_ROLE ?? "").trim().toLowerCase())
+    ? (process.env.APP_ROLE as string).trim().toLowerCase()
+    : "all") as "all" | "api" | "worker",
   schedulerEnabled:
     process.env.SCHEDULER_ENABLED !== undefined
       ? process.env.SCHEDULER_ENABLED.trim().toLowerCase() === "true"
       : (process.env.NODE_ENV ?? "").trim().toLowerCase() === "production",
   clientUrl: process.env.CLIENT_URL as string,
+  // The API's public address, for things emails must fetch (the logo).
+  apiPublicUrl: ((process.env.API_PUBLIC_URL as string) || "https://api.zuristudios.com").replace(/\/$/, ""),
   // Encrypts authenticator-app secrets (32 random bytes, base64). Optional:
   // without it a key is derived from JWT_SECRET. Set it in production, and
   // never change it once set, or everyone's two-step sign-in stops working.

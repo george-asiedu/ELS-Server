@@ -33,5 +33,6 @@ echo "Rolling back: $(basename "${CURRENT}") -> $(basename "${TARGET}")"
 ln -sfn "${TARGET}" "${APP_DIR}/current.next"
 mv -Tf "${APP_DIR}/current.next" "${APP_DIR}/current"
 sudo /usr/bin/systemctl restart zuri-api
+sudo /usr/bin/systemctl restart zuri-worker
 sleep 3
 curl -fsS http://127.0.0.1:5060/health && echo && echo "Done."

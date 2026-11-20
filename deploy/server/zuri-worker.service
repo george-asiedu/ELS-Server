@@ -1,0 +1,58 @@
+# The Zuri background worker: the email, push and WhatsApp queue workers and the
+# recurring-job scheduler. It answers no web requests and runs at a lower
+# priority than the API, so background work can never slow the website or app.
+# Installed by setup.sh as /etc/systemd/system/zuri-worker.service.
+#
+#   systemctl status zuri-worker       is it running?
+#   journalctl -u zuri-worker -f       follow its logs
+#   sudo systemctl restart zuri-worker restart (deploys do this for you)
+
+[Unit]
+Description=Zuri background worker (queues and scheduled jobs)
+After=network-online.target postgresql.service redis-server.service
+Wants=network-online.target
+Requires=postgresql.service
+StartLimitIntervalSec=120
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=zuri
+Group=zuri
+# `current` points at the newest release and is resolved at each start.
+WorkingDirectory=/srv/zuri-api/current
+EnvironmentFile=/etc/zuri/api.env
+# Set here so they can't drift: HTTP on loopback only, behind Nginx (one hop).
+Environment=NODE_ENV=production
+Environment=APP_ROLE=worker
+Environment=SCHEDULER_ENABLED=true
+ExecStart=/usr/bin/node --enable-source-maps dist/worker.js
+# Lower priority than the API, so a busy job gives way to a customer request.
+Nice=10
+CPUWeight=40
+IOSchedulingClass=idle
+Restart=always
+RestartSec=3
+KillSignal=SIGTERM
+TimeoutStopSec=30
+
+# The app reads its code and config and writes nothing on disk.
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+RestrictSUIDSGID=yes
+RestrictNamespaces=yes
+LockPersonality=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+CapabilityBoundingSet=
+LimitNOFILE=65536
+MemoryMax=1024M
+
+[Install]
+WantedBy=multi-user.target

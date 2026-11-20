@@ -12,6 +12,7 @@ import { resolveTenant } from "./middleware/tenant";
 import { resolveStudioByDomain } from "./tenant/studioResolver";
 import routes from "./routes/index";
 import { bootstrapQueues, shutdownQueues } from "./queue";
+import { ZURI_LOGO_PNG } from "./notifications/assets/zuriLogo";
 import { startScheduler, stopScheduler } from "./scheduler/scheduler";
 import { createTenantClient } from "./tenant/tenantClient";
 import { createHash } from "crypto";
@@ -245,6 +246,11 @@ const recoveryLimiter = rateLimit({
 app.use("/api", limiter);
 app.use("/api/auth/login", loginIpLimiter);
 app.use("/api/platform/auth/login", loginIpLimiter);
+// The Zuri mark for emails. Public, cacheable, and built into the server.
+app.get("/api/brand/zuri-logo.png", (_req, res) => {
+  res.set({ "Content-Type": "image/png", "Cache-Control": "public, max-age=86400", "Cross-Origin-Resource-Policy": "cross-origin" });
+  res.send(ZURI_LOGO_PNG);
+});
 app.use("/api/payments", sensitiveActionLimiter);
 app.use("/api/bills", sensitiveActionLimiter);
 app.use("/api/orders", sensitiveActionLimiter);
@@ -321,7 +327,7 @@ if (!port)
 
 // HOST=127.0.0.1 on the VPS (behind Nginx); everywhere else all interfaces.
 const server = app.listen(port, process.env.HOST || "0.0.0.0", () => {
-  console.log(`Server is running on port ${port}`);
+  console.log(`Server is running on port ${port} (role: ${env.appRole})`);
 });
 
 // Background email queue (Redis, optional) and the recurring-job scheduler
@@ -329,7 +335,7 @@ const server = app.listen(port, process.env.HOST || "0.0.0.0", () => {
 bootstrapQueues().catch((error) => {
   console.error("Failed to start queues:", error);
 });
-if (env.schedulerEnabled) {
+if (env.schedulerEnabled && env.appRole !== "api") {
   startScheduler().catch((error) => {
     console.error("Failed to start scheduler:", error);
   });

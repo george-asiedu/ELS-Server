@@ -18,6 +18,10 @@ export interface JobDefinition {
   // Longest a run may hold its lease. A run still going past this is assumed
   // dead (crashed process) and the next slot may start.
   maxRunMinutes: number;
+  // Jobs that do a lot of work (reports for every business, cleaning storage)
+  // run one at a time in their own lane, so they never delay the quick,
+  // frequent ones (payment checks, reminders).
+  lane?: "heavy";
   run: () => Promise<Record<string, unknown>>;
 }
 
@@ -71,6 +75,7 @@ export const JOBS: JobDefinition[] = [
     schedule: { periodMinutes: 24 * 60, offsetMinutes: 10 * 60 },
     scheduleLabel: "Daily at 10:00 UTC",
     maxRunMinutes: 20,
+    lane: "heavy",
     run: async () => {
       const { ReviewRequestService } = await import("../reviews/reviewRequests");
       return { ...(await new ReviewRequestService().sendDue()) };
@@ -84,6 +89,7 @@ export const JOBS: JobDefinition[] = [
     schedule: { periodMinutes: 24 * 60, offsetMinutes: 7 * 60 },
     scheduleLabel: "Daily at 07:00 UTC",
     maxRunMinutes: 30,
+    lane: "heavy",
     run: async () => {
       const { MonthlyReportService } = await import("../reports/monthlyReport");
       return { ...(await new MonthlyReportService().sendDue()) };
@@ -110,6 +116,7 @@ export const JOBS: JobDefinition[] = [
     schedule: { periodMinutes: 24 * 60, offsetMinutes: 3 * 60 },
     scheduleLabel: "Daily at 03:00 UTC",
     maxRunMinutes: 30,
+    lane: "heavy",
     run: async () => {
       const { GalleryService } = await import("../gallery/galleryService");
       const { S3BucketService } = await import("../bucket/s3BucketService");

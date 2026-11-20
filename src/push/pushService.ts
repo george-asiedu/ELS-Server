@@ -1,6 +1,7 @@
 import webpush from "web-push";
 import { env } from "../config/env.config";
 import { createTenantClient } from "../tenant/tenantClient";
+import { pushQueue } from "../queue/queues";
 import type { NotificationTemplateKey } from "../notifications/registry";
 
 // Web push to the browsers and installed apps people have switched on, as in
@@ -33,9 +34,21 @@ export interface PushPayload {
 const CONCURRENCY = 20;
 
 /** Sends to every device of each user. Dead subscriptions are removed. */
-export const pushToUsers = async (userIds: string[], payload: PushPayload) => {
+export const pushToUsers = async (
+  userIds: string[],
+  payload: PushPayload,
+  opts: { background?: boolean } = {},
+) => {
   const result = { sent: 0, failed: 0, removed: 0 };
   if (!pushConfigured || !userIds.length) return result;
+  // Off the request path: hand it to the push worker. (Only when there is one;
+  // without Redis it is sent here as before.)
+  if (opts.background && pushQueue) {
+    await pushQueue
+      .add("push", { userIds: [...new Set(userIds)], payload: { title: payload.title, body: payload.body, url: payload.url, ...(payload.tag ? { tag: payload.tag } : {}) } })
+      .catch((e) => console.warn("Couldn't queue a push:", (e as Error).message));
+    return result;
+  }
   const subs = await raw.pushSubscription.findMany({
     where: { userId: { in: [...new Set(userIds)] } },
   });
@@ -123,7 +136,7 @@ const PUSH_ROUTES: Partial<Record<NotificationTemplateKey, string>> = {
  * Tell people something: a row in their in-app notifications list, plus a
  * push to every device they've switched on. Returns how many devices got it.
  */
-export const notifyUsers = async (userIds: string[], payload: PushPayload) => {
+export const notifyUsers = async (userIds: string[], payload: PushPayload, opts: { background?: boolean } = { background: true }) => {
   const ids = [...new Set(userIds)];
   if (!ids.length) return 0;
   await raw.notification.createMany({
@@ -134,7 +147,7 @@ export const notifyUsers = async (userIds: string[], payload: PushPayload) => {
       url: payload.url.slice(0, 300),
     })),
   });
-  const { sent } = await pushToUsers(ids, payload);
+  const { sent } = await pushToUsers(ids, payload, opts);
   return sent;
 };
 
@@ -152,6 +165,8 @@ export const pushForNotification = async (args: {
   entityId: string;
   pushBody?: string;
   pushUrl?: string;
+  /** Wait for the devices (reminders decide between push and email on it). */
+  waitForDevices?: boolean;
 }): Promise<number> => {
   const url = args.pushUrl ?? PUSH_ROUTES[args.template];
   if (!url) return 0;
@@ -180,6 +195,7 @@ export const pushForNotification = async (args: {
         url,
         tag: `${args.template}:${args.entityId}`,
       },
+      { background: !args.waitForDevices },
     );
   } catch (e) {
     console.warn(`Notice for ${args.template} failed:`, (e as Error).message);

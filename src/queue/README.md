@@ -1,5 +1,11 @@
 # Background work
 
+**Production runs this in a separate `zuri-worker` process** (`APP_ROLE=worker`,
+`dist/worker.js`) at a low priority; the web process (`APP_ROLE=api`) only adds
+jobs. Queues: `email`, `push`, `whatsapp`, each with its own worker and limits.
+Heavy scheduled jobs run one at a time. See docs/DEPLOYMENT.md. In development
+`APP_ROLE` is unset and one process does everything.
+
 Two mechanisms, deliberately different:
 
 1. **Email sending** goes through a BullMQ queue in Redis (this folder), so a

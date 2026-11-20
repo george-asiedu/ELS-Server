@@ -1,6 +1,7 @@
 import { env } from "../config/env.config";
 import { createTenantClient } from "../tenant/tenantClient";
 import { toWhatsappNumber } from "../utils/whatsapp";
+import { whatsappQueue, type WhatsappJobData } from "../queue/queues";
 
 // Booking messages to customers on WhatsApp, through Meta's WhatsApp Cloud API.
 // Business-started messages must use templates Meta has approved, so each
@@ -20,7 +21,7 @@ export type WhatsappKind = "CONFIRMED" | "REMINDER_24H" | "REMINDER_1H";
  *   and for reminders 6 "tomorrow" or "in about an hour".
  * The Meta templates must be written to match (see .env.example).
  */
-export const sendBookingWhatsapp = async (args: {
+export const deliverBookingWhatsapp = async (args: {
   kind: WhatsappKind;
   studioId: string;
   appointmentId: string;
@@ -89,4 +90,18 @@ export const sendBookingWhatsapp = async (args: {
     console.warn(`WhatsApp ${args.kind} failed:`, (e as Error).message);
     return false;
   }
+};
+
+/** Adds the message to the WhatsApp queue, or sends it here when there isn't one. */
+export const sendBookingWhatsapp = async (args: WhatsappJobData): Promise<boolean> => {
+  if (!whatsappConfigured) return false;
+  if (whatsappQueue) {
+    try {
+      await whatsappQueue.add("send", args);
+      return true;
+    } catch (e) {
+      console.warn("Couldn't queue a WhatsApp message:", (e as Error).message);
+    }
+  }
+  return deliverBookingWhatsapp(args);
 };

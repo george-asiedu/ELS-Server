@@ -54,6 +54,9 @@ const FROM_ZURI = new Set<string>([
   "FEATURE_REQUEST_SUBMITTED_PLATFORM",
   "FEATURE_REQUEST_STATUS_STUDIO",
   "FEATURE_REQUEST_FEE_STUDIO",
+  // Heads-ups to the business about its own customers.
+  "BOOKING_REQUEST_STUDIO",
+  "BOOKING_RESCHEDULE_REQUESTED",
 ]);
 const senderCache = new Map<string, { at: number; value: { fromName: string; replyTo?: string } }>();
 
@@ -119,7 +122,7 @@ export class NotificationService extends Connection {
     // Reminders go to the recipient's devices first; the email is only the
     // fallback for someone with no device switched on.
     if (PUSH_FIRST.has(args.template)) {
-      const pushed = await pushForNotification(args);
+      const pushed = await pushForNotification({ ...args, waitForDevices: true });
       if (pushed > 0) {
         await this.notificationLog.update({
           where: { id: log.id },

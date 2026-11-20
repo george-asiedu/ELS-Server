@@ -8,9 +8,11 @@
 Every push runs **CI** (`.github/workflows/ci.yml`: lint, build). The deploy
 workflow for that branch runs only if CI passes.
 
-The API runs its scheduler and email queue in the same process, so
-production is one `zuri-api` service behind Nginx, with Postgres and Redis on
-the same server.
+Production is two services on one server, behind Nginx, with Postgres and Redis
+beside them: **`zuri-api`** answers requests, and **`zuri-worker`** does the
+background work (the email, push and WhatsApp queues and the scheduled jobs).
+The worker runs at a lower priority and answers no requests, so a busy job can
+never make the website or the app slow.
 
 ## 1. Development: Render
 
@@ -31,13 +33,13 @@ updates, swap) and installed Node 22, Redis, Nginx and Certbot. Zuri adds only:
 | | |
 |---|---|
 | App user | `zuri` (runs the app; no login; can't change its code) |
-| Service | `zuri-api` on `127.0.0.1:5060`, with its scheduler and email queue |
+| Services | `zuri-api` on `127.0.0.1:5060` (web only), `zuri-worker` (queues and scheduler, low priority, no port) |
 | Nginx site | `api.zuristudios.com` → `127.0.0.1:5060`, HTTPS by Certbot |
 | Database | PostgreSQL 17 on loopback, database and role `zuri` |
 | Redis | Nichelle's Redis, database `1`, so queues and keys never mix |
 | Releases | `/srv/zuri-api/releases/*`, `current` symlink, 5 kept |
 | Settings | `/etc/zuri/api.env` (root:zuri, 640), never inside a release |
-| Backups | nightly at 02:30 UTC to `/var/backups/zuri` (14 days) and S3 |
+| Backups | nightly at 02:30 UTC to `/var/backups/zuri` (14 days), then copied to the Neon database as an off-server restore copy, and to S3 if `BACKUP_BUCKET` is set |
 
 Port 5060 and Postgres are never opened in UFW; Nginx is the only way in.
 
@@ -62,6 +64,63 @@ Port 5060 and Postgres are never opened in UFW; Nginx is the only way in.
    AWS keys in `api.env` `s3:PutObject` on it. Add a lifecycle rule to delete
    copies after 30 days. Test: `sudo systemctl start zuri-backup` then
    `journalctl -u zuri-backup`.
+
+### Background work: queues and the worker
+
+| Queue | Used for | Worker limits |
+|---|---|---|
+| `email` | every transactional email (retried with backoff) | 5 at a time |
+| `push` | push notifications to devices | 4 at a time |
+| `whatsapp` | WhatsApp booking messages | 2 at a time, at most 10 a second |
+| scheduler | payment checks, reminders, sales, reports, storage clean-up | light jobs one each; **heavy jobs (reports, storage, review requests) one at a time**, in their own lane |
+
+The two services get their role from `APP_ROLE` (`api` or `worker`; set in the
+unit files, not in `api.env`). The worker unit runs with `Nice=10`, a low CPU
+weight and idle disk priority, and is limited to 1 GB. Without Redis the API
+sends emails and pushes itself, as before. Check it:
+`systemctl status zuri-api zuri-worker`, `journalctl -u zuri-worker -f`; the
+super admin's Jobs page shows each scheduled job.
+
+### Move the database from Neon to this server
+
+This is how Westend City Church did it, and the same scripts are here. Zuri's
+production data lives on Neon until you do this.
+
+1. **Keep the Neon URL.** Create `/etc/zuri/neon.env` (root only, `chmod 600`):
+   `NEON_DATABASE_URL='postgresql://…neon.tech/…?sslmode=require'` (the direct URL, not `-pooler`).
+2. **Deploy once** so the tables exist on the server's own Postgres (the deploy
+   runs the migrations). Both databases must be on the same migrations.
+3. **Copy the data** (it stops the app, takes a backup, copies the rows, compares
+   the row counts, starts the app again; Neon is only read):
+   `sudo zuri-import-from-neon`
+4. **Point the app at the server's database**: `DATABASE_URL` in `/etc/zuri/api.env`
+   is already the local one (setup.sh wrote it).
+
+From then on Neon is the **off-server restore copy**: after every nightly backup,
+`zuri-neon-copy` loads the newest dump into the Neon database in `neon.env`,
+replacing it in one transaction (on any error Neon keeps yesterday's copy). It
+refuses to run while the app still uses that Neon database, refuses to copy an
+emptier database over a fuller one, and never fails the backup. Run it by hand:
+`sudo zuri-neon-copy`; see the result: `journalctl -u zuri-backup -n 30`. Neon
+must run PostgreSQL 17 or newer (Neon console, Settings). To turn it off, delete
+`/etc/zuri/neon.env`.
+
+If the server is lost: point `DATABASE_URL` and the migration URL at the Neon
+database on a new server, or `pg_dump` Neon onto it.
+
+### Guest access and the security check
+
+Guest bookings, guest orders and bill payments need two things, both set up
+outside the code:
+
+- **Cloudflare Turnstile** (free): create a widget at dash.cloudflare.com, then put
+  `TURNSTILE_SECRET_KEY` in `/etc/zuri/api.env` and `VITE_TURNSTILE_SITE_KEY` in the
+  website's build settings. In production the API refuses guest actions without a
+  secret. (Cloudflare's test keys always pass: secret `1x0000000000000000000000000000000AA`,
+  site key `1x00000000000000000000AA`.) It is also asked for on Mobile Money prompts.
+- **The guest key** is made by the API and rotated from the super admin's Settings.
+  Nothing to configure.
+- `API_PUBLIC_URL` (default `https://api.zuristudios.com`) is where emails fetch the logo from.
 
 ### GitHub
 

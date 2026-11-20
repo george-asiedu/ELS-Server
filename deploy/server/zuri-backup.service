@@ -3,7 +3,7 @@
 #   journalctl -u zuri-backup            how the last one went
 
 [Unit]
-Description=Zuri Studios database backup
+Description=Zuri database backup
 After=postgresql.service network-online.target
 Wants=network-online.target
 
@@ -14,6 +14,9 @@ Group=zuri
 EnvironmentFile=/etc/zuri/api.env
 WorkingDirectory=/srv/zuri-api/current
 ExecStart=/usr/bin/bash scripts/backup.sh
+# Then refresh the Neon restore copy. "+" runs it as root (it reads /etc/zuri);
+# "-" means a problem there never fails the backup (or a deploy waiting on it).
+ExecStartPost=-+/usr/local/sbin/zuri-neon-copy
 PrivateTmp=yes
 NoNewPrivileges=yes
 ProtectSystem=strict

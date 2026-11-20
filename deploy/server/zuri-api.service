@@ -1,12 +1,12 @@
-# The Zuri Studios API, with its scheduler and email queue in the same
-# process. Installed by setup.sh as /etc/systemd/system/zuri-api.service.
+# The Zuri web API. Background work (queues and scheduled jobs) runs in the
+# separate zuri-worker service, so it never slows requests down. Installed by setup.sh as /etc/systemd/system/zuri-api.service.
 #
 #   systemctl status zuri-api          is it running?
 #   journalctl -u zuri-api -f          follow its logs
 #   sudo systemctl restart zuri-api    restart (deploys do this for you)
 
 [Unit]
-Description=Zuri Studios API
+Description=Zuri API
 After=network-online.target postgresql.service redis-server.service
 Wants=network-online.target
 Requires=postgresql.service
@@ -25,7 +25,8 @@ Environment=NODE_ENV=production
 Environment=HOST=127.0.0.1
 Environment=PORT=5060
 Environment=TRUST_PROXY_HOPS=1
-Environment=SCHEDULER_ENABLED=true
+Environment=APP_ROLE=api
+Environment=SCHEDULER_ENABLED=false
 ExecStart=/usr/bin/node --enable-source-maps dist/app.js
 Restart=always
 RestartSec=3

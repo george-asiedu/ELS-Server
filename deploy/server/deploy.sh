@@ -69,6 +69,7 @@ healthy() {
 }
 
 sudo /usr/bin/systemctl restart zuri-api
+sudo /usr/bin/systemctl restart zuri-worker
 if healthy; then
   log "Live: $(curl -fsS "${HEALTH_URL}")"
 else
@@ -79,6 +80,7 @@ else
     ln -sfn "${PREVIOUS}" "${APP_DIR}/current.next"
     mv -Tf "${APP_DIR}/current.next" "${APP_DIR}/current"
     sudo /usr/bin/systemctl restart zuri-api
+    sudo /usr/bin/systemctl restart zuri-worker
     healthy && echo "Rolled back; the previous release is serving." || echo "::error::Rollback is unhealthy too: journalctl -u zuri-api"
   fi
   exit 1

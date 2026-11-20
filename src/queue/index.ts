@@ -1,7 +1,10 @@
 import type { Worker } from "bullmq";
 import { Queue } from "bullmq";
 import { isQueueEnabled, getRedisConnection } from "./connection";
-import { emailQueue, LEGACY_QUEUE_NAMES, QUEUE_NAMES } from "./queues";
+import { env } from "../config/env.config";
+import { emailQueue, LEGACY_QUEUE_NAMES, pushQueue, QUEUE_NAMES, whatsappQueue } from "./queues";
+import { createPushWorker } from "./workers/pushWorker";
+import { createWhatsappWorker } from "./workers/whatsappWorker";
 import { createEmailWorker } from "./workers/emailWorker";
 
 const workers: Worker[] = [];
@@ -53,9 +56,15 @@ export const bootstrapQueues = async (): Promise<void> => {
     return;
   }
 
+  // The API process only adds jobs. The workers run in the worker process (or
+  // here too when APP_ROLE isn't set, as in development).
+  if (env.appRole === "api") {
+    console.log("Queues: this process only adds jobs; the worker service runs them.");
+    return;
+  }
   await retireLegacyQueues();
-  workers.push(createEmailWorker());
-  console.log(`Queue online: "${QUEUE_NAMES.email}" (background email).`);
+  workers.push(createEmailWorker(), createPushWorker(), createWhatsappWorker());
+  console.log(`Queues online: ${Object.values(QUEUE_NAMES).join(", ")}.`);
 };
 
 /**
@@ -65,7 +74,7 @@ export const bootstrapQueues = async (): Promise<void> => {
  */
 export const shutdownQueues = async (): Promise<void> => {
   await Promise.allSettled(workers.map((w) => w.close()));
-  await emailQueue?.close().catch(() => undefined);
+  await Promise.allSettled([emailQueue?.close(), pushQueue?.close(), whatsappQueue?.close()]);
   await getRedisConnection()
     ?.quit()
     .catch(() => undefined);

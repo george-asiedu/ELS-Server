@@ -37,6 +37,7 @@ import {
 } from "../notifications/templates/booking";
 import { MoneyLine } from "../notifications/types";
 import { ghs } from "../notifications/format";
+import { platformBrandForPlan } from "../notifications/brand";
 import {
   brandFromStudio,
   firstName,
@@ -180,6 +181,13 @@ export class AppointmentService extends Connection {
   // Loyalty value for booking-time redemption. The discount cap ratio comes
   // from the studio's settings (loyaltyCapRatio()).
   private static readonly POINTS_PER_GHS = 10; // 10 points = GHS 1 off
+
+  /** For mail to the business itself: from Zuri Studios, not from its own name. */
+  private async zuriBrand() {
+    const id = getTenantContext()?.studioId;
+    const studio = id ? await this.studio.findUnique({ where: { id }, select: { plan: true } }).catch(() => null) : null;
+    return platformBrandForPlan(studio?.plan);
+  }
 
   public async create(data: CreateAppointmentInput, userId?: string, opts: { guest?: boolean } = {}) {
     // A guest has no account, so the studio can only reach them by email to
@@ -371,7 +379,7 @@ export class AppointmentService extends Connection {
 
       const studioEmail = await this.currentStudioNotifyEmail();
       if (studioEmail) {
-        const { subject, html } = bookingRequestStudio(brand, {
+        const { subject, html } = bookingRequestStudio(await this.zuriBrand(), {
           ...core,
           customerName: appointment.fullName,
           customerPhone: appointment.phone,
@@ -941,7 +949,7 @@ export class AppointmentService extends Connection {
       try {
         const to = await this.currentStudioNotifyEmail();
         if (to) {
-          const { subject, html } = bookingRescheduleRequested(brand, {
+          const { subject, html } = bookingRescheduleRequested(await this.zuriBrand(), {
             ...core,
             customerName: appointment.fullName,
             previousDate: formatDate(existing.appointmentDate),

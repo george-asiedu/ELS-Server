@@ -1,3 +1,4 @@
+import { env } from "../../config/env.config";
 import { EmailBrand, MoneyLine } from "../types";
 
 // ---------------------------------------------------------------------------
@@ -36,8 +37,9 @@ export const brandColor = (brand: EmailBrand): string =>
   (brand.kind === "studio" && brand.studio.primaryColor) || "#FBC500";
 // The Zuri mark, served from the public site's /public folder. Email clients
 // need an absolute URL, and PNG rather than SVG.
-// The version tag makes mail clients fetch the current logo instead of a cached old one.
-const ZURI_LOGO_URL = "https://zuristudios.com/zuri-mark-square.png?v=3";
+// Served by the API itself (see app.ts), so it is always the current logo. The
+// version tag makes mail clients fetch it again instead of showing a cached old one.
+const ZURI_LOGO_URL = `${env.apiPublicUrl}/api/brand/zuri-logo.png?v=3`;
 const brandLogo = (brand: EmailBrand) =>
   brand.kind === "studio" ? brand.studio.logoUrl : ZURI_LOGO_URL;
 const brandSiteUrl = (brand: EmailBrand) =>

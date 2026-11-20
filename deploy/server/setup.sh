@@ -93,11 +93,14 @@ install -d -m 750 -o zuri -g zuri /var/backups/zuri
 
 # ─── 4. systemd ──────────────────────────────────────────────────────────────
 log "Installing systemd services"
-for unit in zuri-api.service zuri-backup.service zuri-backup.timer; do
+for unit in zuri-api.service zuri-worker.service zuri-backup.service zuri-backup.timer; do
   install -m 644 "${HERE}/${unit}" "/etc/systemd/system/${unit}"
 done
 systemctl daemon-reload
-systemctl enable zuri-api        # started by the first deploy
+systemctl enable zuri-api zuri-worker   # started by the first deploy
+# The Neon restore copy and the one-off import (see docs/DEPLOYMENT.md).
+install -m 755 "${HERE}/neon-copy.sh" /usr/local/sbin/zuri-neon-copy
+install -m 755 "${HERE}/import-from-neon.sh" /usr/local/sbin/zuri-import-from-neon
 systemctl enable --now zuri-backup.timer
 
 # ─── 5. Nginx ────────────────────────────────────────────────────────────────
