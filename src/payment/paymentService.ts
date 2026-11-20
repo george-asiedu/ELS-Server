@@ -1,3 +1,4 @@
+import { timingSafeEqual } from "crypto";
 import { isVoucherReference, VoucherService } from "../vouchers/voucherService";
 import crypto from "crypto";
 import { Connection } from "../db/dbConnection";
@@ -105,15 +106,23 @@ export class PaymentService extends Connection {
   private async prepareBookingCharge(
     appointmentId: string,
     type: PaymentType,
-    userId: string,
+    owner: string | { guestToken: string },
   ) {
     const appointment = await this.appointment.findUnique({
       where: { id: appointmentId },
       include: { service: { select: { name: true } } },
     });
     if (!appointment) throw new ApiError("Appointment not found", 404);
-    if (appointment.userId !== userId) {
-      throw new ApiError("You can only pay for your own booking", 403);
+    // A signed-in customer pays for their own booking; a guest proves it's
+    // theirs with the token they were given when they booked.
+    const userId = typeof owner === "string" ? owner : null;
+    if (userId) {
+      if (appointment.userId !== userId) throw new ApiError("You can only pay for your own booking", 403);
+    } else {
+      const given = Buffer.from(typeof owner === "string" ? "" : owner.guestToken);
+      const real = Buffer.from(appointment.guestToken ?? "");
+      if (appointment.userId || !real.length || given.length !== real.length || !timingSafeEqual(given, real))
+        throw new ApiError("You can only pay for your own booking", 403);
     }
 
     const settings = await this.settings();
@@ -127,7 +136,7 @@ export class PaymentService extends Connection {
       throw new ApiError("Partial (deposit) payment is not available", 400);
     }
     // Customers who've missed bookings pay in full rather than a deposit.
-    if (type === "PARTIAL" && (await this.noShowCount(userId)) >= NO_SHOWS_FOR_FULL_PAYMENT) {
+    if (type === "PARTIAL" && userId && (await this.noShowCount(userId)) >= NO_SHOWS_FOR_FULL_PAYMENT) {
       throw new ApiError("Because of missed appointments, please pay the full amount for this booking.", 400);
     }
 
@@ -142,7 +151,7 @@ export class PaymentService extends Connection {
         : amountDue;
     if (charge <= 0) throw new ApiError("Invalid payment amount", 400);
 
-    const email = appointment.email || (await this.userEmail(userId));
+    const email = appointment.email || (userId ? await this.userEmail(userId) : null);
     if (!email) throw new ApiError("An email is required to pay", 400);
 
     const reference = await this.makeReference("APT");
@@ -202,7 +211,7 @@ export class PaymentService extends Connection {
   public async initialize(
     appointmentId: string,
     type: PaymentType,
-    userId: string,
+    userId: string | { guestToken: string },
     origin?: string,
   ) {
     const { reference, email, split } = await this.prepareBookingCharge(
@@ -242,7 +251,7 @@ export class PaymentService extends Connection {
   public async chargeMomoBooking(
     appointmentId: string,
     type: PaymentType,
-    userId: string,
+    userId: string | { guestToken: string },
     phone: string,
     provider: string,
   ) {

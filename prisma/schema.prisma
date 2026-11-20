@@ -497,6 +497,13 @@ model ScheduledJob {
 
 model PlatformConfig {
   id                        String  @id @default(cuid())
+  // Guest key: the web app sends it to book, pay or buy without an account.
+  // Rotating moves the old one to "previous", which keeps working for a day so
+  // pages that are already open don't break.
+  guestKeyCurrent           String?
+  guestKeyPrevious          String?
+  guestKeyPreviousUntil     DateTime?
+  guestKeyRotatedAt         DateTime?
   // Master switch: when off, onboarding only offers subscription billing and the
   // revenue-share (% cut) option is hidden entirely. Subscription is always the
   // default; the super admin opts in to revenue-share.
@@ -716,6 +723,9 @@ model Appointment {
   notes           String?
   designImageUrl  String?
   status          AppointmentStatus @default(PENDING)
+  // Guest bookings (no account): a private token, handed back once when the
+  // booking is made, is what lets that person pay for it.
+  guestToken      String?
 
   // Original service price at time of booking.
   totalPrice     Float?

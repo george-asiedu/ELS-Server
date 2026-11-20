@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { guestLimiter, requireGuestKey } from "../middleware/guestKey";
 import { OrderController } from "./orderController";
 import {
   authenticate,
@@ -27,7 +28,7 @@ router.get("/me", authenticate, requireCustomer, OrderController.listMine);
 router.post("/:id/repay", authenticate, requireCustomer, OrderController.repay);
 
 // Guest checkout (no account) — anyone can buy a product.
-router.post("/guest-checkout", OrderController.guestCheckout);
+router.post("/guest-checkout", guestLimiter, requireGuestKey, OrderController.guestCheckout);
 
 // Verify a transaction after the Paystack redirect (public: guests too).
 router.get("/verify", OrderController.verify);

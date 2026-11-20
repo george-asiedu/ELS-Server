@@ -131,6 +131,7 @@ app.use(
       "X-Device-Id",
       "Idempotency-Key",
       "X-Zuri-Client",
+      "X-Guest-Key",
     ],
     credentials: true,
     maxAge: 600,

@@ -1,9 +1,11 @@
 import { Router } from "express";
+import { guestLimiter, requireGuestKey } from "../middleware/guestKey";
 import { PaymentController } from "./paymentController";
 import {
   authenticate,
   requireAdmin,
   requireCustomer,
+  optionalAuth,
 } from "../middleware/auth";
 
 const router: Router = Router();
@@ -37,18 +39,23 @@ router.post(
 // Submit an OTP if the mobile-money charge asks for one.
 router.post(
   "/charge/submit-otp",
-  authenticate,
-  requireCustomer,
+  optionalAuth,
   PaymentController.submitOtp,
 );
 // Poll a charge's status (mobile money or inline popup).
-router.get("/status", authenticate, PaymentController.status);
+router.get("/status", optionalAuth, PaymentController.status);
 
 // Verify a transaction after the Paystack redirect (any logged-in user).
-router.get("/verify", authenticate, PaymentController.verify);
+router.get("/verify", optionalAuth, PaymentController.verify);
 
 // Verify a combined booking + products charge (customer).
 router.get("/verify-combined", authenticate, PaymentController.verifyCombined);
+
+// Guest — a booking made without an account is paid with its private token.
+// Status, OTP and verify work off the payment reference, which can't be guessed,
+// so they don't need a signed-in user.
+router.post("/guest/initialize", guestLimiter, requireGuestKey, PaymentController.guestInitialize);
+router.post("/guest/charge/momo", guestLimiter, requireGuestKey, PaymentController.guestChargeMomo);
 
 // Paystack server-to-server webhook (public; HMAC signature-verified).
 router.post("/webhook", PaymentController.webhook);

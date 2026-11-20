@@ -1,3 +1,4 @@
+import { randomBytes } from "crypto";
 import { notifyStudioAdmins } from "../push/pushService";
 import { sendBookingWhatsapp } from "../whatsapp/whatsappService";
 import { WaitlistService } from "../waitlist/waitlistService";
@@ -180,7 +181,11 @@ export class AppointmentService extends Connection {
   // from the studio's settings (loyaltyCapRatio()).
   private static readonly POINTS_PER_GHS = 10; // 10 points = GHS 1 off
 
-  public async create(data: CreateAppointmentInput, userId?: string) {
+  public async create(data: CreateAppointmentInput, userId?: string, opts: { guest?: boolean } = {}) {
+    // A guest has no account, so the studio can only reach them by email to
+    // take payment and confirm.
+    if (opts.guest && !data.email?.trim()) throw new ApiError("Enter your email so we can confirm your booking", 400);
+    const guestToken = opts.guest ? randomBytes(18).toString("base64url") : null;
     // The studio confirms and follows up on WhatsApp, so the number has to be
     // one a wa.me link can open.
     if (!toWhatsappNumber(data.phone)) {
@@ -296,6 +301,7 @@ export class AppointmentService extends Connection {
             ...(staffId ? { staffId } : {}),
             ...(designImageUrl ? { designImageUrl } : {}),
             ...(userId ? { userId } : {}),
+            ...(guestToken ? { guestToken } : {}),
           },
           include: serviceInclude,
         });
@@ -389,7 +395,10 @@ export class AppointmentService extends Connection {
       console.error("Failed to send booking-request notifications:", error);
     }
 
-    return { message: "Appointment created successfully", data: appointment };
+    return {
+      message: "Appointment created successfully",
+      data: guestToken ? { ...appointment, guestToken } : appointment,
+    };
   }
 
   // Times already taken (any non-cancelled appointment) for a given date.

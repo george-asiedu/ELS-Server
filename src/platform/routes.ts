@@ -13,6 +13,10 @@ import { SchedulerController } from "../scheduler/schedulerController";
 import { PlatformActivityLogService } from "./platformActivityLog";
 import { LedgerController } from "../ledger/ledgerController";
 import { UserDirectoryController } from "../users/userDirectoryController";
+import { AuditService } from "../audit/auditService";
+import { currentGuestKey, guestKeyFetchLimiter, guestKeyStatus, rotateGuestKey } from "../middleware/guestKey";
+
+const audit = new AuditService();
 
 const activityLogs = new PlatformActivityLogService();
 
@@ -25,6 +29,12 @@ router.post("/auth/reset-password", PlatformController.resetPassword);
 
 // Public: site details, prices and setup fees for the platform pages.
 router.get("/public-config", cachePublic(), PlatformController.publicConfig);
+// The web app reads the current guest key here (never cached, so a rotation
+// reaches it straight away).
+router.get("/guest-key", guestKeyFetchLimiter, async (_req, res) => {
+  res.set("Cache-Control", "no-store");
+  return res.status(200).json({ data: { key: await currentGuestKey() } });
+});
 router.get("/public-stats", cachePublic(300), PlatformController.publicStats);
 router.get("/directory", cachePublic(300), PlatformController.directory);
 
@@ -46,6 +56,17 @@ router.get("/analytics", PlatformController.analytics);
 router.get("/earnings", PlatformController.earnings);
 router.get("/billing-config", PlatformController.getBillingConfig);
 router.patch("/billing-config", PlatformController.updateBillingConfig);
+router.get("/guest-key/status", async (_req, res) => res.status(200).json({ data: await guestKeyStatus() }));
+router.post("/guest-key/rotate", async (req, res) => {
+  const data = await rotateGuestKey();
+  await audit.record({
+    actor: { id: req.user.id, email: req.user.email, role: req.user.role },
+    action: "platform.guest_key.rotated",
+    targetType: "PlatformConfig",
+    metadata: { endsWith: data.endsWith },
+  });
+  return res.status(200).json({ message: "Guest key rotated. The old one works for 24 more hours.", data });
+});
 router.get("/site-settings", PlatformController.getSiteSettings);
 router.patch("/site-settings", PlatformController.updateSiteSettings);
 
