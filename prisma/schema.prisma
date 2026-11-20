@@ -299,6 +299,8 @@ model FeatureRequest {
   // decided; 0 means free. Added to the studio's next renewal.
   feeAmount       Float?
   feeSetAt        DateTime?
+  // Pictures that show what they mean (up to 5), uploaded with the request.
+  images          String[] @default([])
 
   studio Studio @relation(fields: [studioId], references: [id], onDelete: Cascade)
 
@@ -614,12 +616,35 @@ model PromoBanner {
   placement PromoPlacement @default(BOTH)
   active    Boolean        @default(true)
   order     Int            @default(0)
+  // The scheduled sale this banner belongs to (shown only on its sale days).
+  salePromoId String?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@index([studioId])
   @@map("promo_banners")
+}
+
+// A scheduled sale for a studio's or store's products: a % off on certain
+// weekdays (Fridays by default) between two dates, like Black Friday. On sale
+// days it puts the price down on every product that has no price of its own
+// set, and shows a banner; the next day it puts them back.
+model SalePromo {
+  id         String   @id @default(cuid())
+  studioId   String?
+  name       String
+  percentOff Float
+  startsOn   DateTime // a day, at midnight UTC
+  endsOn     DateTime
+  // 0 = Sunday ... 6 = Saturday.
+  weekdays   Int[]    @default([5])
+  banner     Boolean  @default(true)
+  active     Boolean  @default(true)
+  createdAt  DateTime @default(now())
+
+  @@index([studioId])
+  @@map("sale_promos")
 }
 
 // ------------------- Tenant-owned models -------------------
@@ -1230,6 +1255,9 @@ model Product {
   costPrice   Float    @default(0)
   // When set (and below price), an active promotional price.
   promoPrice  Float?
+  // Set when promoPrice came from a scheduled sale (e.g. Black Friday) rather
+  // than the owner, so the sale can take it off again when the day ends.
+  salePromoId String?
   imageUrl    String?
   // More photos shown after imageUrl on the product page.
   images      String[] @default([])

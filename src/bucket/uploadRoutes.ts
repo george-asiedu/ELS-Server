@@ -14,6 +14,7 @@ const scopes = new Set([
   "staff",
   "profiles",
   "reviews",
+  "requests",
   "misc",
 ]);
 

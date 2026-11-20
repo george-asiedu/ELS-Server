@@ -90,6 +90,19 @@ export const JOBS: JobDefinition[] = [
     },
   },
   {
+    key: "sales-schedule",
+    label: "Scheduled sales",
+    description:
+      "Puts sale prices and banners on for stores whose sale (like Black Friday) runs today, and takes them off again afterwards.",
+    schedule: { periodMinutes: 60, offsetMinutes: 0 },
+    scheduleLabel: "Hourly",
+    maxRunMinutes: 10,
+    run: async () => {
+      const { reconcileAll } = await import("../sales/salesService");
+      return { ...(await reconcileAll()) };
+    },
+  },
+  {
     key: "storage-maintenance",
     label: "Storage",
     description:

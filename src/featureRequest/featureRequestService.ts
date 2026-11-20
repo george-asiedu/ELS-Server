@@ -12,6 +12,7 @@ import { addExtraCharge, waiveExtraCharge } from "../billing/extraCharges";
 import { notifyStudioAdmins } from "../push/pushService";
 import { platformBrand } from "../notifications/brand";
 import { env } from "../config/env.config";
+import { S3BucketService } from "../bucket/s3BucketService";
 import { runAsSuperAdmin } from "../tenant/context";
 
 export const FEATURE_REQUEST_STATUSES = [
@@ -31,6 +32,12 @@ type FeatureRequestStatus = (typeof FEATURE_REQUEST_STATUSES)[number];
  */
 export class FeatureRequestService extends Connection {
   private notifications = new NotificationService();
+  private s3 = new S3BucketService();
+
+  /** Image addresses ready to show. */
+  private shown<T extends { images?: string[] }>(r: T): T {
+    return { ...r, images: (r.images ?? []).map((u) => this.s3.deliveryUrl(u) ?? u) };
+  }
 
   /**
    * Every super admin's email. User is a tenant-scoped model, so this must run
@@ -78,7 +85,7 @@ export class FeatureRequestService extends Connection {
   public async create(
     studioId: string | null | undefined,
     userId: string | undefined,
-    input: { title?: unknown; description?: unknown },
+    input: { title?: unknown; description?: unknown; images?: unknown },
   ) {
     const id = this.requireStudioId(studioId);
     const title = String(input.title ?? "").trim();
@@ -94,16 +101,22 @@ export class FeatureRequestService extends Connection {
       );
     }
 
+    // Up to 5 pictures, each one this studio uploaded for requests.
+    const rawImages = Array.isArray(input.images) ? input.images : [];
+    if (rawImages.length > 5) throw new ApiError("Attach up to 5 images", HttpCode.BAD_REQUEST);
+    const images = rawImages.map((u) => this.s3.assertOwnedMediaUrl(String(u), "requests"));
+
     const created = await this.featureRequest.create({
       data: {
         studioId: id,
+        images,
         ...(userId ? { createdByUserId: userId } : {}),
         title,
         description,
       },
     });
-    await this.notifySuperAdmins(created.id, id, title, description, userId);
-    return { message: "Feature request submitted", data: created };
+    await this.notifySuperAdmins(created.id, id, title, images.length ? `${description}\n\n(${images.length} image${images.length === 1 ? "" : "s"} attached. See them on the review page.)` : description, userId);
+    return { message: "Feature request submitted", data: this.shown(created) };
   }
 
   // Best-effort: a mail failure must never fail the request the studio just made.
@@ -161,7 +174,7 @@ export class FeatureRequestService extends Connection {
       where: { studioId: id },
       orderBy: { createdAt: "desc" },
     });
-    return { message: "Feature requests", data: requests };
+    return { message: "Feature requests", data: requests.map((r) => this.shown(r)) };
   }
 
   // ---- Platform (super-admin) side --------------------------------------
@@ -177,7 +190,7 @@ export class FeatureRequestService extends Connection {
       orderBy: { createdAt: "desc" },
       include: { studio: { select: { id: true, name: true, slug: true } } },
     });
-    return { message: "Feature requests", data: requests };
+    return { message: "Feature requests", data: requests.map((r) => this.shown(r)) };
   }
 
   /**

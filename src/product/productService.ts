@@ -239,8 +239,9 @@ export class ProductService extends Connection {
           : {}),
         ...(data.price !== undefined ? { price: data.price } : {}),
         ...(data.costPrice !== undefined ? { costPrice: data.costPrice } : {}),
+        // A price the owner sets is theirs: a scheduled sale won't touch it.
         ...(data.promoPrice !== undefined
-          ? { promoPrice: data.promoPrice }
+          ? { promoPrice: data.promoPrice, salePromoId: null }
           : {}),
         ...(data.category !== undefined ? { category: data.category } : {}),
         ...(data.stock !== undefined ? { stock: data.stock } : {}),

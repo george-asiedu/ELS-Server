@@ -10,6 +10,7 @@ const SCOPED_MODELS = new Set<string>([
   "User",
   "Profile",
   "Appointment",
+  "SalePromo",
   "Service",
   "ServiceAddOn",
   "Payment",
