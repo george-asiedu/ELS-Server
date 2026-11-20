@@ -57,4 +57,13 @@ export class GalleryController {
     const result = await galleryService.remove(id);
     return res.status(200).json(result);
   };
+
+  public static listTrash = async (_req: Request, res: Response) =>
+    res.status(200).json(await galleryService.listTrash());
+
+  public static restore = async (req: Request, res: Response) =>
+    res.status(200).json(await galleryService.restore(String(req.params.id)));
+
+  public static purge = async (req: Request, res: Response) =>
+    res.status(200).json(await galleryService.purge(String(req.params.id)));
 }

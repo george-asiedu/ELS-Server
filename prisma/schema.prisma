@@ -169,6 +169,8 @@ model Studio {
   subscriptionCode       String?
   subscriptionStatus     String? // active | lapsed | revenue_share | ...
   currentPeriodEnd       DateTime?
+  // Extra storage the studio has taken, in blocks (see PlatformConfig).
+  storageExtraBlocks     Int            @default(0)
   // Set by the super admin for this customer only. A custom monthly price
   // (yearly is 10x, like the list price) applies to its current plan; a
   // discount applies to every charge until it ends (no end = ongoing).
@@ -540,6 +542,12 @@ model ScheduledJob {
 
 model PlatformConfig {
   id                        String  @id @default(cuid())
+  // Storage for Zuri Studios plans (not Zuri Stores): included amount per plan,
+  // and the size and monthly price of an extra block.
+  storageStandardMb         Int     @default(500)
+  storagePremiumMb          Int     @default(1024)
+  storageBlockMb            Int     @default(50)
+  storageBlockPrice         Float   @default(5)
   // Guest key: the web app sends it to book, pay or buy without an account.
   // Rotating moves the old one to "previous", which keeps working for a day so
   // pages that are already open don't break.
@@ -949,6 +957,10 @@ model Gallery {
   mediaType MediaType @default(IMAGE)
   category  String // Category slug (see Category model)
   active    Boolean   @default(true)
+  // In the trash: hidden everywhere, still stored (and counted) until it is
+  // restored or purgeAfter passes.
+  deletedAt  DateTime?
+  purgeAfter DateTime?
   createdAt DateTime  @default(now())
 
   @@index([studioId])

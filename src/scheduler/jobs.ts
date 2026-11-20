@@ -90,6 +90,24 @@ export const JOBS: JobDefinition[] = [
     },
   },
   {
+    key: "storage-maintenance",
+    label: "Storage",
+    description:
+      "Empties gallery trash items older than 30 days, and on the 1st adds each studio's extra storage for the new month to its next bill.",
+    schedule: { periodMinutes: 24 * 60, offsetMinutes: 3 * 60 },
+    scheduleLabel: "Daily at 03:00 UTC",
+    maxRunMinutes: 30,
+    run: async () => {
+      const { GalleryService } = await import("../gallery/galleryService");
+      const { S3BucketService } = await import("../bucket/s3BucketService");
+      const { billStorageForMonth } = await import("../storage/storageService");
+      const purged = await new GalleryService(new S3BucketService()).purgeExpired();
+      // Extra storage is added for the month once; re-running it is harmless.
+      const billed = await billStorageForMonth();
+      return { ...purged, ...billed };
+    },
+  },
+  {
     key: "billing-reminders",
     label: "Subscription reminders",
     description:

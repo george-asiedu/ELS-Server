@@ -14,6 +14,7 @@ import { ApiError } from "../middleware/apiError";
 import path from "path";
 import { v4 as uuidv4 } from "uuid";
 import { getTenantContext } from "../tenant/context";
+import { assertCanStore, forgetStorage } from "../storage/storageService";
 
 export interface SafeFile {
   originalname: string;
@@ -135,6 +136,7 @@ export class S3BucketService {
         400,
       );
     }
+    await assertCanStore(tenant.studioId, input.size);
     const key = `studios/${tenant.studioId}/${input.category}/${uuidv4()}${ext}`;
     const created = await this.s3.send(
       new CreateMultipartUploadCommand({
@@ -257,7 +259,9 @@ export class S3BucketService {
     const studioId = getTenantContext()?.studioId;
     if (!studioId)
       throw new ApiError("Studio context is required for media uploads", 400);
+    await assertCanStore(studioId, body.length);
     const key = `studios/${studioId}/${category}/${uuidv4()}.webp`;
+    forgetStorage(studioId);
     await this.s3.send(
       new PutObjectCommand({
         Bucket: env.aws.s3BucketName,

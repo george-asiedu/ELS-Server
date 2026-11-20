@@ -83,7 +83,7 @@ export class CategoryService extends Connection {
 
     const [serviceCount, galleryCount] = await Promise.all([
       this.service.count({ where: { category: existing.slug } }),
-      this.gallery.count({ where: { category: existing.slug } }),
+      this.gallery.count({ where: { category: existing.slug, deletedAt: null } }),
     ]);
     if (serviceCount > 0 || galleryCount > 0) {
       throw new ApiError(
