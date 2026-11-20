@@ -443,6 +443,7 @@ export class OnboardingService extends Connection {
         planName: planName(plan),
         dashboardUrl: studioLink(studio.slug, "/admin/login"),
         storefrontUrl: websiteUrl,
+        learnUrl: studioLink(studio.slug, "/admin/learn"),
       });
       // The signup charge is a real payment, so it gets a receipt like any
       // other. Revenue-share studios with no setup fee pay nothing here, and

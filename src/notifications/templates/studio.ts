@@ -13,6 +13,8 @@ export const studioCreated = (
     planName: string;
     dashboardUrl: string;
     storefrontUrl: string;
+    /** The free training page in their dashboard. */
+    learnUrl?: string;
   },
 ) => ({
   subject: "Your studio is now live on Zuri",
@@ -29,7 +31,18 @@ export const studioCreated = (
       <p class="muted" style="margin: 0; font-family: Arial, sans-serif; font-size: 13px; color: #7A6A6E; text-align: center;">
         Your storefront: <a class="accent" href="${esc(data.storefrontUrl)}" style="color: #947400;">${esc(data.storefrontUrl.replace(/^https?:\/\//, ""))}</a>
       </p>
-      ${button("Open Studio Dashboard", data.dashboardUrl, "#FBC500")}`,
+      ${button("Open Studio Dashboard", data.dashboardUrl, "#FBC500")}
+      ${
+        data.learnUrl
+          ? `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin: 24px 0 0; border: 1px solid #EADFE1; border-radius: 12px;">
+        <tr><td style="padding: 16px 20px; font-family: Arial, sans-serif; font-size: 14px; color: #2A1B1F; line-height: 1.6;">
+          <strong>Free training, so you can get going on your own</strong><br>
+          Short guides for each part of Zuri and a free live online session are waiting in your dashboard.
+          Prefer someone beside you? In-person training is available for a fee. Ask for it from the same page.
+          <br><a class="accent" href="${esc(data.learnUrl)}" style="color: #947400;">Start learning</a>
+        </td></tr></table>`
+          : ""
+      }`,
   }),
 });
 

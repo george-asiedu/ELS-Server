@@ -544,6 +544,9 @@ model ScheduledJob {
 
 model PlatformConfig {
   id                        String  @id @default(cuid())
+  // Free live online training: where to join, and when (shown to every studio and store).
+  trainingLiveUrl           String?
+  trainingLiveNote          String?
   // Storage for Zuri Studios plans (not Zuri Stores): included amount per plan,
   // and the size and monthly price of an extra block.
   storageStandardMb         Int     @default(500)
@@ -645,6 +648,32 @@ model SalePromo {
 
   @@index([studioId])
   @@map("sale_promos")
+}
+
+enum TrainingStatus {
+  NEW
+  SCHEDULED
+  DONE
+  DECLINED
+}
+
+// A studio or store asking for in-person training. Online training is free and
+// needs no request; in-person has a fee the super admin sets, added to the next bill.
+model TrainingRequest {
+  id              String         @id @default(cuid())
+  studioId        String
+  requestedByUserId String?
+  preferredDate   String?
+  location        String?
+  notes           String?
+  status          TrainingStatus @default(NEW)
+  feeAmount       Float?
+  scheduledFor    DateTime?
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  @@index([studioId])
+  @@map("training_requests")
 }
 
 enum BillStatus {

@@ -17,6 +17,7 @@ import { AuditService } from "../audit/auditService";
 import { currentGuestKey, guestKeyFetchLimiter, guestKeyStatus, rotateGuestKey } from "../middleware/guestKey";
 
 const audit = new AuditService();
+import { platformList as platformTrainingList, platformUpdate as platformTrainingUpdate, saveSettings as saveTrainingSettings, settings as trainingSettings } from "../training/trainingService";
 
 const activityLogs = new PlatformActivityLogService();
 
@@ -147,6 +148,9 @@ router.patch("/jobs/:key", SchedulerController.setEnabled);
 router.post("/jobs/:key/run", SchedulerController.runNow);
 
 // Feature-request triage across all studios.
+router.get("/training", async (_req, res) => res.status(200).json({ data: await platformTrainingList(), settings: await trainingSettings() }));
+router.patch("/training/settings", async (req, res) => res.status(200).json({ message: "Saved", data: await saveTrainingSettings(req.body ?? {}) }));
+router.patch("/training/:id", async (req, res) => res.status(200).json({ message: "Updated", data: await platformTrainingUpdate(String(req.params.id), req.body ?? {}) }));
 router.get("/feature-requests", FeatureRequestController.platformList);
 router.patch("/feature-requests/:id/fee", FeatureRequestController.platformSetFee);
 router.patch(
