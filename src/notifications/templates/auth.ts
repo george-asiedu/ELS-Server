@@ -73,7 +73,7 @@ export const emailVerificationCode = (
   brand: EmailBrand,
   data: { code: string; expiresInMinutes: number },
 ) => ({
-  subject: `${data.code} is your Zuri Studios verification code`,
+  subject: `${data.code} is your Zuri verification code`,
   html: renderShell({
     brand,
     previewText: `Your code is ${data.code}.`,
@@ -130,12 +130,12 @@ export const customerWelcome = (
 ) => {
   const greeting = data.studioName
     ? `Welcome to ${esc(data.studioName)}`
-    : "Welcome to Zuri Studios";
+    : "Welcome to Zuri";
   const color = brand.kind === "studio" ? "#FBC500" : ROSE;
   return {
     subject: data.studioName
       ? `Welcome to ${data.studioName}, ${data.firstName}`
-      : `Welcome to Zuri Studios, ${data.firstName}`,
+      : `Welcome to Zuri, ${data.firstName}`,
     html: renderShell({
       brand,
       previewText: "Your account is ready.",

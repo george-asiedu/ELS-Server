@@ -100,7 +100,7 @@ export class AuthController {
       : null;
     const result = await startTwoFactorSetup(
       req.user!.id,
-      studio?.name ?? "Zuri Studios",
+      studio?.name ?? "Zuri",
     );
     return res.status(200).json(result);
   };

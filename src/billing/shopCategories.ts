@@ -1,4 +1,4 @@
-// What a shop can sell. Picked at signup (Zuri Storefront, or Premium's
+// What a shop can sell. Picked at signup (Zuri Stores, or Premium's
 // shop) and used to choose the shop website's template and starter content.
 // The ids are stored; labels are for display.
 export const SHOP_CATEGORIES = [

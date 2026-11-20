@@ -1,7 +1,7 @@
 import { EmailBrand, MoneyLine } from "../types";
 
 // ---------------------------------------------------------------------------
-// Zuri Studios email design system.
+// Zuri email design system.
 //
 // Table-based, inline-styled, email-client-safe HTML (Gmail/Outlook/Apple
 // Mail/Yahoo all render this reliably — no CSS grid, no JS, no external
@@ -285,9 +285,9 @@ const supportLine = (brand: EmailBrand): string => {
 // The small grey footer under the card.
 const legalFooter = (brand: EmailBrand): string => {
   if (brand.kind === "zuri")
-    return `Zuri Studios &middot; <a href="${esc(brand.zuri.websiteUrl)}" style="color: ${FAINT};">${esc(brand.zuri.websiteUrl.replace(/^https?:\/\//, ""))}</a><br>You're getting this email because of something on your account.`;
+    return `Zuri &middot; <a href="${esc(brand.zuri.websiteUrl)}" style="color: ${FAINT};">${esc(brand.zuri.websiteUrl.replace(/^https?:\/\//, ""))}</a><br>You're getting this email because of something on your account.`;
   const s = brand.studio;
-  return `${esc(s.name)}${s.address ? ` &middot; ${esc(s.address)}` : ""}<br>Powered by Zuri Studios. You're getting this email because of something on your account.`;
+  return `${esc(s.name)}${s.address ? ` &middot; ${esc(s.address)}` : ""}<br>Powered by Zuri. You're getting this email because of something on your account.`;
 };
 
 /**

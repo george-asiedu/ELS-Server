@@ -166,7 +166,7 @@ export const pushForNotification = async (args: {
     return await notifyUsers(
       users.map((u) => u.id),
       {
-        title: studio?.name ?? "Zuri Studios",
+        title: studio?.name ?? "Zuri",
         body: args.pushBody ?? args.subject,
         url,
         tag: `${args.template}:${args.entityId}`,

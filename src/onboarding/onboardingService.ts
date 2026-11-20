@@ -189,7 +189,7 @@ export class OnboardingService extends Connection {
       );
     }
     const plan: Plan = isPlan(input.plan) ? input.plan : "STANDARD";
-    // What the shop sells: required for Zuri Storefront, optional for
+    // What the shop sells: required for Zuri Stores, optional for
     // Premium's shop, not used by booking-only Standard.
     let shopCategory: ShopCategory | null = null;
     if (plan !== "STANDARD") {
@@ -451,7 +451,7 @@ export class OnboardingService extends Connection {
       const signupReceipt =
         amount > 0
           ? buildReceiptPdf({
-              studioName: "Zuri Studios",
+              studioName: "Zuri",
               title:
                 revenueShare || signup.coverageMonths
                   ? "Setup fee receipt"

@@ -2,7 +2,7 @@
 // design spec). Every notification the app sends is named here — nothing
 // calls emailQueue/sendEmailNow directly with a hand-rolled subject/HTML
 // string outside notifications/templates/*, so this list is a complete,
-// accurate inventory of every email Zuri Studios sends.
+// accurate inventory of every email Zuri sends.
 //
 // Deliberately NOT implemented (see notifications/README.md for why each one
 // doesn't apply to this app's actual architecture today):

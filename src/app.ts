@@ -279,7 +279,7 @@ app.use(xss());
 app.use(compression());
 
 app.get("/", (_req: Request, res: Response) => {
-  res.send("Welcome to the Zuri Studios API");
+  res.send("Welcome to the Zuri API");
 });
 
 // Health check endpoint

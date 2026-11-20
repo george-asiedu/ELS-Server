@@ -15,7 +15,7 @@ export const studioCreated = (
     storefrontUrl: string;
   },
 ) => ({
-  subject: "Your studio is now live on Zuri Studios",
+  subject: "Your studio is now live on Zuri",
   html: renderShell({
     brand,
     previewText: `${data.studioName} is live.`,
@@ -24,7 +24,7 @@ export const studioCreated = (
       ${statusBadge("success", "STUDIO LIVE")}
       <h1 style="margin: 0 0 12px; font-family: Georgia, serif; font-size: 22px; color: #2A1B1F; text-align: center;">Welcome, ${esc(data.ownerFirstName)}</h1>
       <p style="margin: 0 0 4px; font-family: Arial, sans-serif; font-size: 15px; color: #2A1B1F; line-height: 1.6; text-align: center;">
-        <strong>${esc(data.studioName)}</strong> is live on Zuri Studios, on the ${esc(data.planName)} plan.
+        <strong>${esc(data.studioName)}</strong> is live on Zuri, on the ${esc(data.planName)} plan.
       </p>
       <p class="muted" style="margin: 0; font-family: Arial, sans-serif; font-size: 13px; color: #7A6A6E; text-align: center;">
         Your storefront: <a class="accent" href="${esc(data.storefrontUrl)}" style="color: #947400;">${esc(data.storefrontUrl.replace(/^https?:\/\//, ""))}</a>

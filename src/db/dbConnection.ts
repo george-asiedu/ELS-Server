@@ -257,12 +257,12 @@ export class Connection {
   // Falls back to the platform name when there's no studio in context.
   protected async currentStudioName(): Promise<string> {
     const studioId = getTenantContext()?.studioId;
-    if (!studioId) return "Zuri Studios";
+    if (!studioId) return "Zuri";
     const studio = await this.studio.findUnique({
       where: { id: studioId },
       select: { name: true },
     });
-    return studio?.name ?? "Zuri Studios";
+    return studio?.name ?? "Zuri";
   }
 
   // Full studio branding (name, logo, colour, storefront/booking URLs, contact

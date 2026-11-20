@@ -15,7 +15,7 @@ export const subscriptionExpiringSoon = (
     manageUrl: string;
   },
 ) => ({
-  subject: "Your Zuri Studios plan renews soon",
+  subject: "Your Zuri plan renews soon",
   html: renderShell({
     brand,
     previewText: `Your plan renews on ${data.renewsOn}.`,
@@ -36,7 +36,7 @@ export const subscriptionExpired = (
   brand: EmailBrand,
   data: { planName: string; expiredOn: string; reactivateUrl: string },
 ) => ({
-  subject: "Your Zuri Studios plan has expired",
+  subject: "Your Zuri plan has expired",
   html: renderShell({
     brand,
     previewText: "Your plan has expired — renew to restore your storefront.",

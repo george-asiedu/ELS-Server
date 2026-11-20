@@ -7,7 +7,7 @@ import { EmailBrand, StudioBrandingInfo } from "./types";
 export const platformBrand: EmailBrand = {
   kind: "zuri",
   zuri: {
-    name: "Zuri Studios",
+    name: "Zuri",
     websiteUrl: env.clientUrl,
     supportEmail: env.senderEmail,
   },
@@ -19,7 +19,7 @@ export const platformBrand: EmailBrand = {
 export const storefrontFallbackBrand: EmailBrand = {
   kind: "zuri",
   zuri: {
-    name: "Zuri Studios",
+    name: "Zuri",
     websiteUrl: "https://zuristudios.com",
     supportEmail: "customersupport@zuristudios.com",
   },

@@ -38,7 +38,7 @@ export interface StudioBrandingInfo {
 // The platform's own identity, used for account/billing/security mail that
 // isn't tied to a single studio's storefront.
 export interface ZuriBrandingInfo {
-  name: "Zuri Studios";
+  name: "Zuri";
   websiteUrl: string;
   supportEmail: string;
 }

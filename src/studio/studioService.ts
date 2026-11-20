@@ -555,7 +555,7 @@ export class StudioService extends Connection {
       select: { plan: true, billingCadence: true, billingMode: true },
     });
     if (!studio) throw new ApiError("Studio not found", HttpCode.NOT_FOUND);
-    // Zuri Storefront and the studio plans are different products: a
+    // Zuri Stores and the studio plans are different products: a
     // storefront can change billing period, a studio can move between
     // Standard and Premium, but neither crosses over.
     if ((plan === "STOREFRONT") !== (studio.plan === "STOREFRONT")) {

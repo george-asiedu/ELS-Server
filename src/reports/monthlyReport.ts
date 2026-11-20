@@ -175,7 +175,7 @@ export class MonthlyReportService extends Connection {
             ...(product ? [`Best seller: ${product.name} (${product.count} sold)`] : []),
           ];
 
-          // From the platform to the business, so it signs off as Zuri Studios.
+          // From the platform to the business, so it signs off as Zuri.
           const brand = platformBrand;
           for (const admin of admins) {
             const { subject, html } = monthlyReport(brand, {
