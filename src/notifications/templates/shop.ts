@@ -158,3 +158,32 @@ export const orderStageUpdate = (
     }),
   };
 };
+
+/** The receipt for a bill a walk-in paid through its link. */
+export const billReceipt = (
+  brand: EmailBrand,
+  data: {
+    customerFirstName: string;
+    studioName: string;
+    number: string;
+    lines: { name: string; quantity: number; total: string }[];
+    total: string;
+    paidOn: string;
+  },
+) => {
+  return {
+    subject: `Receipt ${data.number} from ${data.studioName}`,
+    html: renderShell({
+      brand,
+      previewText: `You paid ${data.total} to ${data.studioName}`,
+      documentType: "Payment receipt",
+      bodyHtml: `
+        <h1 style="margin: 0 0 12px; font-family: Georgia, serif; font-size: 22px; color: #2A1B1F;">Thank you, ${esc(data.customerFirstName)}</h1>
+        <p style="margin: 0 0 8px; font-family: Arial, sans-serif; font-size: 15px; color: #2A1B1F; line-height: 1.6;">
+          ${esc(data.studioName)} received your payment on ${esc(data.paidOn)}. Bill <strong>${esc(data.number)}</strong>.
+        </p>
+        ${itemsTable(data.lines)}
+        ${moneyTable([{ label: "Total paid", value: data.total, emphasis: true }])}`,
+    }),
+  };
+};

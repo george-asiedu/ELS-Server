@@ -434,6 +434,9 @@ export class Connection {
   get platformReview() {
     return this.db.platformReview;
   }
+  get bill() {
+    return this.db.bill;
+  }
   get salePromo() {
     return this.db.salePromo;
   }

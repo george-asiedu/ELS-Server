@@ -35,6 +35,7 @@ import {
   receiptNumber,
 } from "../notifications/format";
 import { buildReceiptPdf } from "../notifications/receiptPdf";
+import { BillService } from "../bills/billService";
 import { receiptMethodLabel } from "../notifications/design/shell";
 
 type PaymentType = "FULL" | "PARTIAL";
@@ -959,6 +960,9 @@ export class PaymentService extends Connection {
         } else if (isVoucherReference(reference)) {
           // A gift card or package bought online.
           await new VoucherService().finalizeByReference(reference);
+        } else if (reference.startsWith("BILL-")) {
+          // A walk-in's bill paid through its link.
+          await BillService.finalizeByReference(reference).catch((e) => console.warn("Bill webhook:", (e as Error).message));
         } else if (isStudioBillingReference(reference)) {
           // A studio's renewal or plan change. Applying it here means a studio
           // that paid and closed the tab is still renewed.

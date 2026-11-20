@@ -1,0 +1,27 @@
+import { Router } from "express";
+import { authenticate, requireAdmin } from "../middleware/auth";
+import { BillService } from "./billService";
+
+const router: Router = Router();
+const bills = new BillService();
+
+// Public: the customer's pay page. The secret token in the link is the key.
+router.get("/pay/:token", async (req, res) => res.status(200).json(await bills.publicView(String(req.params.token))));
+router.post("/pay/:token/start", async (req, res) =>
+  res.status(200).json(await bills.startPayment(String(req.params.token), req.body?.email, req.headers.origin)),
+);
+router.get("/pay/:token/verify", async (req, res) =>
+  res.status(200).json(await bills.verifyPayment(String(req.params.token), String(req.query.reference ?? ""))),
+);
+
+// Studio admin: create, list, cancel, or record a payment taken at the counter.
+router.post("/", authenticate, requireAdmin, async (req, res) => res.status(201).json(await bills.create(req.body ?? {}, req.user!.id)));
+router.get("/", authenticate, requireAdmin, async (req, res) =>
+  res.status(200).json(await bills.list(typeof req.query.status === "string" ? req.query.status : undefined)),
+);
+router.post("/:id/void", authenticate, requireAdmin, async (req, res) => res.status(200).json(await bills.void(String(req.params.id))));
+router.post("/:id/paid", authenticate, requireAdmin, async (req, res) =>
+  res.status(200).json(await bills.markPaidOffline(String(req.params.id), req.body?.method, req.body?.note)),
+);
+
+export default router;

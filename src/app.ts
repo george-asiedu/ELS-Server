@@ -245,6 +245,7 @@ app.use("/api", limiter);
 app.use("/api/auth/login", loginIpLimiter);
 app.use("/api/platform/auth/login", loginIpLimiter);
 app.use("/api/payments", sensitiveActionLimiter);
+app.use("/api/bills", sensitiveActionLimiter);
 app.use("/api/orders", sensitiveActionLimiter);
 app.use("/api/refunds", sensitiveActionLimiter);
 app.use("/api/onboarding", sensitiveActionLimiter);

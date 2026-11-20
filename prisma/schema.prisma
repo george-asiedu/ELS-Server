@@ -647,6 +647,46 @@ model SalePromo {
   @@map("sale_promos")
 }
 
+enum BillStatus {
+  UNPAID
+  PAID
+  VOID
+}
+
+// A bill for a walk-in: lines the owner adds (services, products or anything
+// else), a link and QR code the customer pays through on their own phone, and
+// a record of it either way (paid online, paid in cash, or cancelled).
+model Bill {
+  id            String     @id @default(cuid())
+  studioId      String?
+  number        String
+  customerName  String
+  customerPhone String?
+  customerEmail String?
+  // Linked when the customer has an account with the same email.
+  userId        String?
+  // [{ name, quantity, unitPrice, kind: "service" | "product" | "custom" }]
+  items         Json
+  total         Float
+  note          String?
+  status        BillStatus @default(UNPAID)
+  // The secret in the pay link.
+  token         String     @unique
+  // The latest Paystack attempt, and the fee the customer paid on top.
+  reference     String?    @unique
+  processingFee Float      @default(0)
+  paidAt        DateTime?
+  // How it was paid: "paystack", "cash", "momo", "card".
+  paidVia       String?
+  paidNote      String?
+  createdByUserId String?
+  createdAt     DateTime   @default(now())
+
+  @@unique([studioId, number])
+  @@index([studioId, status])
+  @@map("bills")
+}
+
 // ------------------- Tenant-owned models -------------------
 
 model User {
@@ -1531,6 +1571,7 @@ model PaymentAttempt {
   paymentId     String?
   orderId       String?
   appointmentId String?
+  billId        String?
 
   // What we asked Paystack to charge, in GHS. Compared against the verified
   // amount before anything is marked paid.
