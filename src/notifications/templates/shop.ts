@@ -180,7 +180,7 @@ export const billReceipt = (
       bodyHtml: `
         <h1 style="margin: 0 0 12px; font-family: Georgia, serif; font-size: 22px; color: #2A1B1F;">Thank you, ${esc(data.customerFirstName)}</h1>
         <p style="margin: 0 0 8px; font-family: Arial, sans-serif; font-size: 15px; color: #2A1B1F; line-height: 1.6;">
-          ${esc(data.studioName)} received your payment on ${esc(data.paidOn)}. Bill <strong>${esc(data.number)}</strong>.
+          ${esc(data.studioName)} received your payment on ${esc(data.paidOn)}. Bill <strong>${esc(data.number)}</strong>. Your receipt is attached to this email as a PDF.
         </p>
         ${itemsTable(data.lines)}
         ${moneyTable([{ label: "Total paid", value: data.total, emphasis: true }])}`,

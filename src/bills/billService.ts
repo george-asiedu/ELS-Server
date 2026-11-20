@@ -9,7 +9,8 @@ import { NotificationService } from "../notifications/notificationService";
 import { NotificationTemplate } from "../notifications/registry";
 import { billIssued, billReceipt } from "../notifications/templates/shop";
 import { brandFromStudio, firstName, storefrontFallbackBrand } from "../notifications/brand";
-import { ghs } from "../notifications/format";
+import { ghs, receiptNumber } from "../notifications/format";
+import { buildReceiptPdf } from "../notifications/receiptPdf";
 import { notifyStudioAdmins } from "../push/pushService";
 import { runWithTenant } from "../tenant/context";
 import { createTenantClient } from "../tenant/tenantClient";
@@ -268,7 +269,7 @@ export class BillService extends Connection {
     await this.afterPaid(bill);
   }
 
-  private async afterPaid(bill: { id: string; number: string; customerName: string; customerEmail: string | null; items: unknown; total: number; studioId: string | null }) {
+  private async afterPaid(bill: { id: string; number: string; customerName: string; customerEmail: string | null; items: unknown; total: number; processingFee?: number; studioId: string | null }) {
     try {
       if (bill.studioId)
         await notifyStudioAdmins(
@@ -287,6 +288,27 @@ export class BillService extends Connection {
           total: ghs(bill.total),
           paidOn: new Date().toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" }),
         });
+        // The receipt travels as a PDF, like every other payment receipt.
+        const fee = bill.processingFee ?? 0;
+        const pdf = buildReceiptPdf({
+          studioName: studio?.name ?? "Zuri",
+          primaryColor: studio?.primaryColor ?? null,
+          title: "Payment receipt",
+          receiptNumber: receiptNumber("RCP", bill.id),
+          issuedAt: new Date(),
+          heading: `Bill ${bill.number}`,
+          lines: [
+            { label: "Customer", value: bill.customerName },
+            ...(bill.items as { name: string; quantity: number; unitPrice: number }[]).map((i) => ({ label: `${i.name}${i.quantity > 1 ? ` × ${i.quantity}` : ""}`, value: ghs(i.unitPrice * i.quantity) })),
+            ...(fee > 0 ? [{ label: "Payment processing fee", value: ghs(fee) }] : []),
+            { label: "Amount paid", value: ghs(bill.total + fee), strong: true },
+          ],
+          amountPaid: ghs(bill.total + fee),
+          reference: bill.id,
+          paymentMethod: "Online payment",
+          paidToEmail: studio?.email ?? null,
+          status: "PAID",
+        });
         await this.notifications.send({
           template: NotificationTemplate.BILL_RECEIPT,
           to: bill.customerEmail,
@@ -295,6 +317,7 @@ export class BillService extends Connection {
           studioId: bill.studioId,
           entityType: "Bill",
           entityId: bill.id,
+          attachments: [{ filename: pdf.filename, content: pdf.base64, contentType: "application/pdf" }],
         });
       }
     } catch (e) {
