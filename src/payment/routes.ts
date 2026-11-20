@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { guestLimiter, requireGuestKey } from "../middleware/guestKey";
+import { requireCaptcha } from "../middleware/captcha";
 import { PaymentController } from "./paymentController";
 import {
   authenticate,
@@ -34,6 +35,7 @@ router.post(
   "/charge/momo",
   authenticate,
   requireCustomer,
+  requireCaptcha,
   PaymentController.chargeMomo,
 );
 // Submit an OTP if the mobile-money charge asks for one.
@@ -55,7 +57,7 @@ router.get("/verify-combined", authenticate, PaymentController.verifyCombined);
 // Status, OTP and verify work off the payment reference, which can't be guessed,
 // so they don't need a signed-in user.
 router.post("/guest/initialize", guestLimiter, requireGuestKey, PaymentController.guestInitialize);
-router.post("/guest/charge/momo", guestLimiter, requireGuestKey, PaymentController.guestChargeMomo);
+router.post("/guest/charge/momo", guestLimiter, requireGuestKey, requireCaptcha, PaymentController.guestChargeMomo);
 
 // Paystack server-to-server webhook (public; HMAC signature-verified).
 router.post("/webhook", PaymentController.webhook);
