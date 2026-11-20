@@ -35,6 +35,9 @@ export const sendEmailNow = async ({
   /** Where a reply goes (the business's own email, for customer mail). */
   replyTo?: string;
 }): Promise<void> => {
+  // A name with line breaks or quotes could break the header, so it is cleaned.
+  const displayName = fromName?.replace(/[\r\n"<>]+/g, " ").trim().slice(0, 80);
+
   // Drop anything oversized rather than failing the whole send: the email body
   // already states what was paid, so a customer is better off with the mail and
   // no PDF than with no mail at all.
@@ -74,8 +77,9 @@ export const sendEmailNow = async ({
       to,
       subject,
       body: html,
-      from: env.senderEmail,
-      ...(fromName ? { name: fromName.slice(0, 80) } : {}),
+      // The display name goes inside `from` (Plunk's own docs: the separate
+      // `name` field is deprecated). The address stays the verified one.
+      from: displayName ? { name: displayName, email: env.senderEmail } : env.senderEmail,
       ...(replyTo ? { reply: replyTo } : {}),
       ...(safeAttachments?.length ? { attachments: safeAttachments } : {}),
     }),
