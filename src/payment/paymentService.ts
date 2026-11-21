@@ -326,6 +326,7 @@ export class PaymentService extends Connection {
       paystackStatus = data.status;
       await this.processVerification(reference, data);
       await this.orders.finalizeByReference(reference, data);
+      if (reference.startsWith("BILL-")) await BillService.finalizeByReference(reference);
     } catch {
       // Transaction not found yet / still initializing — treat as pending.
     }

@@ -208,6 +208,20 @@ export class BillService extends Connection {
     };
   }
 
+  /** Mobile Money for a bill, from the pay page itself (no redirect). */
+  public async chargeMomo(token: string, rawEmail: unknown, phone: string, provider: string) {
+    const bill = await this.byToken(token);
+    if (bill.status !== "UNPAID") throw bad(bill.status === "PAID" ? "This bill is already paid" : "This bill was cancelled");
+    const email = String(rawEmail ?? bill.customerEmail ?? "").trim().toLowerCase();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw bad("Enter your email so we can send your receipt");
+    const reference = await this.makeReference("BILL");
+    const split = await this.paystackChargeFor(bill.total);
+    await this.bill.update({ where: { id: bill.id }, data: { reference, processingFee: split.processingFee, ...(bill.customerEmail ? {} : { customerEmail: email }) } });
+    await this.ledger.openAttempt({ reference, expectedAmount: bill.total, processingFee: split.processingFee, billId: bill.id, customerEmail: email, customerName: bill.customerName });
+    const res = await paystack.chargeMobileMoney({ email, reference, phone, provider, metadata: { billId: bill.id, billNumber: bill.number, kind: "bill" }, ...split });
+    return { message: "Charge started", data: { reference, status: res.status, displayText: res.display_text ?? res.message ?? null, amount: split.amountPesewas / 100, processingFee: split.processingFee } };
+  }
+
   /** On return from Paystack: check the payment with them, then mark the bill paid. */
   public async verifyPayment(token: string, reference: string) {
     const bill = await this.byToken(token);

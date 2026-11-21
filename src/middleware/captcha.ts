@@ -28,18 +28,22 @@ export const requireCaptcha = async (req: Request, _res: Response, next: NextFun
     const body = new URLSearchParams({ secret, response: token });
     if (req.ip) body.set("remoteip", req.ip);
     let ok = false;
-    try {
-      const r = await fetch("https://challenges.cloudflare.com/turnstile/v0/siteverify", {
-        method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body,
-        signal: AbortSignal.timeout(8000),
-      });
-      ok = Boolean(((await r.json()) as { success?: boolean }).success);
-    } catch (e) {
-      // Cloudflare unreachable: fail closed, say why.
-      console.warn("Turnstile check failed to run:", (e as Error).message);
-      throw new ApiError("We couldn't run the security check. Please try again in a moment.", 503);
+    // One retry: a network blip shouldn't stop a customer paying.
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      try {
+        const r = await fetch("https://challenges.cloudflare.com/turnstile/v0/siteverify", {
+          method: "POST",
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          body,
+          signal: AbortSignal.timeout(8000),
+        });
+        ok = Boolean(((await r.json()) as { success?: boolean }).success);
+        break;
+      } catch (e) {
+        // Cloudflare unreachable twice: fail closed, say why.
+        console.warn(`Turnstile check failed to run (try ${attempt}):`, (e as Error).message);
+        if (attempt === 2) throw new ApiError("We couldn't run the security check. Please try again in a moment.", 503);
+      }
     }
     if (!ok) throw new ApiError("The security check didn't pass. Please try again.", 400);
     return next();

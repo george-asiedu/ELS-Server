@@ -31,6 +31,10 @@ router.post("/:id/repay", authenticate, requireCustomer, OrderController.repay);
 // Guest checkout (no account) — anyone can buy a product.
 router.post("/guest-checkout", guestLimiter, requireGuestKey, requireCaptcha, OrderController.guestCheckout);
 
+// Pay a waiting order with Mobile Money from the checkout page (guests too).
+// The order's reference is the secret; the security check guards the prompt.
+router.post("/charge/momo", guestLimiter, requireCaptcha, OrderController.chargeMomo);
+
 // Verify a transaction after the Paystack redirect (public: guests too).
 router.get("/verify", OrderController.verify);
 

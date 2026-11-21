@@ -902,6 +902,43 @@ export class OrderService extends Connection {
   // Re-initialize payment for the customer's own still-unpaid order (retry after
   // a failed/abandoned charge). Issues a fresh reference and returns a new
   // Paystack access code for the inline popup.
+  /**
+   * Mobile Money for an order that is waiting for payment, started from the
+   * checkout page itself (no redirect). The order is found by its reference,
+   * which is the secret a guest holds. A new reference is used for the charge,
+   * and the attempt is recorded under it like any other payment.
+   */
+  public async chargeMomo(reference: string, phone: string, provider: string) {
+    const order = await this.order.findFirst({ where: { reference } });
+    if (!order) throw new ApiError("Order not found", 404);
+    if (order.status !== "PENDING_PAYMENT") throw new ApiError("This order is no longer awaiting payment", 400);
+    const email = order.customerEmail;
+    if (!email) throw new ApiError("An email is required to pay", 400);
+    const fresh = await this.makeReference("ORD");
+    const split = await this.paystackChargeFor(order.total);
+    await this.order.update({ where: { id: order.id }, data: { reference: fresh, processingFee: split.processingFee } });
+    await this.ledger.openAttempt({
+      reference: fresh,
+      expectedAmount: order.total,
+      processingFee: split.processingFee,
+      orderId: order.id,
+      customerEmail: email,
+      customerName: order.customerName ?? null,
+    });
+    const res = await paystack.chargeMobileMoney({
+      email,
+      reference: fresh,
+      phone,
+      provider,
+      metadata: { orderId: order.id, orderNumber: order.orderNumber, kind: "order" },
+      ...split,
+    });
+    return {
+      message: "Charge started",
+      data: { reference: fresh, status: res.status, displayText: res.display_text ?? res.message ?? null, amount: split.amountPesewas / 100, processingFee: split.processingFee },
+    };
+  }
+
   public async repay(userId: string, orderId: string, origin?: string) {
     const order = await this.order.findUnique({ where: { id: orderId } });
     if (!order || order.userId !== userId) {

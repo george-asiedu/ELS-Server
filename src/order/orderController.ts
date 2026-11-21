@@ -123,6 +123,12 @@ export class OrderController {
     return res.status(200).json(await orderService.verify(reference));
   };
 
+  public static chargeMomo = async (req: Request, res: Response) => {
+    const { reference, phone, provider } = req.body ?? {};
+    if (!reference || !phone || !provider) throw new ApiError("reference, phone and provider are required", 400);
+    return res.status(200).json(await orderService.chargeMomo(String(reference), String(phone).trim(), String(provider).trim().toLowerCase()));
+  };
+
   public static repay = async (req: Request, res: Response) => {
     const userId = req.user?.id;
     if (!userId) throw new ApiError("Authentication required", 401);
