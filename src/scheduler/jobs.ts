@@ -96,6 +96,35 @@ export const JOBS: JobDefinition[] = [
     },
   },
   {
+    key: "insights-weekly",
+    label: "Weekly insights email",
+    description:
+      "Emails each Premium and Zuri Stores business its week: money in, profit and the top things to act on. Each business can turn it off.",
+    // Mondays at 07:30 UTC (the epoch began on a Thursday, hence the offset).
+    schedule: { periodMinutes: 7 * 24 * 60, offsetMinutes: 4 * 24 * 60 + 7 * 60 + 30 },
+    scheduleLabel: "Mondays at 07:30 UTC",
+    maxRunMinutes: 30,
+    lane: "heavy",
+    run: async () => {
+      const { sendWeeklyDigests } = await import("../insights/digest");
+      return { ...(await sendWeeklyDigests()) };
+    },
+  },
+  {
+    key: "insight-alerts",
+    label: "Urgent insight alerts",
+    description:
+      "Pushes only what can't wait (sold-out products, very late orders, old unpaid bills), at most once a week each. Each business can turn it off.",
+    schedule: { periodMinutes: 24 * 60, offsetMinutes: 9 * 60 },
+    scheduleLabel: "Daily at 09:00 UTC",
+    maxRunMinutes: 20,
+    lane: "heavy",
+    run: async () => {
+      const { sendInsightAlerts } = await import("../insights/digest");
+      return { ...(await sendInsightAlerts()) };
+    },
+  },
+  {
     key: "sales-schedule",
     label: "Scheduled sales",
     description:

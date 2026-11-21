@@ -55,6 +55,7 @@ const FROM_ZURI = new Set<string>([
   "FEATURE_REQUEST_STATUS_STUDIO",
   "FEATURE_REQUEST_FEE_STUDIO",
   // Heads-ups to the business about its own customers.
+  "INSIGHTS_WEEKLY",
   "BOOKING_REQUEST_STUDIO",
   "BOOKING_RESCHEDULE_REQUESTED",
 ]);

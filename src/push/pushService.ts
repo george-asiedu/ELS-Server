@@ -126,6 +126,7 @@ const PUSH_ROUTES: Partial<Record<NotificationTemplateKey, string>> = {
   FEATURE_REQUEST_STATUS_STUDIO: "/admin/feature-requests",
   FEATURE_REQUEST_SUBMITTED_PLATFORM: "/platform",
   STUDIO_MONTHLY_REPORT: "/admin/analytics",
+  INSIGHTS_WEEKLY: "/admin/insights",
   REFUNDED_BY_STUDIO: "/account",
   REVIEW_REQUEST: "/account",
   WAITLIST_SLOT_OPEN: "/book",

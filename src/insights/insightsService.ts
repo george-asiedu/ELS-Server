@@ -2,6 +2,7 @@ import { createTenantClient } from "../tenant/tenantClient";
 import { MonthlyReportService } from "../reports/monthlyReport";
 import { parseDurationMinutes } from "../appointment/duration";
 import { PAID_ORDER_STATUSES } from "../order/orderStatus";
+import { computeExtras } from "./deepInsights";
 
 // Business insights: what happened, and what to do about it.
 //
@@ -315,12 +316,15 @@ export const computeInsights = async (studioId: string, days: number) => {
   };
 };
 
+export type InsightsResult = Awaited<ReturnType<typeof computeInsights>> & Awaited<ReturnType<typeof computeExtras>>;
+
 /** Cached for a few minutes: the sums touch a lot of rows and change slowly. */
-export const insightsFor = async (studioId: string, days: number, refresh = false) => {
+export const insightsFor = async (studioId: string, days: number, refresh = false): Promise<InsightsResult> => {
   const key = `${studioId}:${days}`;
   const hit = cache.get(key);
-  if (!refresh && hit && Date.now() - hit.at < 10 * 60_000) return hit.data as Awaited<ReturnType<typeof computeInsights>>;
-  const data = await computeInsights(studioId, days);
+  if (!refresh && hit && Date.now() - hit.at < 10 * 60_000) return hit.data as InsightsResult;
+  const [base, extras] = await Promise.all([computeInsights(studioId, days), computeExtras(studioId, days)]);
+  const data = { ...base, ...extras };
   cache.set(key, { at: Date.now(), data });
   return data;
 };

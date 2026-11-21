@@ -254,6 +254,11 @@ model StudioContent {
 model StudioSettings {
   id                String  @id @default(cuid())
   studioId          String  @unique
+  // Insights: a monthly money-in goal to track pace against, a weekly email
+  // digest of what needs attention, and a push when something urgent comes up.
+  revenueGoal       Float?
+  weeklyDigest      Boolean @default(true)
+  insightAlerts     Boolean @default(true)
   // Appointment booking. Off for Zuri Storefront (shop-only) accounts.
   booking           Boolean @default(true)
   // Who pays Paystack's processing fee on customer payments: CUSTOMER (added

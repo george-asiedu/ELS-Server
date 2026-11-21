@@ -70,3 +70,43 @@ export const monthlyReport = (
     }),
   };
 };
+
+/** The Monday email: how the week went and the few things worth doing now. */
+export const weeklyInsights = (
+  brand: EmailBrand,
+  data: {
+    adminFirstName: string;
+    businessName: string;
+    revenue: string;
+    revenueChange: number | null;
+    profit: string;
+    findings: { title: string; detail: string; impact: string | null }[];
+    goalLine: string | null;
+    insightsUrl: string;
+  },
+) => {
+  const trend = data.revenueChange === null ? "" : data.revenueChange >= 0 ? ` (up ${data.revenueChange}% on the week before)` : ` (down ${Math.abs(data.revenueChange)}% on the week before)`;
+  const items = data.findings
+    .map(
+      (f, i) => `
+      <p style="margin: 0 0 4px; font-family: Arial, sans-serif; font-size: 15px; font-weight: bold; color: #2A1B1F; line-height: 1.5;">${i + 1}. ${esc(f.title)}${f.impact ? ` <span style="font-weight: normal; color: #7A6A6E;">(${esc(f.impact)})</span>` : ""}</p>
+      <p style="margin: 0 0 14px; font-family: Arial, sans-serif; font-size: 14px; color: #2A1B1F; line-height: 1.55;">${esc(f.detail)}</p>`,
+    )
+    .join("");
+  return {
+    subject: data.findings.length ? `Your week at ${data.businessName}: ${data.findings.length} ${data.findings.length === 1 ? "thing" : "things"} to act on` : `Your week at ${data.businessName}`,
+    html: renderShell({
+      brand,
+      previewText: data.findings[0]?.title ?? "How your week went",
+      documentType: "Weekly insights",
+      bodyHtml: `
+        <p style="margin: 0 0 12px; font-family: Arial, sans-serif; font-size: 15px; color: #2A1B1F; line-height: 1.6;">Hello ${esc(data.adminFirstName)},</p>
+        <p style="margin: 0 0 12px; font-family: Arial, sans-serif; font-size: 15px; color: #2A1B1F; line-height: 1.6;">
+          Last week ${esc(data.businessName)} took in <strong>${esc(data.revenue)}</strong>${esc(trend)}, and made <strong>${esc(data.profit)}</strong> after what you logged as spent.${data.goalLine ? ` ${esc(data.goalLine)}` : ""}
+        </p>
+        ${data.findings.length ? `<p style="margin: 18px 0 10px; font-family: Arial, sans-serif; font-size: 15px; font-weight: bold; color: #2A1B1F;">What to do this week</p>${items}` : `<p style="margin: 0 0 12px; font-family: Arial, sans-serif; font-size: 15px; color: #2A1B1F; line-height: 1.6;">Nothing needs your attention right now. Nice work.</p>`}
+        ${button("See all your insights", data.insightsUrl, brandColor(brand))}
+        <p class="muted" style="margin: 0; font-family: Arial, sans-serif; font-size: 12px; color: #7A6A6E;">You can turn this email off on the Insights page.</p>`,
+    }),
+  };
+};
