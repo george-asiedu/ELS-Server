@@ -1,11 +1,16 @@
+import { readSessionCookie, setSessionCookie } from "../auth/sessionCookie";
 import { Request, Response, NextFunction } from "express";
 import jwt from "jsonwebtoken";
 import { env } from "../config/env.config";
 import { ApiError } from "./apiError";
 import { HttpCode } from "../models/status_codes";
 import { AuthToken } from "../models/user";
-import { isActiveLoginSession } from "../auth/sessionService";
+import {
+  isActiveLoginSession,
+  renewLoginSession,
+} from "../auth/sessionService";
 import { reenterTenant } from "./tenant";
+import { createTenantClient } from "../tenant/tenantClient";
 
 interface AccessTokenPayload {
   sub: string;
@@ -16,17 +21,11 @@ interface AccessTokenPayload {
   jti?: string;
 }
 
-const extractToken = (req: Request): string | null => {
-  const header = req.headers.authorization;
-  if (header && header.startsWith("Bearer ")) {
-    return header.slice(7).trim();
-  }
-  return null;
-};
+const extractToken = readSessionCookie;
 
 export const authenticate = async (
   req: Request,
-  _res: Response,
+  res: Response,
   next: NextFunction,
 ) => {
   try {
@@ -73,14 +72,47 @@ export const authenticate = async (
       studioId: decoded.studioId ?? null,
     };
     req.authSessionId = decoded.jti;
+    const renewed = await renewLoginSession(
+      decoded as unknown as Parameters<typeof renewLoginSession>[0],
+    );
+    if (renewed) setSessionCookie(req, res, renewed);
 
     // The session lookup above awaited I/O, so continue in the request's
     // tenant context explicitly (see reenterTenant) — every authenticated
     // route gets this, rather than each route having to remember it.
-    return reenterTenant(req, _res, next);
+    return reenterTenant(req, res, next);
   } catch (error) {
     return next(error);
   }
+};
+
+const { raw: rawDb } = createTenantClient();
+
+// What an admin without two-step sign-in can still reach: setting it up,
+// signing out, their own details, and their notification devices.
+const TWO_FACTOR_EXEMPT = /^\/(auth\/(2fa|logout)|me$|push|inbox)/;
+
+/**
+ * Admins and the super admin must have two-step sign-in on before they can
+ * use their dashboard (REQUIRE_2FA_FOR_ADMINS, on by default). The client
+ * shows the setup screen when it gets TWO_FACTOR_SETUP_REQUIRED.
+ */
+const requireTwoFactor = (req: Request, res: Response, next: NextFunction) => {
+  if (!env.require2faForAdmins || TWO_FACTOR_EXEMPT.test(req.path)) return next();
+  rawDb.user
+    .findUnique({ where: { id: req.user!.id }, select: { totpEnabled: true } })
+    .then((u) =>
+      u?.totpEnabled
+        ? reenterTenant(req, res, next)
+        : next(
+            new ApiError(
+              "Turn on two-step sign-in to use the dashboard",
+              HttpCode.FORBIDDEN,
+              [{ code: "TWO_FACTOR_SETUP_REQUIRED" }],
+            ),
+          ),
+    )
+    .catch(next);
 };
 
 export const requireAdmin = (
@@ -96,7 +128,7 @@ export const requireAdmin = (
   if (req.user.role !== "ADMIN") {
     return next(new ApiError("Admin access required", HttpCode.FORBIDDEN));
   }
-  return next();
+  return requireTwoFactor(req, _res, next);
 };
 
 // Platform operator only — the super-admin dashboard.
@@ -115,7 +147,7 @@ export const requireSuperAdmin = (
       new ApiError("Super admin access required", HttpCode.FORBIDDEN),
     );
   }
-  return next();
+  return requireTwoFactor(req, _res, next);
 };
 
 // Booking is customer-only — admins and guests are rejected.

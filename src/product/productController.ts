@@ -14,6 +14,10 @@ const toBool = (v: unknown): boolean | undefined =>
 
 const parseBody = (body: Record<string, unknown>): UpdateProductInput => {
   const out: UpdateProductInput = {};
+  for (const key of ["images", "sizes", "colors", "attributes"] as const) {
+    if (Array.isArray(body[key]))
+      out[key] = (body[key] as unknown[]).map(String);
+  }
   if (body.name !== undefined) out.name = String(body.name);
   if (body.description !== undefined)
     out.description = body.description === "" ? null : String(body.description);
@@ -26,6 +30,9 @@ const parseBody = (body: Record<string, unknown>): UpdateProductInput => {
     out.promoPrice = p === undefined ? null : p;
   }
   if (body.category !== undefined) out.category = String(body.category);
+  if (body.audience !== undefined) out.audience = String(body.audience);
+  if (body.brand !== undefined)
+    out.brand = body.brand === null || body.brand === "" ? null : String(body.brand).trim().slice(0, 60);
   const stock = toNum(body.stock);
   if (stock !== undefined) out.stock = stock;
   const trackStock = toBool(body.trackStock);
@@ -82,5 +89,21 @@ export class ProductController {
     const { id } = req.params;
     if (!id) throw new ApiError("Product ID is required", 400);
     return res.status(200).json(await productService.remove(id));
+  };
+
+  public static listReviews = async (req: Request, res: Response) => {
+    return res
+      .status(200)
+      .json(await productService.listReviews(String(req.params.id)));
+  };
+
+  public static addReview = async (req: Request, res: Response) => {
+    const result = await productService.addReview(
+      req.user.id,
+      String(req.params.id),
+      Number(req.body?.rating),
+      req.body?.content,
+    );
+    return res.status(201).json(result);
   };
 }

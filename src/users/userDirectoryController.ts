@@ -37,6 +37,10 @@ export class UserDirectoryController {
     return res.status(200).json(await users.detail(idParam(req)));
   };
 
+  public static studioNotes = async (req: Request, res: Response) => {
+    return res.status(200).json(await users.saveNotes(idParam(req), req.body?.notes));
+  };
+
   // ---- Super admin: every studio, with edit and delete ----
   public static platformList = async (req: Request, res: Response) => {
     const studioId =

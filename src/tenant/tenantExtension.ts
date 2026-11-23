@@ -1,3 +1,4 @@
+import { bumpVersion } from "../cache/cache";
 import { PrismaClient } from "../generated/prisma-client/client";
 import { getTenantContext } from "./context";
 
@@ -9,6 +10,8 @@ const SCOPED_MODELS = new Set<string>([
   "User",
   "Profile",
   "Appointment",
+  "SalePromo",
+  "Bill",
   "Service",
   "ServiceAddOn",
   "Payment",
@@ -18,6 +21,12 @@ const SCOPED_MODELS = new Set<string>([
   "Category",
   "BusinessHours",
   "BlockedDate",
+  "Staff",
+  "WaitlistEntry",
+  "PackageOffer",
+  "Voucher",
+  "Expense",
+  "CustomerNote",
   "ContactInfo",
   "LoyaltyPoints",
   "LoyaltyTransaction",
@@ -32,9 +41,39 @@ const SCOPED_MODELS = new Set<string>([
   "ReferralOrderReward",
   "CommerceSettings",
   "PromoBanner",
+  "WishlistItem",
+  "Coupon",
   "PaymentAttempt",
   "LedgerEntry",
   "Refund",
+]);
+
+// What public pages cache (cache/cache.ts). Not products: they carry stock.
+const CACHED_MODELS = new Set<string>([
+  "Studio",
+  "StudioBranding",
+  "StudioContent",
+  "StudioSettings",
+  "PlatformConfig",
+  "PlatformReview",
+  "Service",
+  "ServiceAddOn",
+  "Category",
+  "ProductCategory",
+  "Gallery",
+  "BusinessHours",
+  "ContactInfo",
+  "PromoBanner",
+  "Review",
+]);
+const WRITES = new Set<string>([
+  "create",
+  "createMany",
+  "update",
+  "updateMany",
+  "upsert",
+  "delete",
+  "deleteMany",
 ]);
 
 const lcFirst = (s: string) => s.charAt(0).toLowerCase() + s.slice(1);
@@ -86,83 +125,99 @@ export const tenantExtension = (raw: PrismaClient) => ({
   query: {
     $allModels: {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      async $allOperations({ model, operation, args, query }: any) {
-        if (!SCOPED_MODELS.has(model)) return query(args);
-
-        const ctx = getTenantContext();
-        if (ctx?.superAdmin) return query(args);
-
-        const studioId = ctx?.studioId;
-        if (!studioId) {
-          throw new Error(
-            `Tenant scope missing for ${model}.${operation}: this query must run within a studio context.`,
+      async $allOperations(params: any) {
+        const result = await scoped(raw, params);
+        if (CACHED_MODELS.has(params.model) && WRITES.has(params.operation)) {
+          const ctx = getTenantContext();
+          // A platform-side write can touch any studio.
+          void bumpVersion(
+            ctx?.studioId && !ctx.superAdmin ? `studio:${ctx.studioId}` : "all",
           );
         }
-
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const delegate = (raw as any)[lcFirst(model)];
-        const a = args ?? {};
-
-        switch (operation) {
-          case "findUnique":
-          case "findUniqueOrThrow": {
-            const res = await delegate.findFirst({
-              ...a,
-              where: toFindFirstWhere(a.where, studioId),
-            });
-            if (!res && operation === "findUniqueOrThrow") {
-              throw new Error(`No ${model} found`);
-            }
-            return res;
-          }
-
-          case "findFirst":
-          case "findFirstOrThrow":
-          case "findMany":
-          case "count":
-          case "aggregate":
-          case "groupBy":
-          case "updateMany":
-          case "deleteMany":
-            return query({ ...a, where: { ...(a.where ?? {}), studioId } });
-
-          case "create":
-            return query({ ...a, data: { ...(a.data ?? {}), studioId } });
-
-          case "createMany": {
-            const data = Array.isArray(a.data)
-              ? // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                a.data.map((d: any) => ({ ...d, studioId }))
-              : { ...a.data, studioId };
-            return query({ ...a, data });
-          }
-
-          case "update":
-          case "delete": {
-            // Can't add studioId to a unique `where`; verify ownership first.
-            const owned = await delegate.findFirst({
-              where: toFindFirstWhere(a.where, studioId),
-              select: { id: true },
-            });
-            if (!owned) throw new Error(`No ${model} found in this studio`);
-            return query(a);
-          }
-
-          case "upsert": {
-            const owned = await delegate.findFirst({
-              where: toFindFirstWhere(a.where, studioId),
-              select: { id: true },
-            });
-            if (owned) {
-              return delegate.update({ where: a.where, data: a.update });
-            }
-            return delegate.create({ data: { ...(a.create ?? {}), studioId } });
-          }
-
-          default:
-            return query(a);
-        }
+        return result;
       },
     },
   },
 });
+
+const scoped = async (
+  raw: PrismaClient,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  { model, operation, args, query }: any,
+) => {
+  if (!SCOPED_MODELS.has(model)) return query(args);
+
+  const ctx = getTenantContext();
+  if (ctx?.superAdmin) return query(args);
+
+  const studioId = ctx?.studioId;
+  if (!studioId) {
+    throw new Error(
+      `Tenant scope missing for ${model}.${operation}: this query must run within a studio context.`,
+    );
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const delegate = (raw as any)[lcFirst(model)];
+  const a = args ?? {};
+
+  switch (operation) {
+    case "findUnique":
+    case "findUniqueOrThrow": {
+      const res = await delegate.findFirst({
+        ...a,
+        where: toFindFirstWhere(a.where, studioId),
+      });
+      if (!res && operation === "findUniqueOrThrow") {
+        throw new Error(`No ${model} found`);
+      }
+      return res;
+    }
+
+    case "findFirst":
+    case "findFirstOrThrow":
+    case "findMany":
+    case "count":
+    case "aggregate":
+    case "groupBy":
+    case "updateMany":
+    case "deleteMany":
+      return query({ ...a, where: { ...(a.where ?? {}), studioId } });
+
+    case "create":
+      return query({ ...a, data: { ...(a.data ?? {}), studioId } });
+
+    case "createMany": {
+      const data = Array.isArray(a.data)
+        ? // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          a.data.map((d: any) => ({ ...d, studioId }))
+        : { ...a.data, studioId };
+      return query({ ...a, data });
+    }
+
+    case "update":
+    case "delete": {
+      // Can't add studioId to a unique `where`; verify ownership first.
+      const owned = await delegate.findFirst({
+        where: toFindFirstWhere(a.where, studioId),
+        select: { id: true },
+      });
+      if (!owned) throw new Error(`No ${model} found in this studio`);
+      return query(a);
+    }
+
+    case "upsert": {
+      const owned = await delegate.findFirst({
+        where: toFindFirstWhere(a.where, studioId),
+        select: { id: true },
+      });
+      if (owned) {
+        return delegate.update({ where: a.where, data: a.update });
+      }
+      return delegate.create({ data: { ...(a.create ?? {}), studioId } });
+    }
+
+    default:
+      return query(a);
+  }
+};

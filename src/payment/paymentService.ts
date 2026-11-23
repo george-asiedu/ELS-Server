@@ -1,3 +1,5 @@
+import { timingSafeEqual } from "crypto";
+import { isVoucherReference, VoucherService } from "../vouchers/voucherService";
 import crypto from "crypto";
 import { Connection } from "../db/dbConnection";
 import { ApiError } from "../middleware/apiError";
@@ -33,6 +35,7 @@ import {
   receiptNumber,
 } from "../notifications/format";
 import { buildReceiptPdf } from "../notifications/receiptPdf";
+import { BillService } from "../bills/billService";
 import { receiptMethodLabel } from "../notifications/design/shell";
 
 type PaymentType = "FULL" | "PARTIAL";
@@ -49,9 +52,13 @@ const appointmentInclude = {
 } as const;
 
 // Structural type covering just what the receipt needs.
+/** Missed bookings after which a customer pays in full, not a deposit. */
+export const NO_SHOWS_FOR_FULL_PAYMENT = 2;
+
 interface PaymentWithAppointment {
   amount: number;
   totalAmount: number;
+  processingFee?: number;
   type: string;
   reference: string | null;
   studioId: string | null;
@@ -92,18 +99,31 @@ export class PaymentService extends Connection {
   // Validate a booking payment and (re)create its PENDING Payment row with a
   // fresh reference. Shared by the hosted/inline initialize and the mobile-money
   // charge so both channels behave identically.
+  /** How many of this customer's bookings at this studio were missed. */
+  public async noShowCount(userId: string) {
+    return this.appointment.count({ where: { userId, status: "NO_SHOW" } });
+  }
+
   private async prepareBookingCharge(
     appointmentId: string,
     type: PaymentType,
-    userId: string,
+    owner: string | { guestToken: string },
   ) {
     const appointment = await this.appointment.findUnique({
       where: { id: appointmentId },
       include: { service: { select: { name: true } } },
     });
     if (!appointment) throw new ApiError("Appointment not found", 404);
-    if (appointment.userId !== userId) {
-      throw new ApiError("You can only pay for your own booking", 403);
+    // A signed-in customer pays for their own booking; a guest proves it's
+    // theirs with the token they were given when they booked.
+    const userId = typeof owner === "string" ? owner : null;
+    if (userId) {
+      if (appointment.userId !== userId) throw new ApiError("You can only pay for your own booking", 403);
+    } else {
+      const given = Buffer.from(typeof owner === "string" ? "" : owner.guestToken);
+      const real = Buffer.from(appointment.guestToken ?? "");
+      if (appointment.userId || !real.length || given.length !== real.length || !timingSafeEqual(given, real))
+        throw new ApiError("You can only pay for your own booking", 403);
     }
 
     const settings = await this.settings();
@@ -115,6 +135,10 @@ export class PaymentService extends Connection {
     }
     if (type === "PARTIAL" && !settings.allowPartial) {
       throw new ApiError("Partial (deposit) payment is not available", 400);
+    }
+    // Customers who've missed bookings pay in full rather than a deposit.
+    if (type === "PARTIAL" && userId && (await this.noShowCount(userId)) >= NO_SHOWS_FOR_FULL_PAYMENT) {
+      throw new ApiError("Because of missed appointments, please pay the full amount for this booking.", 400);
     }
 
     const amountDue =
@@ -128,10 +152,11 @@ export class PaymentService extends Connection {
         : amountDue;
     if (charge <= 0) throw new ApiError("Invalid payment amount", 400);
 
-    const email = appointment.email || (await this.userEmail(userId));
+    const email = appointment.email || (userId ? await this.userEmail(userId) : null);
     if (!email) throw new ApiError("An email is required to pay", 400);
 
     const reference = await this.makeReference("APT");
+    const split = await this.paystackChargeFor(charge);
 
     // One payment per appointment — reuse the row and refresh the reference so a
     // previously abandoned attempt gets a clean Paystack transaction.
@@ -139,6 +164,7 @@ export class PaymentService extends Connection {
       where: { appointmentId },
       update: {
         amount: charge,
+        processingFee: split.processingFee,
         totalAmount: amountDue,
         type,
         status: "PENDING",
@@ -148,6 +174,7 @@ export class PaymentService extends Connection {
       create: {
         appointmentId,
         amount: charge,
+        processingFee: split.processingFee,
         totalAmount: amountDue,
         type,
         status: "PENDING",
@@ -167,6 +194,7 @@ export class PaymentService extends Connection {
     await this.ledger.openAttempt({
       reference,
       expectedAmount: charge,
+      processingFee: split.processingFee,
       currency: "GHS",
       ...(payment ? { paymentId: payment.id } : {}),
       appointmentId,
@@ -174,7 +202,7 @@ export class PaymentService extends Connection {
       customerName: appointment.fullName,
     });
 
-    return { reference, charge, email, appointmentId, type };
+    return { reference, charge, email, appointmentId, type, split };
   }
 
   // Start a Paystack transaction for a customer's own booking. Returns the data
@@ -184,23 +212,22 @@ export class PaymentService extends Connection {
   public async initialize(
     appointmentId: string,
     type: PaymentType,
-    userId: string,
+    userId: string | { guestToken: string },
     origin?: string,
   ) {
-    const { reference, charge, email } = await this.prepareBookingCharge(
+    const { reference, email, split } = await this.prepareBookingCharge(
       appointmentId,
       type,
       userId,
     );
-    const subaccount = await this.currentStudioSubaccount();
+    const { subaccount } = split;
 
     const init = await paystack.initialize({
       email,
-      amountPesewas: Math.round(charge * 100),
       reference,
       callbackUrl: `${safeClientOrigin(origin)}/payment/callback`,
       metadata: { appointmentId, type },
-      subaccount,
+      ...split,
     });
 
     return {
@@ -209,7 +236,9 @@ export class PaymentService extends Connection {
         authorizationUrl: init.authorization_url,
         accessCode: init.access_code,
         reference,
-        amount: charge,
+        // What the customer is charged: the price plus any processing fee.
+        amount: split.amountPesewas / 100,
+        processingFee: split.processingFee,
         email,
         subaccount,
         publicKey: env.paystack.publicKey,
@@ -223,25 +252,23 @@ export class PaymentService extends Connection {
   public async chargeMomoBooking(
     appointmentId: string,
     type: PaymentType,
-    userId: string,
+    userId: string | { guestToken: string },
     phone: string,
     provider: string,
   ) {
-    const { reference, charge, email } = await this.prepareBookingCharge(
+    const { reference, email, split } = await this.prepareBookingCharge(
       appointmentId,
       type,
       userId,
     );
-    const subaccount = await this.currentStudioSubaccount();
 
     const res = await paystack.chargeMobileMoney({
       email,
-      amountPesewas: Math.round(charge * 100),
       reference,
       phone,
       provider,
-      subaccount,
       metadata: { appointmentId, type },
+      ...split,
     });
 
     return {
@@ -250,7 +277,8 @@ export class PaymentService extends Connection {
         reference,
         status: res.status,
         displayText: res.display_text ?? res.message ?? null,
-        amount: charge,
+        amount: split.amountPesewas / 100,
+        processingFee: split.processingFee,
       },
     };
   }
@@ -298,6 +326,7 @@ export class PaymentService extends Connection {
       paystackStatus = data.status;
       await this.processVerification(reference, data);
       await this.orders.finalizeByReference(reference, data);
+      if (reference.startsWith("BILL-")) await BillService.finalizeByReference(reference);
     } catch {
       // Transaction not found yet / still initializing — treat as pending.
     }
@@ -501,7 +530,8 @@ export class PaymentService extends Connection {
       // Never trust `status: "success"` alone — confirm Paystack charged the
       // amount and currency we asked for before crediting anything.
       const check = this.ledger.assertAmountMatches(
-        expectedAmount,
+        // The customer was charged the price plus any processing fee.
+        expectedAmount + (attempt?.processingFee ?? 0),
         expectedCurrency,
         data,
       );
@@ -759,11 +789,15 @@ export class PaymentService extends Connection {
     try {
       const balance = Math.max(0, payment.totalAmount - payment.amount);
       const isPartial = payment.type === "PARTIAL";
+      // The fee the customer paid on top, when the studio has them pay it.
+      const fee = payment.processingFee ?? 0;
+      const paidNow = Math.round((payment.amount + fee) * 100) / 100;
       const lines: MoneyLine[] = [
         { label: "Total", value: ghs(payment.totalAmount) },
+        ...(fee > 0 ? [{ label: "Payment processing fee", value: ghs(fee), muted: true }] : []),
         {
           label: isPartial ? "Deposit paid" : "Amount paid",
-          value: ghs(payment.amount),
+          value: ghs(paidNow),
         },
         ...(balance > 0
           ? [
@@ -794,7 +828,7 @@ export class PaymentService extends Connection {
           transactionId: payment.transactionId ?? null,
           paidTo,
           paidToEmail: paidToEmail ?? null,
-          amountPaid: ghs(payment.amount),
+          amountPaid: ghs(paidNow),
           balanceDue: balance > 0 ? ghs(balance) : null,
         },
         ...(brand.kind === "studio" && brand.studio.bookingUrl
@@ -819,13 +853,14 @@ export class PaymentService extends Connection {
             value: `${receiptDayOnly(appt.appointmentDate)} · ${appt.appointmentTime}`,
           },
           { label: "Total", value: ghs(payment.totalAmount) },
+          ...(fee > 0 ? [{ label: "Payment processing fee", value: ghs(fee) }] : []),
           {
             label: isPartial ? "Deposit paid" : "Amount paid",
-            value: ghs(payment.amount),
+            value: ghs(paidNow),
             strong: true,
           },
         ],
-        amountPaid: ghs(payment.amount),
+        amountPaid: ghs(paidNow),
         balanceDue: balance > 0 ? ghs(balance) : null,
         reference: payment.reference ?? payment.id,
         transactionId: payment.transactionId ?? null,
@@ -923,6 +958,12 @@ export class PaymentService extends Connection {
         if (isSignupReference(reference)) {
           // A studio-subscription first payment → provision the studio.
           await this.onboarding.finalize(reference);
+        } else if (isVoucherReference(reference)) {
+          // A gift card or package bought online.
+          await new VoucherService().finalizeByReference(reference);
+        } else if (reference.startsWith("BILL-")) {
+          // A walk-in's bill paid through its link.
+          await BillService.finalizeByReference(reference).catch((e) => console.warn("Bill webhook:", (e as Error).message));
         } else if (isStudioBillingReference(reference)) {
           // A studio's renewal or plan change. Applying it here means a studio
           // that paid and closed the tab is still renewed.

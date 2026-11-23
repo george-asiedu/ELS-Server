@@ -9,8 +9,10 @@ import { xss } from "express-xss-sanitizer";
 import { env } from "./config/env.config";
 import { globalErrorHandler } from "./middleware/globalErrorHandler";
 import { resolveTenant } from "./middleware/tenant";
+import { resolveStudioByDomain } from "./tenant/studioResolver";
 import routes from "./routes/index";
 import { bootstrapQueues, shutdownQueues } from "./queue";
+import { ZURI_LOGO_PNG } from "./notifications/assets/zuriLogo";
 import { startScheduler, stopScheduler } from "./scheduler/scheduler";
 import { createTenantClient } from "./tenant/tenantClient";
 import { createHash } from "crypto";
@@ -54,6 +56,16 @@ const extraOrigins = (process.env.ALLOWED_ORIGINS ?? "")
   .map((o) => o.trim().toLowerCase().replace(/\/$/, ""))
   .filter(Boolean);
 
+const isVerifiedDomainOrigin = async (origin: string): Promise<boolean> => {
+  try {
+    const { protocol, hostname } = new URL(origin);
+    if (protocol !== "https:") return false;
+    return Boolean(await resolveStudioByDomain(hostname));
+  } catch {
+    return false;
+  }
+};
+
 const isAllowedOrigin = (origin: string): boolean => {
   let host: string;
   let protocol: string;
@@ -83,7 +95,10 @@ const isAllowedOrigin = (origin: string): boolean => {
   }
   if (
     env.nodeEnv !== "production" &&
-    (host === "localhost" || host.startsWith("127.") || host.endsWith(".local"))
+    (host === "localhost" ||
+      host.endsWith(".localhost") ||
+      host.startsWith("127.") ||
+      host.endsWith(".local"))
   ) {
     return true;
   }
@@ -116,17 +131,39 @@ app.use(
       "X-Studio-Slug",
       "X-Device-Id",
       "Idempotency-Key",
+      "X-Zuri-Client",
+      "X-Guest-Key",
+      "X-Captcha-Token",
     ],
+    credentials: true,
     maxAge: 600,
     origin: (origin, cb) => {
       // No Origin header = same-origin, curl, or server-to-server (e.g. the
       // Paystack webhook) — allow; browsers always send Origin on cross-site.
       if (!origin) return cb(null, true);
       if (isAllowedOrigin(origin)) return cb(null, true);
-      return cb(new ApiError("Origin is not allowed", HttpCode.FORBIDDEN));
+      // A studio's own verified domain (its /api is forwarded here).
+      void isVerifiedDomainOrigin(origin).then((ok) =>
+        ok
+          ? cb(null, true)
+          : cb(new ApiError("Origin is not allowed", HttpCode.FORBIDDEN)),
+      );
     },
   }),
 );
+// CSRF: a cookie is sent automatically, but another site can't add this header
+// (CORS refuses it), so a state-changing request carrying it came from our app.
+app.use("/api", (req: Request, _res: Response, next: NextFunction) => {
+  const unsafe = !["GET", "HEAD", "OPTIONS"].includes(req.method);
+  if (
+    unsafe &&
+    /(?:^|;\s*)zuri_/.test(req.headers.cookie ?? "") &&
+    !req.headers["x-zuri-client"]
+  ) {
+    return next(new ApiError("Request not allowed", HttpCode.FORBIDDEN));
+  }
+  return next();
+});
 app.use(hpp());
 // Attach logging before rate limits and body parsing so rejected or malformed
 // API requests are still recorded without inspecting their payloads.
@@ -209,7 +246,13 @@ const recoveryLimiter = rateLimit({
 app.use("/api", limiter);
 app.use("/api/auth/login", loginIpLimiter);
 app.use("/api/platform/auth/login", loginIpLimiter);
+// The Zuri mark for emails. Public, cacheable, and built into the server.
+app.get("/api/brand/zuri-logo.png", (_req, res) => {
+  res.set({ "Content-Type": "image/png", "Cache-Control": "public, max-age=86400", "Cross-Origin-Resource-Policy": "cross-origin" });
+  res.send(ZURI_LOGO_PNG);
+});
 app.use("/api/payments", sensitiveActionLimiter);
+app.use("/api/bills", sensitiveActionLimiter);
 app.use("/api/orders", sensitiveActionLimiter);
 app.use("/api/refunds", sensitiveActionLimiter);
 app.use("/api/onboarding", sensitiveActionLimiter);
@@ -217,6 +260,8 @@ app.use("/api/auth", sensitiveActionLimiter);
 app.use("/api/studio/billing", sensitiveActionLimiter);
 app.use("/api/platform/auth", sensitiveActionLimiter);
 app.use("/api/auth/signup", accountCreationLimiter);
+app.use("/api/onboarding/email-code", recoveryLimiter);
+app.use("/api/auth/email-code", recoveryLimiter);
 app.use("/api/auth/forgot-password", recoveryLimiter);
 app.use("/api/auth/reset-password", recoveryLimiter);
 app.use("/api/platform/auth/forgot-password", recoveryLimiter);
@@ -243,7 +288,7 @@ app.use(xss());
 app.use(compression());
 
 app.get("/", (_req: Request, res: Response) => {
-  res.send("Welcome to the Zuri Studios API!");
+  res.send("Welcome to the Zuri API");
 });
 
 // Health check endpoint
@@ -280,8 +325,9 @@ const port = env.port;
 if (!port)
   throw new Error("Port number is not defined in environment variables");
 
-const server = app.listen(port, "0.0.0.0", () => {
-  console.log(`Server is running on port ${port}`);
+// HOST=127.0.0.1 on the VPS (behind Nginx); everywhere else all interfaces.
+const server = app.listen(port, process.env.HOST || "0.0.0.0", () => {
+  console.log(`Server is running on port ${port} (role: ${env.appRole})`);
 });
 
 // Background email queue (Redis, optional) and the recurring-job scheduler
@@ -289,7 +335,7 @@ const server = app.listen(port, "0.0.0.0", () => {
 bootstrapQueues().catch((error) => {
   console.error("Failed to start queues:", error);
 });
-if (env.schedulerEnabled) {
+if (env.schedulerEnabled && env.appRole !== "api") {
   startScheduler().catch((error) => {
     console.error("Failed to start scheduler:", error);
   });

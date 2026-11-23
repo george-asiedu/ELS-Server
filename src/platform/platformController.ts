@@ -11,6 +11,11 @@ import { ApiError } from "../middleware/apiError";
 import { HttpCode } from "../models/status_codes";
 import { revokeLoginSession } from "../auth/sessionService";
 import { getLoginDeviceMetadata } from "../auth/loginDevice";
+import {
+  clearSessionCookie,
+  setSessionCookie,
+  withoutToken,
+} from "../auth/sessionCookie";
 
 const platformService = new PlatformService();
 const platformAuthService = new PlatformAuthService();
@@ -30,6 +35,7 @@ export class PlatformController {
     if (req.user && req.authSessionId) {
       await revokeLoginSession(req.authSessionId, req.user.id);
     }
+    clearSessionCookie(req, res);
     return res.status(200).json({ message: "Logged out successfully" });
   };
 
@@ -46,8 +52,9 @@ export class PlatformController {
       email,
       password,
       getLoginDeviceMetadata(req),
+      req.body?.totp,
     );
-    return res.status(200).json(result);
+    return res.status(200).json(withoutToken(req, res, result));
   };
 
   public static forgotPassword = async (req: Request, res: Response) => {
@@ -73,6 +80,15 @@ export class PlatformController {
   };
 
   // ---- Studios ----------------------------------------------------------
+
+  public static directory = async (req: Request, res: Response) => {
+    return res.status(200).json(await platformService.getDirectory(req.query.q, req.query.kind));
+  };
+
+  public static publicStats = async (_req: Request, res: Response) => {
+    const data = await platformService.getPublicStats();
+    return res.status(200).json({ message: "Platform stats", data });
+  };
 
   public static earnings = async (req: Request, res: Response) => {
     const str = (v: unknown) => (typeof v === "string" && v ? v : undefined);
@@ -282,6 +298,9 @@ export class PlatformController {
       targetId: id,
       studioId: id,
     });
-    return res.status(200).json(result);
+    // The studio's own session cookie, so the token never reaches page scripts.
+    const { token, ...rest } = result;
+    setSessionCookie(req, res, token.accessToken, result.studio.slug);
+    return res.status(200).json(rest);
   };
 }

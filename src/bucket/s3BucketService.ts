@@ -6,6 +6,7 @@ import {
   CompleteMultipartUploadCommand,
   AbortMultipartUploadCommand,
   ListPartsCommand,
+  PutObjectCommand,
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { env } from "../config/env.config";
@@ -13,6 +14,7 @@ import { ApiError } from "../middleware/apiError";
 import path from "path";
 import { v4 as uuidv4 } from "uuid";
 import { getTenantContext } from "../tenant/context";
+import { assertCanStore, forgetStorage } from "../storage/storageService";
 
 export interface SafeFile {
   originalname: string;
@@ -121,7 +123,7 @@ export class S3BucketService {
         ? 2 * 1024 * 1024 * 1024
         : input.category === "studio"
           ? 4 * 1024 * 1024
-          : input.category === "profiles" || input.category === "appointments"
+          : input.category === "profiles" || input.category === "appointments" || input.category === "requests"
             ? 10 * 1024 * 1024
             : 25 * 1024 * 1024;
     if (
@@ -134,6 +136,7 @@ export class S3BucketService {
         400,
       );
     }
+    await assertCanStore(tenant.studioId, input.size);
     const key = `studios/${tenant.studioId}/${input.category}/${uuidv4()}${ext}`;
     const created = await this.s3.send(
       new CreateMultipartUploadCommand({
@@ -189,7 +192,7 @@ export class S3BucketService {
         ? 2 * 1024 * 1024 * 1024
         : category === "studio"
           ? 4 * 1024 * 1024
-          : category === "profiles" || category === "appointments"
+          : category === "profiles" || category === "appointments" || category === "requests"
             ? 10 * 1024 * 1024
             : 25 * 1024 * 1024;
     const uploadedParts = await this.s3.send(
@@ -245,6 +248,30 @@ export class S3BucketService {
         UploadId: uploadId,
       }),
     );
+  }
+
+  /** Store an image the server made in the studio's media. */
+  public async putStudioImage(
+    body: Buffer,
+    category: string,
+    contentType = "image/webp",
+  ) {
+    const studioId = getTenantContext()?.studioId;
+    if (!studioId)
+      throw new ApiError("Studio context is required for media uploads", 400);
+    await assertCanStore(studioId, body.length);
+    const key = `studios/${studioId}/${category}/${uuidv4()}.webp`;
+    forgetStorage(studioId);
+    await this.s3.send(
+      new PutObjectCommand({
+        Bucket: env.aws.s3BucketName,
+        Key: key,
+        Body: body,
+        ContentType: contentType,
+        CacheControl: "public, max-age=31536000, immutable",
+      }),
+    );
+    return this.publicUrl(key);
   }
 
   public assertOwnedMediaUrl(value: string, category: string) {

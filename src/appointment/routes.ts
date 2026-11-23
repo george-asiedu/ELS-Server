@@ -1,4 +1,6 @@
 import { Router } from "express";
+import { guestLimiter, requireGuestKey } from "../middleware/guestKey";
+import { requireCaptcha } from "../middleware/captcha";
 import { AppointmentController } from "./appointmentController";
 import {
   authenticate,
@@ -14,11 +16,21 @@ router.get("/availability", AppointmentController.availability);
 // Create — customer accounts only (no guests, no admins); optional design image.
 router.post("/", authenticate, requireCustomer, AppointmentController.create);
 
+// Guest — book without an account. Returns a private token for paying.
+router.post("/guest", guestLimiter, requireGuestKey, requireCaptcha, AppointmentController.createGuest);
+
 // Logged-in user's own appointments.
 router.get("/me", authenticate, AppointmentController.listMine);
+// Whether this customer must pay in full (after missed bookings).
+router.get("/me/standing", authenticate, async (req, res) => {
+  const { PaymentService, NO_SHOWS_FOR_FULL_PAYMENT } = await import("../payment/paymentService");
+  const noShows = await new PaymentService().noShowCount(req.user!.id);
+  return res.status(200).json({ data: { noShows, mustPayInFull: noShows >= NO_SHOWS_FOR_FULL_PAYMENT } });
+});
 
 // Admin.
 router.get("/", authenticate, requireAdmin, AppointmentController.listAll);
+router.get("/calendar", authenticate, requireAdmin, AppointmentController.calendar);
 router.patch(
   "/:id/status",
   authenticate,

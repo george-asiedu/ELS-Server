@@ -15,6 +15,7 @@ const reviewInclude = {
     },
   },
   service: { select: { name: true } },
+  product: { select: { name: true } },
 } as const;
 
 export class ReviewService extends Connection {
@@ -54,7 +55,8 @@ export class ReviewService extends Connection {
 
   public async listApproved(limit = 6) {
     const reviews = await this.review.findMany({
-      where: { approved: true },
+      // Product reviews belong on the product page, not the studio homepage.
+      where: { approved: true, productId: null },
       orderBy: { createdAt: "desc" },
       take: limit,
       include: reviewInclude,

@@ -85,6 +85,24 @@ export class Connection {
   get blockedDate() {
     return this.db.blockedDate;
   }
+  get staff() {
+    return this.db.staff;
+  }
+  get waitlistEntry() {
+    return this.db.waitlistEntry;
+  }
+  get packageOffer() {
+    return this.db.packageOffer;
+  }
+  get voucher() {
+    return this.db.voucher;
+  }
+  get expense() {
+    return this.db.expense;
+  }
+  get customerNote() {
+    return this.db.customerNote;
+  }
   get contactInfo() {
     return this.db.contactInfo;
   }
@@ -175,6 +193,51 @@ export class Connection {
     return studio?.paystackSubaccountCode ?? null;
   }
 
+  /**
+   * How to charge a customer `base` GHS through the current studio's
+   * subaccount. The platform's cut is fixed in pesewas (its commission on the
+   * price) and Paystack's fee always comes out of the studio's share
+   * (bearer: subaccount), so the platform never pays it. When the studio has
+   * customers pay the fee, it's added on top: the total is grossed up so that
+   * after Paystack's percentage the studio still receives the full price.
+   */
+  protected async paystackChargeFor(base: number) {
+    const basePesewas = Math.round(base * 100);
+    const studioId = getTenantContext()?.studioId;
+    const [studio, settings] = studioId
+      ? await Promise.all([
+          this.studio.findUnique({
+            where: { id: studioId },
+            select: { paystackSubaccountCode: true, platformFeePercent: true },
+          }),
+          this.studioSettings.findUnique({
+            where: { studioId },
+            select: { paystackFeePayer: true },
+          }),
+        ])
+      : [null, null];
+    const subaccount = studio?.paystackSubaccountCode ?? null;
+    const customerPays = (settings?.paystackFeePayer ?? "CUSTOMER") === "CUSTOMER";
+    const rate = env.paystack.feePercent / 100;
+    const totalPesewas = customerPays
+      ? Math.ceil(basePesewas / (1 - rate))
+      : basePesewas;
+    return {
+      subaccount,
+      amountPesewas: totalPesewas,
+      /** GHS the customer pays on top of the price. */
+      processingFee: (totalPesewas - basePesewas) / 100,
+      ...(subaccount
+        ? {
+            bearer: "subaccount" as const,
+            transactionChargePesewas: Math.round(
+              (basePesewas * (studio?.platformFeePercent ?? 0)) / 100,
+            ),
+          }
+        : {}),
+    };
+  }
+
   // Paystack reference: `<PREFIX>-<STUDIO-SLUG>-<uuid>` so a reference in a
   // log/error/dashboard immediately tells you which studio it belongs to.
   protected async makeReference(prefix: string): Promise<string> {
@@ -194,12 +257,12 @@ export class Connection {
   // Falls back to the platform name when there's no studio in context.
   protected async currentStudioName(): Promise<string> {
     const studioId = getTenantContext()?.studioId;
-    if (!studioId) return "Zuri Studios";
+    if (!studioId) return "Zuri";
     const studio = await this.studio.findUnique({
       where: { id: studioId },
       select: { name: true },
     });
-    return studio?.name ?? "Zuri Studios";
+    return studio?.name ?? "Zuri";
   }
 
   // Full studio branding (name, logo, colour, storefront/booking URLs, contact
@@ -338,6 +401,18 @@ export class Connection {
   get studioContent() {
     return this.db.studioContent;
   }
+  get emailVerification() {
+    return this.db.emailVerification;
+  }
+  get wishlistItem() {
+    return this.db.wishlistItem;
+  }
+  get coupon() {
+    return this.db.coupon;
+  }
+  get generatedImage() {
+    return this.db.generatedImage;
+  }
   get studioSettings() {
     return this.db.studioSettings;
   }
@@ -358,6 +433,15 @@ export class Connection {
   }
   get platformReview() {
     return this.db.platformReview;
+  }
+  get bill() {
+    return this.db.bill;
+  }
+  get salePromo() {
+    return this.db.salePromo;
+  }
+  get studioExtraCharge() {
+    return this.db.studioExtraCharge;
   }
   get studioBillingCharge() {
     return this.db.studioBillingCharge;

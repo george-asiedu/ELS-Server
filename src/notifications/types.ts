@@ -27,7 +27,7 @@ export interface MoneyLine {
 export interface StudioBrandingInfo {
   name: string;
   logoUrl?: string | null;
-  primaryColor?: string | null; // hex, e.g. "#C23B65"
+  primaryColor?: string | null; // hex, e.g. "#FBC500"
   websiteUrl?: string | null;
   bookingUrl?: string | null;
   email?: string | null;
@@ -38,7 +38,7 @@ export interface StudioBrandingInfo {
 // The platform's own identity, used for account/billing/security mail that
 // isn't tied to a single studio's storefront.
 export interface ZuriBrandingInfo {
-  name: "Zuri Studios";
+  name: "Zuri" | "Zuri Studios" | "Zuri Stores";
   websiteUrl: string;
   supportEmail: string;
 }

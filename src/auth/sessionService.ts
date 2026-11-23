@@ -7,6 +7,7 @@ import {
 import { loginToken } from "../utils/helper";
 import { Payload } from "../models/user";
 import { createHash } from "crypto";
+import { bumpVersion, cached } from "../cache/cache";
 import { LoginDeviceMetadata } from "./loginDevice";
 
 const MAX_ACTIVE_SESSIONS = 3;
@@ -117,6 +118,8 @@ export const createLoginSession = async (
   }
   if (isNewDevice === undefined)
     throw new Error("Could not create login session");
+  // A login can evict an older session on another device.
+  await bumpVersion(`user-sessions:${user.id}`);
 
   return {
     token: {
@@ -134,16 +137,69 @@ export const isActiveLoginSession = async (
   sessionId: string,
   userId: string,
 ) => {
-  const session = await raw.authSession.findUnique({
-    where: { id: sessionId },
-  });
-  return Boolean(
-    session && session.userId === userId && session.expiresAt > new Date(),
+  // Checked on every signed-in request. Sign-outs bump the user's version, so
+  // a revoked session stops working right away, not after the TTL.
+  const expiresAt = await cached(
+    `session:${sessionId}`,
+    60,
+    [`user-sessions:${userId}`],
+    async () => {
+      const session = await raw.authSession.findUnique({
+        where: { id: sessionId },
+      });
+      return session?.userId === userId ? session.expiresAt.getTime() : 0;
+    },
   );
+  return expiresAt > Date.now();
+};
+
+const SESSION_LIFETIME_MS = 3 * 24 * 60 * 60 * 1000;
+
+/**
+ * Keep an active user signed in: once a token is past half its life, issue a
+ * fresh one for the same session. A session never outlives 3 days from sign-in,
+ * then the user signs in again. Returns null when no renewal is due.
+ */
+export const renewLoginSession = async (decoded: {
+  sub: string;
+  email: string;
+  role: Payload["role"];
+  studioId?: string | null;
+  jti: string;
+  iat: number;
+  exp: number;
+}) => {
+  const nowSeconds = Date.now() / 1000;
+  if (nowSeconds < decoded.iat + (decoded.exp - decoded.iat) / 2) return null;
+  const session = await raw.authSession.findUnique({
+    where: { id: decoded.jti },
+  });
+  if (!session) return null;
+  const cap = session.createdAt.getTime() + SESSION_LIFETIME_MS;
+  const maxSeconds = Math.floor((cap - Date.now()) / 1000);
+  if (maxSeconds <= 60) return null;
+  const { accessToken } = loginToken(
+    {
+      id: decoded.sub,
+      email: decoded.email,
+      role: decoded.role,
+      studioId: decoded.studioId ?? null,
+    },
+    decoded.jti,
+    Math.min(decoded.exp - decoded.iat, maxSeconds),
+  );
+  const fresh = jwt.decode(accessToken) as { exp: number };
+  await raw.authSession.update({
+    where: { id: decoded.jti },
+    data: { expiresAt: new Date(fresh.exp * 1000) },
+  });
+  await bumpVersion(`user-sessions:${decoded.sub}`);
+  return accessToken;
 };
 
 export const revokeLoginSessions = async (userId: string) => {
   await raw.authSession.deleteMany({ where: { userId } });
+  await bumpVersion(`user-sessions:${userId}`);
 };
 
 export const forgetLoginDevices = async (userId: string) => {
@@ -152,6 +208,7 @@ export const forgetLoginDevices = async (userId: string) => {
 
 export const revokeLoginSession = async (sessionId: string, userId: string) => {
   await raw.authSession.deleteMany({ where: { id: sessionId, userId } });
+  await bumpVersion(`user-sessions:${userId}`);
 };
 
 export const revokeStudioLoginSessions = async (studioId: string) => {
@@ -161,6 +218,7 @@ export const revokeStudioLoginSessions = async (studioId: string) => {
   });
   const userIds = users.map(({ id }) => id);
   await raw.authSession.deleteMany({ where: { studioId } });
+  await bumpVersion(...userIds.map((id) => `user-sessions:${id}`));
   if (userIds.length) {
     await raw.authDevice.deleteMany({ where: { userId: { in: userIds } } });
   }

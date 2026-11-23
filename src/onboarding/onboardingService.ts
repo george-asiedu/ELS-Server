@@ -1,3 +1,5 @@
+import { rewardBusinessReferral } from "../billing/businessReferral";
+import jwt from "jsonwebtoken";
 import { shortId } from "../utils/shortId";
 import { studioLink } from "../utils/studioLink";
 import { Connection } from "../db/dbConnection";
@@ -22,16 +24,23 @@ import {
   toPesewas,
   addPeriod,
   addMonths,
+  isPlan,
+  planName,
 } from "../billing/billingPlans";
+import { isShopCategory, type ShopCategory } from "../billing/shopCategories";
 import { NotificationService } from "../notifications/notificationService";
 import { buildReceiptPdf } from "../notifications/receiptPdf";
 import { ghs, receiptNumber } from "../notifications/format";
 import { NotificationTemplate } from "../notifications/registry";
 import { studioCreated } from "../notifications/templates/studio";
+import { confirmEmailCode, sendEmailCode } from "../auth/emailCode";
+import { countPromoUse, promoPercent } from "../billing/studioPricing";
+import { platformBrandForPlan } from "../notifications/brand";
 import { platformBrand } from "../notifications/brand";
 
 type BillingMode = "SUBSCRIPTION" | "REVENUE_SHARE";
 
+const EMAIL_PROOF_PURPOSE = "signup-email";
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 // Min 8 chars with an uppercase, lowercase, number, and special character —
 // matches the login/signup validators so a new owner can sign in right after.
@@ -53,6 +62,13 @@ export class OnboardingService extends Connection {
   private platform = new PlatformService();
   private audit = new AuditService();
   private notifications = new NotificationService();
+
+  /** Check a billing promo for the signup screen. */
+  public async checkPromo(rawCode: unknown, rawPlan: unknown) {
+    const plan: Plan = isPlan(rawPlan) ? rawPlan : "STANDARD";
+    const promo = await promoPercent(rawCode, plan);
+    return { message: "Promo applied", data: promo };
+  }
 
   public async availability(rawSlug: string) {
     let slug: string;
@@ -91,7 +107,54 @@ export class OnboardingService extends Connection {
     return { message: "Onboarding config", data: cfg };
   }
 
+  /** Email a 6-digit code. Says the same thing whether the email is in use. */
+  public async sendEmailCode(rawEmail: unknown) {
+    const email = String(rawEmail ?? "")
+      .trim()
+      .toLowerCase();
+    if (!EMAIL_RE.test(email)) {
+      throw new ApiError("A valid email is required", HttpCode.BAD_REQUEST);
+    }
+    await sendEmailCode({ key: email, to: email, brand: platformBrand });
+    return { message: "Code sent", data: { email } };
+  }
+
+  /** Check a code. A match returns a short-lived proof that start() requires. */
+  public async confirmEmailCode(rawEmail: unknown, rawCode: unknown) {
+    const email = String(rawEmail ?? "")
+      .trim()
+      .toLowerCase();
+    await confirmEmailCode(email, rawCode);
+    return {
+      message: "Email confirmed",
+      data: {
+        emailToken: jwt.sign(
+          { purpose: EMAIL_PROOF_PURPOSE, email },
+          env.JWT_SECRET,
+          { expiresIn: "1h" },
+        ),
+      },
+    };
+  }
+
+  private assertEmailProof(token: unknown, email: string) {
+    try {
+      const proof = jwt.verify(String(token ?? ""), env.JWT_SECRET) as {
+        purpose?: string;
+        email?: string;
+      };
+      if (proof.purpose === EMAIL_PROOF_PURPOSE && proof.email === email)
+        return;
+    } catch {
+      /* Falls through to the same error as a mismatch. */
+    }
+    throw new ApiError("Please confirm your email first", HttpCode.BAD_REQUEST);
+  }
+
   public async start(input: {
+    emailToken?: unknown;
+    promoCode?: unknown;
+    ref?: unknown;
     name?: unknown;
     slug?: unknown;
     ownerEmail?: unknown;
@@ -100,6 +163,7 @@ export class OnboardingService extends Connection {
     plan?: unknown;
     cadence?: unknown;
     billingMode?: unknown;
+    shopCategory?: unknown;
   }) {
     const name = String(input.name ?? "").trim();
     if (name.length < 2 || name.length > 60) {
@@ -115,6 +179,7 @@ export class OnboardingService extends Connection {
     if (!EMAIL_RE.test(ownerEmail)) {
       throw new ApiError("A valid email is required", HttpCode.BAD_REQUEST);
     }
+    this.assertEmailProof(input.emailToken, ownerEmail);
     const ownerPassword = String(input.ownerPassword ?? "");
     // Enforce the SAME rules the login/signup validators use, so an owner can
     // actually sign in afterwards with the password they set here.
@@ -124,7 +189,19 @@ export class OnboardingService extends Connection {
         HttpCode.BAD_REQUEST,
       );
     }
-    const plan: Plan = input.plan === "PREMIUM" ? "PREMIUM" : "STANDARD";
+    const plan: Plan = isPlan(input.plan) ? input.plan : "STANDARD";
+    // What the shop sells: required for Zuri Stores, optional for
+    // Premium's shop, not used by booking-only Standard.
+    let shopCategory: ShopCategory | null = null;
+    if (plan !== "STANDARD") {
+      if (isShopCategory(input.shopCategory)) shopCategory = input.shopCategory;
+      else if (plan === "STOREFRONT") {
+        throw new ApiError(
+          "Tell us what you'll be selling",
+          HttpCode.BAD_REQUEST,
+        );
+      }
+    }
     const cadence: Cadence = input.cadence === "YEARLY" ? "YEARLY" : "MONTHLY";
 
     // Revenue-share is only selectable when the super admin has enabled it;
@@ -151,19 +228,24 @@ export class OnboardingService extends Connection {
       billingMode === "SUBSCRIPTION"
         ? subscriptionSetupFor(plan, cadence, cfg)
         : null;
-    const amountPesewas =
+    const listPesewas =
       billingMode === "REVENUE_SHARE"
         ? Math.round(setupFeeFor(plan, cfg) * 100)
         : setup
           ? Math.round(setup.fee * 100)
           : toPesewas(planPriceFor(plan, cadence, cfg));
 
-    if (billingMode === "SUBSCRIPTION" && !amountPesewas) {
+    if (billingMode === "SUBSCRIPTION" && !listPesewas) {
       throw new ApiError(
         "Billing is not configured for that plan yet. Please contact us.",
         HttpCode.BAD_GATEWAY,
       );
     }
+    // A billing promo takes its % off whatever is charged now.
+    const promo = await promoPercent(input.promoCode, plan);
+    const amountPesewas = Math.round(
+      listPesewas * (1 - Math.min(100, promo.percent) / 100),
+    );
 
     const reference = `${SIGNUP_PREFIX}${shortId()}`;
     const ownerPasswordHash = await getPasswordHash(ownerPassword);
@@ -179,7 +261,11 @@ export class OnboardingService extends Connection {
         plan,
         cadence,
         billingMode,
+        ...(shopCategory ? { shopCategory } : {}),
         reference,
+        ...(promo.code ? { promoCode: promo.code } : {}),
+        // An invite link from another business (checked when provisioning).
+        ...(typeof input.ref === "string" && /^[a-z0-9-]{2,60}$/.test(input.ref) ? { referralSlug: input.ref } : {}),
         status: "PENDING",
         // Recorded now, so finalize provisions exactly what was paid for even
         // if the super admin changes the fees in between.
@@ -188,8 +274,9 @@ export class OnboardingService extends Connection {
       },
     });
 
-    // Free revenue-share signup (no setup fee): provision right away.
-    if (billingMode === "REVENUE_SHARE" && !amountPesewas) {
+    // Nothing to pay (a revenue-share plan with no setup fee, or a 100%
+    // promo): provision right away.
+    if (!amountPesewas) {
       const done = await this.finalize(reference, { skipPaymentCheck: true });
       return {
         message: "Signup provisioned",
@@ -285,12 +372,15 @@ export class OnboardingService extends Connection {
         slug: signup.slug,
         ownerEmail: signup.ownerEmail,
         ownerPasswordHash: signup.ownerPasswordHash,
+        // Signups confirm the email with a code before paying.
+        ownerEmailVerified: true,
         ...(signup.ownerFullName
           ? { ownerFullName: signup.ownerFullName }
           : {}),
         plan,
         cadence,
         billingMode,
+        shopCategory: signup.shopCategory ?? null,
         // Revenue-share: platform takes the plan's commission per transaction and
         // there's no billing period. Subscription: 0% cut, a period is set.
         platformFeePercent: revenueShare ? commissionFor(plan, cfg) : 0,
@@ -306,6 +396,13 @@ export class OnboardingService extends Connection {
             },
       }),
     );
+    await countPromoUse(signup.promoCode);
+    // Invited by another business: link them and reward both.
+    if (signup.referralSlug && signup.referralSlug !== signup.slug) {
+      await rewardBusinessReferral(signup.referralSlug, studio.id).catch((e) =>
+        console.warn("Business referral reward failed:", (e as Error).message),
+      );
+    }
 
     await this.studioSignup.update({
       where: { id: signup.id },
@@ -341,12 +438,13 @@ export class OnboardingService extends Connection {
 
     try {
       const websiteUrl = studioLink(studio.slug);
-      const { subject, html } = studioCreated(platformBrand, {
+      const { subject, html } = studioCreated(platformBrandForPlan(plan), {
         ownerFirstName: signup.ownerFullName?.split(" ")[0] || "there",
         studioName: studio.name,
-        planName: plan === "PREMIUM" ? "Premium" : "Standard",
+        planName: planName(plan),
         dashboardUrl: studioLink(studio.slug, "/admin/login"),
         storefrontUrl: websiteUrl,
+        learnUrl: studioLink(studio.slug, "/admin/learn"),
       });
       // The signup charge is a real payment, so it gets a receipt like any
       // other. Revenue-share studios with no setup fee pay nothing here, and
@@ -355,14 +453,14 @@ export class OnboardingService extends Connection {
       const signupReceipt =
         amount > 0
           ? buildReceiptPdf({
-              studioName: "Zuri Studios",
+              studioName: "Zuri",
               title:
                 revenueShare || signup.coverageMonths
                   ? "Setup fee receipt"
                   : "Subscription receipt",
               receiptNumber: receiptNumber("RCP", studio.id),
               issuedAt: new Date(),
-              heading: `${plan === "PREMIUM" ? "Premium" : "Standard"} plan — ${studio.name}`,
+              heading: `${planName(plan)} plan — ${studio.name}`,
               lines: [
                 { label: "Studio", value: studio.name },
                 { label: "Account", value: signup.ownerEmail },

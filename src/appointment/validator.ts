@@ -29,6 +29,10 @@ const createAppointmentSchema: JSONSchemaType<CreateAppointmentInput> = {
     notes: { type: "string", nullable: true, maxLength: 1000 },
     applyPoints: { type: "string", nullable: true, enum: ["true", "false"] },
     designImageUrl: { type: "string", nullable: true, maxLength: 2048 },
+    // A staff member's id, or "any" (or absent) for whoever is free.
+    staffId: { type: "string", nullable: true, maxLength: 64 },
+    // A gift card or package code to pay with.
+    voucherCode: { type: "string", nullable: true, maxLength: 40 },
   },
   required: [
     "fullName",
@@ -59,6 +63,7 @@ const updateStatusSchema: JSONSchemaType<UpdateAppointmentStatusInput> = {
         "PENDING_RESCHEDULE",
         "COMPLETED",
         "CANCELLED",
+        "NO_SHOW",
       ],
     },
   },

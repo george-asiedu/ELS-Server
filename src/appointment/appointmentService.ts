@@ -1,3 +1,8 @@
+import { randomBytes } from "crypto";
+import { notifyStudioAdmins } from "../push/pushService";
+import { sendBookingWhatsapp } from "../whatsapp/whatsappService";
+import { WaitlistService } from "../waitlist/waitlistService";
+import { VoucherService } from "../vouchers/voucherService";
 import { Connection, TenantTx } from "../db/dbConnection";
 import {
   CursorPage,
@@ -32,6 +37,7 @@ import {
 } from "../notifications/templates/booking";
 import { MoneyLine } from "../notifications/types";
 import { ghs } from "../notifications/format";
+import { platformBrandForPlan } from "../notifications/brand";
 import {
   brandFromStudio,
   firstName,
@@ -119,6 +125,9 @@ const paymentView = (
 export interface SlotCheck {
   date: Date;
   time: string;
+  // The staff member the booking is with. Set: only their bookings (and ones
+  // with nobody assigned) clash. Null: every booking clashes, as before staff.
+  staffId?: string | null;
   // Excluded from the clash check — the booking being moved must not collide
   // with itself.
   ignoreAppointmentId?: string | undefined;
@@ -135,6 +144,7 @@ export interface SlotCheck {
 }
 
 const serviceInclude = {
+  staff: { select: { id: true, name: true } },
   service: {
     select: {
       id: true,
@@ -172,7 +182,18 @@ export class AppointmentService extends Connection {
   // from the studio's settings (loyaltyCapRatio()).
   private static readonly POINTS_PER_GHS = 10; // 10 points = GHS 1 off
 
-  public async create(data: CreateAppointmentInput, userId?: string) {
+  /** For mail to the business itself: from Zuri Studios, not from its own name. */
+  private async zuriBrand() {
+    const id = getTenantContext()?.studioId;
+    const studio = id ? await this.studio.findUnique({ where: { id }, select: { plan: true } }).catch(() => null) : null;
+    return platformBrandForPlan(studio?.plan);
+  }
+
+  public async create(data: CreateAppointmentInput, userId?: string, opts: { guest?: boolean } = {}) {
+    // A guest has no account, so the studio can only reach them by email to
+    // take payment and confirm.
+    if (opts.guest && !data.email?.trim()) throw new ApiError("Enter your email so we can confirm your booking", 400);
+    const guestToken = opts.guest ? randomBytes(18).toString("base64url") : null;
     // The studio confirms and follows up on WhatsApp, so the number has to be
     // one a wa.me link can open.
     if (!toWhatsappNumber(data.phone)) {
@@ -203,7 +224,8 @@ export class AppointmentService extends Connection {
     // Points can't be combined with a promo — the price is already reduced.
     let discountAmount = 0;
     let pointsRedeemed = 0;
-    if (userId && data.applyPoints === "true" && !onPromo) {
+    // Points aren't combined with a gift card or package code.
+    if (userId && data.applyPoints === "true" && !onPromo && !data.voucherCode) {
       const balance = await this.loyaltyPoints.findUnique({
         where: { userId },
       });
@@ -227,19 +249,49 @@ export class AppointmentService extends Connection {
         // Same gate a reschedule passes through. Until this existed the server
         // accepted any well-formatted date/time, including one in the past, on
         // a closed day, or already taken by someone else.
-        await this.assertSlotBookable(
-          {
-            date: appointmentDate,
-            time: data.appointmentTime,
-            enforceOpeningHours: true,
-            // Booking for "in a few minutes" is legitimate (a walk-in the
-            // studio enters), so creation has no notice floor beyond not
-            // being in the past.
-            minNoticeHours: 0,
-            durationMinutes: parseDurationMinutes(service.duration),
-          },
-          tx,
-        );
+        const slot = {
+          date: appointmentDate,
+          time: data.appointmentTime,
+          enforceOpeningHours: true,
+          // Booking for "in a few minutes" is legitimate (a walk-in the
+          // studio enters), so creation has no notice floor beyond not
+          // being in the past.
+          minNoticeHours: 0,
+          durationMinutes: parseDurationMinutes(service.duration),
+        };
+        // With staff: the chosen person, or the first one free who does
+        // this service. Without staff, the studio-wide check as before.
+        let staffId: string | null = null;
+        const qualified = await this.qualifiedStaff(data.serviceId);
+        if (qualified.length) {
+          const wanted = data.staffId && data.staffId !== "any" ? data.staffId : null;
+          if (wanted && !qualified.includes(wanted)) {
+            throw new ApiError("That person doesn't do this service. Pick someone else or Anyone.", 400);
+          }
+          for (const candidate of wanted ? [wanted] : qualified) {
+            try {
+              await this.assertSlotBookable({ ...slot, staffId: candidate }, tx);
+              staffId = candidate;
+              break;
+            } catch (e) {
+              // Only "taken" moves on to the next person; anything else stands.
+              if (!(e instanceof ApiError) || e.statusCode !== 409) throw e;
+            }
+          }
+          if (!staffId) throw new ApiError("That slot is already taken", 409);
+        } else {
+          await this.assertSlotBookable(slot, tx);
+        }
+
+        // A gift card covers up to its balance; a package covers the price
+        // and uses a session. Taken inside the lock with the booking.
+        let voucher: { voucherId: string; covered: number } | null = null;
+        if (data.voucherCode) {
+          voucher = await new VoucherService().redeem(tx, data.voucherCode, {
+            amount: effectivePrice - discountAmount,
+            serviceId: data.serviceId,
+          });
+        }
 
         const created = await tx.appointment.create({
           data: {
@@ -250,11 +302,14 @@ export class AppointmentService extends Connection {
             appointmentTime: data.appointmentTime,
             notes: data.notes ?? null,
             totalPrice: effectivePrice,
-            discountAmount,
+            discountAmount: discountAmount + (voucher?.covered ?? 0),
+            ...(voucher ? { voucherId: voucher.voucherId, voucherAmount: voucher.covered } : {}),
             pointsRedeemed,
             serviceId: data.serviceId,
+            ...(staffId ? { staffId } : {}),
             ...(designImageUrl ? { designImageUrl } : {}),
             ...(userId ? { userId } : {}),
+            ...(guestToken ? { guestToken } : {}),
           },
           include: serviceInclude,
         });
@@ -324,7 +379,7 @@ export class AppointmentService extends Connection {
 
       const studioEmail = await this.currentStudioNotifyEmail();
       if (studioEmail) {
-        const { subject, html } = bookingRequestStudio(brand, {
+        const { subject, html } = bookingRequestStudio(await this.zuriBrand(), {
           ...core,
           customerName: appointment.fullName,
           customerPhone: appointment.phone,
@@ -348,7 +403,10 @@ export class AppointmentService extends Connection {
       console.error("Failed to send booking-request notifications:", error);
     }
 
-    return { message: "Appointment created successfully", data: appointment };
+    return {
+      message: "Appointment created successfully",
+      data: guestToken ? { ...appointment, guestToken } : appointment,
+    };
   }
 
   // Times already taken (any non-cancelled appointment) for a given date.
@@ -385,7 +443,6 @@ export class AppointmentService extends Connection {
         where: {
           appointmentDate: { gte: dayStart, lte: dayEnd },
           status: { in: ["PENDING", "CONFIRMED"] },
-          email: { not: null },
         },
         include: serviceInclude,
       });
@@ -409,6 +466,46 @@ export class AppointmentService extends Connection {
           skipped++;
           continue;
         }
+
+        // The studio's admins get a push for every booking (walk-ins too).
+        if (appt.studioId) {
+          await notifyStudioAdmins(
+            appt.studioId,
+            {
+              template:
+                window === "24H"
+                  ? NotificationTemplate.BOOKING_REMINDER_24H
+                  : NotificationTemplate.BOOKING_REMINDER_1H,
+              entityId: `${appt.id}:${window}:admin`,
+            },
+            {
+              title: window === "24H" ? "Booking tomorrow" : "Booking in about an hour",
+              body: `${appt.fullName ?? "A client"} · ${appt.service?.name ?? "Appointment"} at ${appt.appointmentTime}`,
+              url: `/admin/calendar?date=${appt.appointmentDate.toISOString().slice(0, 10)}`,
+              tag: `admin-reminder:${appt.id}:${window}`,
+            },
+          ).catch((e) =>
+            errors.push(`${appt.id} (admin push): ${(e as Error).message}`),
+          );
+        }
+        // WhatsApp, when the studio has it on (whatever the email situation).
+        if (appt.studioId) {
+          const studioName =
+            (await this.studio.findUnique({ where: { id: appt.studioId }, select: { name: true } }))?.name ?? "the studio";
+          await sendBookingWhatsapp({
+            kind: window === "24H" ? "REMINDER_24H" : "REMINDER_1H",
+            studioId: appt.studioId,
+            appointmentId: appt.id,
+            phone: appt.phone,
+            firstName: firstName(appt.fullName),
+            studioName,
+            serviceName: appt.service?.name ?? "your appointment",
+            date: formatDate(appt.appointmentDate),
+            time: appt.appointmentTime,
+          });
+        }
+        // Customers without an email (walk-ins added by the studio) get nothing more.
+        if (!appt.email) continue;
 
         try {
           const studio = await this.currentStudioBranding(
@@ -469,6 +566,18 @@ export class AppointmentService extends Connection {
    * booking — without it the UI would offer an 11:00 slot that the server
    * rejects because a 4-hour service started at 10:00.
    */
+  /** Active staff who do this service, in display order. Empty: no staff. */
+  private async qualifiedStaff(serviceId: string): Promise<string[]> {
+    const staff = await this.staff.findMany({
+      where: { active: true },
+      orderBy: [{ order: "asc" }, { createdAt: "asc" }],
+      select: { id: true, serviceIds: true },
+    });
+    return staff
+      .filter((s) => !s.serviceIds.length || s.serviceIds.includes(serviceId))
+      .map((s) => s.id);
+  }
+
   public async takenSlots(date: string) {
     const appointments = await this.appointment.findMany({
       where: {
@@ -477,6 +586,7 @@ export class AppointmentService extends Connection {
       },
       select: {
         appointmentTime: true,
+        staffId: true,
         service: { select: { duration: true } },
       },
     });
@@ -492,10 +602,12 @@ export class AppointmentService extends Connection {
               start: formatTimeHHMM(mins),
               label: a.appointmentTime,
               minutes: parseDurationMinutes(a.service?.duration) ?? 0,
+              // Who it's with, so a picker can tell when someone else is free.
+              staffId: a.staffId,
             };
       })
       .filter(
-        (b): b is { start: string; label: string; minutes: number } =>
+        (b): b is { start: string; label: string; minutes: number; staffId: string | null } =>
           b !== null,
       );
     return {
@@ -519,6 +631,30 @@ export class AppointmentService extends Connection {
       message: "Appointments retrieved successfully",
       ...cursorPageResult(appointments, page),
     };
+  }
+
+  /** Every booking between two dates (inclusive), for the admin calendar. */
+  public async listRange(fromRaw: unknown, toRaw: unknown) {
+    const parse = (v: unknown) =>
+      typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v)
+        ? new Date(`${v}T00:00:00.000Z`)
+        : null;
+    const from = parse(fromRaw);
+    const to = parse(toRaw);
+    if (!from || !to || to < from)
+      throw new ApiError("Give a from and to date (YYYY-MM-DD)", 400);
+    // A calendar shows at most about six weeks.
+    if (to.getTime() - from.getTime() > 45 * 24 * 60 * 60 * 1000)
+      throw new ApiError("Ask for 45 days or fewer", 400);
+    const appointments = await this.appointment.findMany({
+      where: { appointmentDate: { gte: from, lte: to } },
+      orderBy: [{ appointmentDate: "asc" }, { appointmentTime: "asc" }],
+      include: serviceInclude,
+    });
+    appointments.forEach((item) => {
+      item.designImageUrl = this.s3.deliveryUrl(item.designImageUrl);
+    });
+    return { message: "Appointments retrieved successfully", data: appointments };
   }
 
   public async listAll(page: CursorPage) {
@@ -659,6 +795,7 @@ export class AppointmentService extends Connection {
       select: {
         id: true,
         appointmentTime: true,
+        staffId: true,
         service: { select: { duration: true } },
       },
     });
@@ -669,6 +806,8 @@ export class AppointmentService extends Connection {
     const newEnd = newStart + (check.durationMinutes ?? 0);
 
     for (const other of sameDay) {
+      // Different staff can be booked at the same time.
+      if (check.staffId && other.staffId && other.staffId !== check.staffId) continue;
       const otherStart = parseTimeMinutes(other.appointmentTime);
       if (otherStart === null) continue;
       const otherEnd =
@@ -769,6 +908,7 @@ export class AppointmentService extends Connection {
             date,
             time,
             ignoreAppointmentId: id,
+            staffId: existing.staffId,
             enforceOpeningHours: byCustomer,
             minNoticeHours,
             durationMinutes: parseDurationMinutes(existing.service?.duration),
@@ -809,7 +949,7 @@ export class AppointmentService extends Connection {
       try {
         const to = await this.currentStudioNotifyEmail();
         if (to) {
-          const { subject, html } = bookingRescheduleRequested(brand, {
+          const { subject, html } = bookingRescheduleRequested(await this.zuriBrand(), {
             ...core,
             customerName: appointment.fullName,
             previousDate: formatDate(existing.appointmentDate),
@@ -940,6 +1080,7 @@ export class AppointmentService extends Connection {
             date: existing.appointmentDate,
             time: existing.appointmentTime,
             ignoreAppointmentId: id,
+            staffId: existing.staffId,
             enforceOpeningHours: true,
             minNoticeHours: 0,
             durationMinutes: parseDurationMinutes(next.duration),
@@ -1123,6 +1264,35 @@ export class AppointmentService extends Connection {
       data: { status },
       include: serviceInclude,
     });
+
+    // A cancelled booking gives back what its gift card or package covered.
+    if (status === "CANCELLED" && existing.status !== "CANCELLED" && existing.voucherId) {
+      await new VoucherService().restore(existing.voucherId, existing.voucherAmount);
+    }
+
+    // A cancelled slot is free again: tell anyone waiting for that day.
+    if (status === "CANCELLED" && existing.status !== "CANCELLED") {
+      void new WaitlistService().slotOpened(appointment.appointmentDate).catch((e) =>
+        console.warn("Waitlist check failed:", (e as Error).message),
+      );
+    }
+
+    // A WhatsApp confirmation too, when the studio has it on.
+    if (status === "CONFIRMED" && existing.status !== "CONFIRMED" && appointment.studioId) {
+      const studioName =
+        (await this.studio.findUnique({ where: { id: appointment.studioId }, select: { name: true } }))?.name ?? "the studio";
+      void sendBookingWhatsapp({
+        kind: "CONFIRMED",
+        studioId: appointment.studioId,
+        appointmentId: appointment.id,
+        phone: appointment.phone,
+        firstName: firstName(appointment.fullName),
+        studioName,
+        serviceName: appointment.service?.name ?? "your appointment",
+        date: formatDate(appointment.appointmentDate),
+        time: appointment.appointmentTime,
+      });
+    }
 
     // Award loyalty points the first time an appointment is completed — on the
     // amount actually paid (after any loyalty discount), never the sticker price.

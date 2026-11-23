@@ -7,18 +7,28 @@ import {
 } from "../utils/helper";
 import { ApiError } from "../middleware/apiError";
 import { randomBytes, createHash } from "crypto";
-import { getTenantContext } from "../tenant/context";
 import { NotificationService } from "../notifications/notificationService";
 import { NotificationTemplate } from "../notifications/registry";
 import {
   passwordResetRequested,
   passwordChanged,
+  accountLocked,
   customerWelcome,
   loginAlert,
 } from "../notifications/templates/auth";
 import { brandFromStudio, platformBrand } from "../notifications/brand";
 import { createLoginSession, revokeLoginSessions } from "./sessionService";
 import { LoginDeviceMetadata } from "./loginDevice";
+import { assertSignInCode } from "./twoFactor";
+import { confirmEmailCode, sendEmailCode } from "./emailCode";
+import {
+  assertNotLocked,
+  clearLoginFailures,
+  lockoutKey,
+  recordLoginFailure,
+  unknownUserHash,
+} from "./loginLockout";
+import { getTenantContext } from "../tenant/context";
 
 const notifications = new NotificationService();
 
@@ -110,16 +120,89 @@ export class AuthService extends UserRepository {
     return generateReferralCode(8);
   }
 
-  public async login(data: Login, device?: LoginDeviceMetadata) {
-    const user = await this.getByEmail(data.email);
-    if (!user) {
-      throw new ApiError("Invalid email or password", 400);
+  private async sendLockedEmail(
+    user: { id: string; email: string; studioId: string | null },
+    minutes: number,
+  ) {
+    try {
+      const brand = await this.studioEmailBrand(null, platformBrand);
+      const { subject, html } = accountLocked(brand, {
+        lockedFor:
+          minutes >= 60 ? `${minutes / 60} hours` : `${minutes} minutes`,
+        recoveryUrl: await this.linkToStudio("/forgot-password", user.studioId),
+      });
+      await notifications.send({
+        template: NotificationTemplate.AUTH_ACCOUNT_LOCKED,
+        to: user.email,
+        subject,
+        html,
+        studioId: user.studioId ?? null,
+        entityType: "User",
+        // Each lock is its own event; the log would otherwise send just one.
+        entityId: `${user.id}:${Date.now()}`,
+      });
+    } catch (error) {
+      console.error("Failed to send account-locked email:", error);
     }
+  }
 
-    const isPasswordValid = await verifyPassword(data.password, user.password);
-    if (!isPasswordValid) {
+  // Optional for customers: offered in their account, never required.
+  public async emailVerificationStatus(userId: string) {
+    const user = await this.user.findUnique({
+      where: { id: userId },
+      select: { emailVerifiedAt: true },
+    });
+    return {
+      message: "Status retrieved",
+      data: { verified: Boolean(user?.emailVerifiedAt) },
+    };
+  }
+
+  public async sendVerificationCode(user: {
+    id: string;
+    email: string;
+    studioId?: string | null;
+  }) {
+    await sendEmailCode({
+      key: `user:${user.id}`,
+      to: user.email,
+      brand: await this.studioEmailBrand(null, platformBrand),
+      studioId: user.studioId ?? null,
+    });
+    return { message: "Code sent" };
+  }
+
+  public async confirmVerificationCode(userId: string, code: unknown) {
+    await confirmEmailCode(`user:${userId}`, code);
+    await this.user.update({
+      where: { id: userId },
+      data: { emailVerifiedAt: new Date() },
+    });
+    return { message: "Email confirmed", data: { verified: true } };
+  }
+
+  public async login(data: Login, device?: LoginDeviceMetadata) {
+    const lockKey = lockoutKey(getTenantContext()?.studioId, data.email);
+    await assertNotLocked(lockKey);
+
+    const user = await this.getByEmail(data.email);
+    const isPasswordValid = await verifyPassword(
+      data.password,
+      user?.password ?? (await unknownUserHash()),
+    );
+    if (!user || !isPasswordValid) {
+      const lock = await recordLoginFailure(lockKey);
+      if (lock) {
+        if (user && lock.first) {
+          // Not awaited, so a real account takes no longer than an unknown one.
+          void this.sendLockedEmail(user, lock.minutes);
+        }
+        throw lock.error;
+      }
       throw new ApiError("Invalid email or password", 400);
     }
+    await assertSignInCode(user, data.totp, lockKey);
+    await clearLoginFailures(lockKey);
 
     const payload = {
       id: user.id,
@@ -247,6 +330,8 @@ export class AuthService extends UserRepository {
     }
 
     // hash new password and update user; clear reset token fields
+    // A reset proves ownership, so it reopens sign-in straight away.
+    await clearLoginFailures(lockoutKey(user.studioId, user.email));
     const newHashedPassword = await getPasswordHash(newPassword);
     await this.resetPasswordByUserId(user.id, newHashedPassword);
     await revokeLoginSessions(user.id);

@@ -85,9 +85,15 @@ const track = (p: Promise<void>) => {
   void p.finally(() => inFlight.delete(p));
 };
 
+// One heavy job at a time, one light job at a time per kind of work, so a long
+// run can't pile up behind itself or crowd the database.
+const busyLanes = new Set<string>();
+
 const tick = async () => {
   const now = Date.now();
   for (const job of JOBS) {
+    const lane = job.lane ?? `light:${job.key}`;
+    if (busyLanes.has(lane)) continue;
     const slot = slotId(job.schedule, now);
     try {
       const claimed = await raw.scheduledJob.updateMany({
@@ -105,7 +111,10 @@ const tick = async () => {
           lastTrigger: "schedule",
         },
       });
-      if (claimed.count === 1) track(execute(job));
+      if (claimed.count === 1) {
+        busyLanes.add(lane);
+        track(execute(job).finally(() => busyLanes.delete(lane)));
+      }
     } catch (error) {
       console.error(`Scheduler could not check ${job.key}:`, error);
     }

@@ -1,6 +1,9 @@
+import { PAID_ORDER_STATUSES } from "../order/orderStatus";
+import { S3BucketService } from "../bucket/s3BucketService";
+import { studioPriceFor } from "../billing/studioPricing";
 import { Connection } from "../db/dbConnection";
 import { ApiError } from "../middleware/apiError";
-import { isLapsed } from "../billing/billingPlans";
+import { isLapsed, byPlan, planName, type Plan } from "../billing/billingPlans";
 import { HttpCode } from "../models/status_codes";
 import { getPasswordHash } from "../utils/helper";
 import { toWhatsappNumber, WHATSAPP_NUMBER_HINT } from "../utils/whatsapp";
@@ -18,6 +21,7 @@ import { env } from "../config/env.config";
 import { createTenantClient } from "../tenant/tenantClient";
 import { randomBytes, createHash } from "crypto";
 import { passwordResetRequested } from "../notifications/templates/auth";
+import { platformBrandForPlan } from "../notifications/brand";
 import { AuditService } from "../audit/auditService";
 
 // Slugs that can never belong to a studio: they collide with platform routes,
@@ -60,17 +64,17 @@ export const validateStudioSlug = (raw: string): string => {
   return slug;
 };
 
-type Plan = "STANDARD" | "PREMIUM";
-
-// Feature flags a plan unlocks. Booking is always on; Premium adds the shop.
+// Feature flags a plan unlocks. Standard: booking. Premium: booking and the
+// shop. Storefront: the shop alone (no booking, gallery or add-ons).
 export const planFlags = (plan: Plan) => ({
-  commerce: plan === "PREMIUM",
+  booking: plan !== "STOREFRONT",
+  commerce: plan !== "STANDARD",
   productsInBooking: plan === "PREMIUM",
-  onlinePayments: true, // online booking payments are in both plans
+  onlinePayments: true,
   loyalty: true,
   referrals: true,
   reviews: true,
-  gallery: true,
+  gallery: plan !== "STOREFRONT",
 });
 
 export interface BillingConfig {
@@ -80,10 +84,13 @@ export interface BillingConfig {
   // One-time activation fee for REVENUE_SHARE studios (covers no period).
   setupFeeStandard: number;
   setupFeePremium: number;
+  setupFeeStorefront: number;
+  commissionStorefrontPercent: number;
   // Subscription setup fee: charged at signup in place of the first period's
   // price and covering the first setupFeeMonths* months. 0 = no setup fee.
   subscriptionSetupFeeStandard: number;
   subscriptionSetupFeePremium: number;
+  subscriptionSetupFeeStorefront: number;
   setupFeeMonthsMonthly: number;
   setupFeeMonthsYearly: number;
   // Plan prices (GHS) actually charged: the super admin's value, or the
@@ -92,6 +99,8 @@ export interface BillingConfig {
   priceStandardYearly: number;
   pricePremiumMonthly: number;
   pricePremiumYearly: number;
+  priceStorefrontMonthly: number;
+  priceStorefrontYearly: number;
 }
 
 type PlatformConfigRow = Omit<
@@ -100,11 +109,15 @@ type PlatformConfigRow = Omit<
   | "priceStandardYearly"
   | "pricePremiumMonthly"
   | "pricePremiumYearly"
+  | "priceStorefrontMonthly"
+  | "priceStorefrontYearly"
 > & {
   priceStandardMonthly: number | null;
   priceStandardYearly: number | null;
   pricePremiumMonthly: number | null;
   pricePremiumYearly: number | null;
+  priceStorefrontMonthly: number | null;
+  priceStorefrontYearly: number | null;
 };
 
 // A yearly plan costs this many months of the monthly price: two months free,
@@ -120,20 +133,27 @@ const toBillingConfig = (row: PlatformConfigRow): BillingConfig => {
     row.priceStandardMonthly ?? env.paystack.prices.STANDARD_MONTHLY;
   const premiumMonthly =
     row.pricePremiumMonthly ?? env.paystack.prices.PREMIUM_MONTHLY;
+  const storefrontMonthly =
+    row.priceStorefrontMonthly ?? env.paystack.prices.STOREFRONT_MONTHLY;
   return {
     revenueShareEnabled: row.revenueShareEnabled,
     commissionStandardPercent: row.commissionStandardPercent,
     commissionPremiumPercent: row.commissionPremiumPercent,
     setupFeeStandard: row.setupFeeStandard,
     setupFeePremium: row.setupFeePremium,
+    setupFeeStorefront: row.setupFeeStorefront,
+    commissionStorefrontPercent: row.commissionStorefrontPercent,
     subscriptionSetupFeeStandard: row.subscriptionSetupFeeStandard,
     subscriptionSetupFeePremium: row.subscriptionSetupFeePremium,
+    subscriptionSetupFeeStorefront: row.subscriptionSetupFeeStorefront,
     setupFeeMonthsMonthly: row.setupFeeMonthsMonthly,
     setupFeeMonthsYearly: row.setupFeeMonthsYearly,
     priceStandardMonthly: standardMonthly,
     priceStandardYearly: yearlyFrom(standardMonthly),
     pricePremiumMonthly: premiumMonthly,
     pricePremiumYearly: yearlyFrom(premiumMonthly),
+    priceStorefrontMonthly: storefrontMonthly,
+    priceStorefrontYearly: yearlyFrom(storefrontMonthly),
   };
 };
 
@@ -231,14 +251,14 @@ export const planPriceFor = (
   plan: Plan,
   cadence: "MONTHLY" | "YEARLY",
   cfg: BillingConfig,
-): number =>
-  plan === "PREMIUM"
-    ? cadence === "YEARLY"
-      ? cfg.pricePremiumYearly
-      : cfg.pricePremiumMonthly
-    : cadence === "YEARLY"
-      ? cfg.priceStandardYearly
-      : cfg.priceStandardMonthly;
+): number => {
+  const yearly = cadence === "YEARLY";
+  return byPlan(plan, {
+    STANDARD: yearly ? cfg.priceStandardYearly : cfg.priceStandardMonthly,
+    PREMIUM: yearly ? cfg.pricePremiumYearly : cfg.pricePremiumMonthly,
+    STOREFRONT: yearly ? cfg.priceStorefrontYearly : cfg.priceStorefrontMonthly,
+  });
+};
 
 /**
  * The subscription setup fee for a plan and cadence, and how many months it
@@ -250,10 +270,11 @@ export const subscriptionSetupFor = (
   cadence: "MONTHLY" | "YEARLY",
   cfg: BillingConfig,
 ): { fee: number; months: number } | null => {
-  const fee =
-    plan === "PREMIUM"
-      ? cfg.subscriptionSetupFeePremium
-      : cfg.subscriptionSetupFeeStandard;
+  const fee = byPlan(plan, {
+    STANDARD: cfg.subscriptionSetupFeeStandard,
+    PREMIUM: cfg.subscriptionSetupFeePremium,
+    STOREFRONT: cfg.subscriptionSetupFeeStorefront,
+  });
   if (!(fee > 0)) return null;
   return {
     fee,
@@ -266,15 +287,22 @@ export const subscriptionSetupFor = (
 
 // Commission % the platform takes per transaction for a plan (REVENUE_SHARE).
 export const commissionFor = (plan: Plan, cfg: BillingConfig): number =>
-  plan === "PREMIUM"
-    ? cfg.commissionPremiumPercent
-    : cfg.commissionStandardPercent;
+  byPlan(plan, {
+    STANDARD: cfg.commissionStandardPercent,
+    PREMIUM: cfg.commissionPremiumPercent,
+    STOREFRONT: cfg.commissionStorefrontPercent,
+  });
 
 // One-time setup fee (GHS) charged at signup for a plan (REVENUE_SHARE).
 export const setupFeeFor = (plan: Plan, cfg: BillingConfig): number =>
-  plan === "PREMIUM" ? cfg.setupFeePremium : cfg.setupFeeStandard;
+  byPlan(plan, {
+    STANDARD: cfg.setupFeeStandard,
+    PREMIUM: cfg.setupFeePremium,
+    STOREFRONT: cfg.setupFeeStorefront,
+  });
 
 export interface StudioSettingsInput {
+  booking?: boolean;
   commerce?: boolean;
   loyalty?: boolean;
   referrals?: boolean;
@@ -300,11 +328,14 @@ export interface ProvisionCoreInput {
   slug: string; // already validated + normalized
   ownerEmail: string; // already normalized
   ownerPasswordHash: string;
+  ownerEmailVerified?: boolean;
   ownerFullName?: string;
   customDomain?: string;
   plan: Plan;
   cadence?: "MONTHLY" | "YEARLY";
   billingMode?: "SUBSCRIPTION" | "REVENUE_SHARE";
+  // What a shop sells (picks its website template). Null for booking-only.
+  shopCategory?: string | null;
   // Platform's per-transaction cut (subaccount percentage_charge). Set for
   // REVENUE_SHARE studios from the plan's configured commission; 0 otherwise.
   platformFeePercent?: number;
@@ -368,6 +399,10 @@ export class PlatformService extends Connection {
       input.pricePremiumMonthly,
       current.pricePremiumMonthly,
     );
+    const storefrontMonthly = positive(
+      input.priceStorefrontMonthly,
+      current.priceStorefrontMonthly,
+    );
     const row = await this.platformConfig.update({
       where: { id },
       data: {
@@ -388,6 +423,18 @@ export class PlatformService extends Connection {
           current.setupFeeStandard,
         ),
         setupFeePremium: nonNeg(input.setupFeePremium, current.setupFeePremium),
+        setupFeeStorefront: nonNeg(
+          input.setupFeeStorefront,
+          current.setupFeeStorefront,
+        ),
+        commissionStorefrontPercent: clampPct(
+          input.commissionStorefrontPercent,
+          current.commissionStorefrontPercent,
+        ),
+        subscriptionSetupFeeStorefront: nonNeg(
+          input.subscriptionSetupFeeStorefront,
+          current.subscriptionSetupFeeStorefront,
+        ),
         subscriptionSetupFeeStandard: nonNeg(
           input.subscriptionSetupFeeStandard,
           current.subscriptionSetupFeeStandard,
@@ -410,6 +457,8 @@ export class PlatformService extends Connection {
         priceStandardYearly: yearlyFrom(standardMonthly),
         pricePremiumMonthly: premiumMonthly,
         pricePremiumYearly: yearlyFrom(premiumMonthly),
+        priceStorefrontMonthly: storefrontMonthly,
+        priceStorefrontYearly: yearlyFrom(storefrontMonthly),
       },
     });
     return { message: "Billing config updated", data: toBillingConfig(row) };
@@ -510,7 +559,7 @@ export class PlatformService extends Connection {
       }),
       this.order.findMany({
         where: {
-          status: { in: ["PAID", "FULFILLED"] },
+          status: { in: [...PAID_ORDER_STATUSES] },
           ...(paidAt
             ? { OR: [{ paidAt }, { paidAt: null, createdAt: paidAt }] }
             : {}),
@@ -665,7 +714,7 @@ export class PlatformService extends Connection {
     ]);
     const studioBy = new Map(studios.map((st) => [st.id, st]));
     const planLabel = (plan: string, cadence: string) =>
-      `${plan === "PREMIUM" ? "Premium" : "Standard"} ${cadence === "YEARLY" ? "yearly" : "monthly"}`;
+      `${planName(plan)} ${cadence === "YEARLY" ? "yearly" : "monthly"}`;
 
     type Entry = {
       id: string;
@@ -700,7 +749,7 @@ export class PlatformService extends Connection {
         purpose: sub ? "SETUP_FEE" : "ACTIVATION_FEE",
         description: sub
           ? `Setup fee at signup · ${planLabel(x.plan, x.cadence)}${x.coverageMonths ? ` · covers ${x.coverageMonths} months` : ""}`
-          : `Activation fee at signup · ${x.plan === "PREMIUM" ? "Premium" : "Standard"} pay as you earn`,
+          : `Activation fee at signup · ${planName(x.plan)} pay as you earn`,
         amount: x.amountCharged ?? 0,
         reference: x.reference,
         plan: x.plan,
@@ -753,7 +802,7 @@ export class PlatformService extends Connection {
         this.order.findMany({
           where: {
             studioId: { in: ids },
-            status: { in: ["PAID", "FULFILLED"] },
+            status: { in: [...PAID_ORDER_STATUSES] },
             ...(paidAt
               ? { OR: [{ paidAt }, { paidAt: null, createdAt: paidAt }] }
               : {}),
@@ -879,6 +928,98 @@ export class PlatformService extends Connection {
         total: rows.length,
         pages: Math.max(1, Math.ceil(rows.length / pageSize)),
       },
+    };
+  }
+
+  /**
+   * The public directory of businesses on Zuri: every active studio and store,
+   * with what customers need to choose one. Optional search over name, area
+   * and services, and a filter for studios or stores.
+   */
+  public async getDirectory(q: unknown, kind: unknown) {
+    const studios = await this.studio.findMany({
+      where: { status: "ACTIVE" },
+      select: {
+        id: true,
+        name: true,
+        slug: true,
+        shopCategory: true,
+        settings: { select: { booking: true, commerce: true } },
+        branding: { select: { logoUrl: true } },
+        content: { select: { heroImageUrl: true, aboutText: true } },
+      },
+      orderBy: { createdAt: "asc" },
+    });
+    const ids = studios.map((s) => s.id);
+    const [contacts, services, ratings, images, categories] = await Promise.all([
+      this.contactInfo.findMany({ where: { studioId: { in: ids } }, select: { studioId: true, address: true } }),
+      this.service.findMany({ where: { studioId: { in: ids }, active: true }, select: { studioId: true, name: true, popular: true } }),
+      this.review.groupBy({ by: ["studioId"], where: { studioId: { in: ids }, approved: true }, _avg: { rating: true }, _count: { _all: true } }),
+      // A photo for businesses without a hero image: their newest product or gallery shot.
+      this.product.findMany({ where: { studioId: { in: ids }, active: true, imageUrl: { not: null } }, select: { studioId: true, imageUrl: true }, orderBy: { createdAt: "desc" } }),
+      // A shop's tags are its product categories.
+      this.productCategory.findMany({ where: { studioId: { in: ids }, active: true }, select: { studioId: true, name: true }, orderBy: { order: "asc" } }),
+    ]);
+    const s3 = new S3BucketService();
+    // Searches start at 3 characters; shorter is treated as no search.
+    const raw = typeof q === "string" ? q.trim().toLowerCase().slice(0, 80) : "";
+    const query = raw.length >= 3 ? raw : "";
+    const data = studios
+      .map((st) => {
+        const booking = st.settings?.booking !== false;
+        const own = services.filter((x) => x.studioId === st.id);
+        const top = booking
+          ? [...own].sort((a, b) => Number(b.popular) - Number(a.popular)).slice(0, 3).map((x) => x.name)
+          : categories.filter((c) => c.studioId === st.id).slice(0, 3).map((c) => c.name);
+        const rating = ratings.find((r) => r.studioId === st.id);
+        const photo = st.content?.heroImageUrl ?? images.find((i) => i.studioId === st.id)?.imageUrl ?? null;
+        return {
+          name: st.name,
+          slug: st.slug,
+          kind: booking ? ("studio" as const) : ("store" as const),
+          shopCategory: st.shopCategory,
+          area: contacts.find((c) => c.studioId === st.id)?.address ?? null,
+          about: st.content?.aboutText?.slice(0, 160) ?? null,
+          logoUrl: s3.deliveryUrl(st.branding?.logoUrl ?? null),
+          photoUrl: s3.deliveryUrl(photo),
+          topServices: top,
+          rating: rating?._avg.rating ?? null,
+          reviews: rating?._count._all ?? 0,
+          searchText: [
+            st.name,
+            contacts.find((c) => c.studioId === st.id)?.address ?? "",
+            ...own.map((x) => x.name),
+            ...categories.filter((c) => c.studioId === st.id).map((c) => c.name),
+            st.shopCategory ?? "",
+          ]
+            .join(" ")
+            .toLowerCase(),
+        };
+      })
+      .filter((d) => (kind === "studio" || kind === "store" ? d.kind === kind : true))
+      .filter((d) => !query || query.split(/\s+/).every((w) => d.searchText.includes(w)))
+      .map(({ searchText: _searchText, ...rest }) => rest);
+    return { message: "Directory", data };
+  }
+
+  /**
+   * Public figures for the platform's landing page (shown as they are).
+   */
+  public async getPublicStats() {
+    const [studios, bookings, customers, orders] = await Promise.all([
+      this.studio.count({ where: { status: "ACTIVE" } }),
+      this.appointment.count({
+        where: { status: { in: ["CONFIRMED", "COMPLETED"] } },
+      }),
+      this.user.count({ where: { role: "CUSTOMER" } }),
+      // Shop orders customers paid for (and those already handed over).
+      this.order.count({ where: { status: { in: [...PAID_ORDER_STATUSES] } } }),
+    ]);
+    return {
+      studiosLive: studios,
+      bookingsMade: bookings,
+      customers,
+      ordersPlaced: orders,
     };
   }
 
@@ -1049,6 +1190,19 @@ export class PlatformService extends Connection {
           }
         : null,
       lastPayment,
+      // What this customer pays per period now, after its own terms.
+      yourPrice: studioPriceFor(
+        studio,
+        studio.plan as Plan,
+        studio.billingCadence as "MONTHLY" | "YEARLY",
+        await loadBillingConfig(),
+      ),
+      terms: {
+        customPriceMonthly: studio.customPriceMonthly,
+        discountPercent: studio.billingDiscountPercent,
+        discountEndsAt: studio.billingDiscountEndsAt,
+        note: studio.billingNote,
+      },
       totalPaid:
         Math.round(earnings.reduce((t, e) => t + e.amount, 0) * 100) / 100,
       payments: earnings,
@@ -1145,6 +1299,7 @@ export class PlatformService extends Connection {
         plan: input.plan,
         ...(input.cadence ? { billingCadence: input.cadence } : {}),
         ...(input.billingMode ? { billingMode: input.billingMode } : {}),
+        ...(input.shopCategory ? { shopCategory: input.shopCategory } : {}),
         ...(input.platformFeePercent !== undefined
           ? { platformFeePercent: input.platformFeePercent }
           : {}),
@@ -1166,6 +1321,7 @@ export class PlatformService extends Connection {
       data: {
         email: input.ownerEmail,
         password: input.ownerPasswordHash,
+        ...(input.ownerEmailVerified ? { emailVerifiedAt: new Date() } : {}),
         role: "ADMIN",
         studioId: studio.id,
       },
@@ -1307,7 +1463,7 @@ export class PlatformService extends Connection {
           select: { email: true },
         });
         if (owner?.email) {
-          const { subject, html } = studioAccountSuspended(platformBrand, {
+          const { subject, html } = studioAccountSuspended(platformBrandForPlan(studio.plan), {
             studioName: studio.name,
             supportEmail: env.senderEmail,
           });
@@ -1390,6 +1546,7 @@ export class PlatformService extends Connection {
         ([k, v]) =>
           typeof v === "boolean" &&
           [
+            "booking",
             "commerce",
             "loyalty",
             "referrals",

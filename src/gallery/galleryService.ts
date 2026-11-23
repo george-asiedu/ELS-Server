@@ -1,6 +1,8 @@
 import { Connection } from "../db/dbConnection";
 import { S3BucketService } from "../bucket/s3BucketService";
 import { ApiError } from "../middleware/apiError";
+import { TRASH_DAYS, forgetStorage, keyFromUrl } from "../storage/storageService";
+import { runAsSuperAdmin } from "../tenant/context";
 import {
   CursorPage,
   cursorPageArgs,
@@ -20,7 +22,7 @@ export class GalleryService extends Connection {
     });
     const slugs = visible.map((c) => c.slug);
     const images = await this.gallery.findMany({
-      where: { active: true, category: { in: slugs } },
+      where: { active: true, deletedAt: null, category: { in: slugs } },
       orderBy: [{ createdAt: "desc" }, { id: "desc" }],
       ...cursorPageArgs(page),
     });
@@ -35,6 +37,7 @@ export class GalleryService extends Connection {
 
   public async listAll(page: CursorPage) {
     const images = await this.gallery.findMany({
+      where: { deletedAt: null },
       orderBy: [{ createdAt: "desc" }, { id: "desc" }],
       ...cursorPageArgs(page),
     });
@@ -162,12 +165,73 @@ export class GalleryService extends Connection {
     return { message: "Gallery item updated", data: updated };
   }
 
+  /** Delete moves the item to the trash. It stays stored (and counted) for 30 days. */
   public async remove(id: string) {
     const existing = await this.gallery.findUnique({ where: { id } });
-    if (!existing) {
+    if (!existing || existing.deletedAt) {
       throw new ApiError("Image not found", 404);
     }
-    await this.gallery.delete({ where: { id } });
-    return { message: "Image deleted successfully" };
+    await this.gallery.update({
+      where: { id },
+      data: { deletedAt: new Date(), purgeAfter: new Date(Date.now() + TRASH_DAYS * 86_400_000) },
+    });
+    return { message: `Moved to the trash. You can restore it for ${TRASH_DAYS} days.` };
+  }
+
+  public async listTrash() {
+    const items = await this.gallery.findMany({
+      where: { deletedAt: { not: null } },
+      orderBy: { deletedAt: "desc" },
+    });
+    items.forEach((item) => {
+      item.imageUrl = this.s3.deliveryUrl(item.imageUrl) ?? item.imageUrl;
+    });
+    return { message: "Trash", data: items };
+  }
+
+  public async restore(id: string) {
+    const existing = await this.gallery.findUnique({ where: { id } });
+    if (!existing?.deletedAt) throw new ApiError("That item isn't in the trash", 404);
+    // Its category may have been removed meanwhile: put it back where it can be seen.
+    const category = await this.category.findFirst({ where: { slug: existing.category } });
+    const restored = await this.gallery.update({
+      where: { id },
+      data: { deletedAt: null, purgeAfter: null, ...(category ? {} : { active: false }) },
+    });
+    return {
+      message: category ? "Restored." : "Restored, but its category no longer exists, so it's hidden until you move it.",
+      data: restored,
+    };
+  }
+
+  /** Delete one trashed item for good, and its file. */
+  public async purge(id: string) {
+    const existing = await this.gallery.findUnique({ where: { id } });
+    if (!existing?.deletedAt) throw new ApiError("Move it to the trash first", 400);
+    await this.purgeRow(existing);
+    return { message: "Deleted for good." };
+  }
+
+  /** The row and the file behind it. A file shared by another item is kept. */
+  private async purgeRow(item: { id: string; studioId: string | null; imageUrl: string }) {
+    const key = keyFromUrl(item.imageUrl);
+    const sharedBy = key ? await this.gallery.count({ where: { id: { not: item.id }, imageUrl: item.imageUrl } }) : 0;
+    await this.gallery.delete({ where: { id: item.id } });
+    if (key && !sharedBy) {
+      await this.s3.deleteFile(key).catch((e) => console.warn("Couldn't delete a stored file:", (e as Error).message));
+    }
+    if (item.studioId) forgetStorage(item.studioId);
+  }
+
+  /** Daily: empty what's been in the trash past its time, in every studio. */
+  public async purgeExpired() {
+    return runAsSuperAdmin(async () => {
+      const due = await this.gallery.findMany({
+        where: { deletedAt: { not: null }, purgeAfter: { lte: new Date() } },
+        take: 500,
+      });
+      for (const item of due) await this.purgeRow(item);
+      return { purged: due.length };
+    });
   }
 }

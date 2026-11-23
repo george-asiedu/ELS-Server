@@ -16,6 +16,15 @@ export class AppointmentController {
     return res.status(201).json(result);
   };
 
+  // A booking without an account. No design upload and no points: those need
+  // someone signed in. The response carries the token that unlocks payment.
+  public static createGuest = async (req: Request, res: Response) => {
+    const { designImageUrl: _ignored, applyPoints: _points, ...body } = req.body ?? {};
+    assertValid(validateCreateAppointment, body);
+    const result = await appointmentService.create(body, undefined, { guest: true });
+    return res.status(201).json(result);
+  };
+
   public static availability = async (req: Request, res: Response) => {
     const date = String(req.query.date || "");
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
@@ -29,6 +38,11 @@ export class AppointmentController {
     if (!req.user) throw new ApiError("Authentication required", 401);
     const page = parseCursorPage(req.query.cursor, req.query.limit);
     const result = await appointmentService.listForUser(req.user.id, page);
+    return res.status(200).json(result);
+  };
+
+  public static calendar = async (req: Request, res: Response) => {
+    const result = await appointmentService.listRange(req.query.from, req.query.to);
     return res.status(200).json(result);
   };
 

@@ -1,0 +1,95 @@
+#!/usr/bin/env bash
+#
+# Keeps Neon as an off-server restore copy of the Zuri database.
+#
+# Runs after every nightly backup (zuri-backup.service → ExecStartPost) and loads the
+# newest dump from /var/backups/zuri into the Neon database in /etc/zuri/neon.env,
+# replacing what is there. If the VPS is ever lost, the data is still on Neon:
+# point DATABASE_URL back at it, or dump it onto a new server.
+#
+# Safety:
+#   - Refuses to run while the app itself still uses that Neon database (it would wipe
+#     live data). It only starts once DATABASE_URL in /etc/zuri/app.env points elsewhere.
+#   - Refuses to copy an empty database, or one with fewer users than Neon (data not
+#     imported yet, or something went wrong on this server).
+#   - Restores in one transaction: if anything fails, Neon keeps yesterday's copy.
+#   - Checks Neon's PostgreSQL version can take this server's dumps.
+#   - Never fails the backup itself: a problem here is logged, the local dump stays.
+#
+# Manual run:  sudo /usr/local/sbin/zuri-neon-copy
+# Turn off:    sudo rm /etc/zuri/neon.env   (or leave NEON_DATABASE_URL empty)
+
+set -euo pipefail
+ENV_DIR=/etc/zuri
+APP_ENV="${ENV_DIR}/api.env"
+NEON_ENV="${ENV_DIR}/neon.env"
+DIR="${ZURI_BACKUP_DIR:-/var/backups/zuri}"
+DB="${ZURI_DB:-zuri}"
+log() { echo "neon-copy: $*"; }
+# Any unexpected error (e.g. Neon unreachable): say so, leave Neon as it is, don't fail the backup.
+trap 'rc=$?; [ $rc -ne 0 ] && log "stopped on an error (exit $rc); Neon left as it is"; exit 0' EXIT
+
+[ -r "${NEON_ENV}" ] || { log "no ${NEON_ENV}; skipping"; exit 0; }
+# The local database port (set by setup-db.sh), for manual runs outside the backup service.
+# shellcheck disable=SC1091
+[ -z "${ZURI_DB_PORT:-}" ] && [ -r "${ENV_DIR}/db.env" ] && . "${ENV_DIR}/db.env"
+# shellcheck disable=SC1090
+. "${NEON_ENV}"
+[ -n "${NEON_DATABASE_URL:-}" ] || { log "NEON_DATABASE_URL is empty; skipping"; exit 0; }
+NEON="${NEON_DATABASE_URL/-pooler./.}" # restores need the direct endpoint, not the pooler
+host_of() { sed -E 's#^[a-z]+://[^@]*@([^/:?]+).*#\1#' <<<"$1" | sed 's/-pooler\././'; }
+
+# Never overwrite the database the app is using.
+APP_URL="$(grep -E '^DATABASE_URL=' "${APP_ENV}" | head -1 | cut -d= -f2- | tr -d "'\"")"
+if [ "$(host_of "${APP_URL}")" = "$(host_of "${NEON}")" ]; then
+  log "REFUSING: the app still uses ${NEON%%\?*} as its live database. Move it to this server first (setup-db.sh + import-from-neon.sh)."
+  exit 0
+fi
+
+DUMP="$(ls -1t "${DIR}"/zuri-*.dump 2>/dev/null | head -1 || true)"
+[ -n "${DUMP}" ] || { log "no backup in ${DIR} yet; skipping"; exit 0; }
+
+# The newest local client tools (they must be at least the server's version that made the dump).
+BIN="$(ls -d /usr/lib/postgresql/*/bin 2>/dev/null | sort -V | tail -1)"
+LOCAL_MAJOR="$(basename "$(dirname "${BIN}")")"
+NEON_MAJOR="$("${BIN}/psql" "${NEON}" -qAtc 'SHOW server_version_num' | cut -c1-2)"
+if [ "${NEON_MAJOR}" -lt "${LOCAL_MAJOR}" ]; then
+  log "Neon runs PostgreSQL ${NEON_MAJOR} but backups come from ${LOCAL_MAJOR}. Upgrade the Neon project to ${LOCAL_MAJOR}+ (Neon console → Settings). Skipping."
+  exit 0
+fi
+
+# Never replace a fuller database with an emptier one (e.g. before the data was imported).
+psql_local() { sudo -u postgres "${BIN}/psql" -p "${ZURI_DB_PORT:-5432}" -d "${DB}" -qAtc "$1"; }
+LOCAL_USERS="$(psql_local 'SELECT count(*) FROM users' 2>/dev/null || echo 0)"
+NEON_USERS="$("${BIN}/psql" "${NEON}" -qAtc 'SELECT count(*) FROM users' 2>/dev/null || echo 0)"
+if [ "${LOCAL_USERS:-0}" -eq 0 ]; then
+  log "REFUSING: this server's database has no users yet (create the first user, or run import-from-neon.sh). Neon left as it is."
+  exit 0
+fi
+if [ "${NEON_USERS:-0}" -gt "${LOCAL_USERS}" ]; then
+  log "REFUSING: Neon has more users (${NEON_USERS}) than this server (${LOCAL_USERS}); it may hold data that isn't here. Neon left as it is."
+  exit 0
+fi
+
+log "loading $(basename "${DUMP}") into Neon (PostgreSQL ${NEON_MAJOR})"
+LIST="$(mktemp)"
+trap 'rc=$?; rm -f "${LIST}"; [ $rc -ne 0 ] && log "stopped on an error (exit $rc); Neon left as it is"; exit 0' EXIT
+# Leave Neon's own schema and extensions alone (Neon manages them), but make sure every
+# extension the dump uses (citext, pg_trgm…) is switched on there first.
+for ext in $("${BIN}/pg_restore" -l "${DUMP}" | awk '/ EXTENSION - /{print $NF}' | sort -u); do
+  case "${ext}" in plpgsql) continue ;; esac
+  "${BIN}/psql" "${NEON}" -qAtc "CREATE EXTENSION IF NOT EXISTS \"${ext}\" WITH SCHEMA public" >/dev/null
+done
+"${BIN}/pg_restore" -l "${DUMP}" | grep -vE ' (EXTENSION|SCHEMA) - | COMMENT - EXTENSION ' > "${LIST}"
+if ! "${BIN}/pg_restore" --clean --if-exists --no-owner --no-privileges --single-transaction --exit-on-error -L "${LIST}" -d "${NEON}" "${DUMP}"; then
+  log "FAILED: Neon keeps its previous copy. The local backup ${DUMP} is fine."
+  exit 0
+fi
+
+# Compare a few row counts so a silent mismatch shows up in the log.
+for t in users studios appointments orders; do
+  a="$(psql_local "SELECT count(*) FROM \"${t}\"" 2>/dev/null || echo '?')"
+  b="$("${BIN}/psql" "${NEON}" -qAtc "SELECT count(*) FROM \"${t}\"")"
+  [ "${a}" = "${b}" ] && log "  ${t}: ${b}" || log "  ${t}: server=${a} neon=${b}  <-- differs (rows written since the backup are expected)"
+done
+log "done: Neon is a copy as of $(basename "${DUMP}")"

@@ -1,3 +1,4 @@
+import { PAID_ORDER_STATUSES } from "../order/orderStatus";
 import { Connection } from "../db/dbConnection";
 import { studioLink } from "../utils/studioLink";
 import { S3BucketService } from "../bucket/s3BucketService";
@@ -5,14 +6,11 @@ import { ApiError } from "../middleware/apiError";
 import { HttpCode } from "../models/status_codes";
 import { paystack } from "../payment/paystackClient";
 import { env } from "../config/env.config";
+import { whatsappConfigured } from "../whatsapp/whatsappService";
 import { randomUUID } from "crypto";
 import { shortId } from "../utils/shortId";
 import { promises as dns } from "dns";
-import {
-  planFlags,
-  planPriceFor,
-  loadBillingConfig,
-} from "../platform/platformService";
+import { planFlags, loadBillingConfig } from "../platform/platformService";
 import { AuditService } from "../audit/auditService";
 import {
   Plan,
@@ -21,7 +19,16 @@ import {
   extendPeriod,
   isLapsed,
   subtractPeriod,
+  isPlan,
 } from "../billing/billingPlans";
+import {
+  STUDIO_PRICE_SELECT,
+  activeDiscount,
+  countPromoUse,
+  promoPercent,
+  studioPriceFor,
+} from "../billing/studioPricing";
+import { isShopCategory } from "../billing/shopCategories";
 import {
   resolveStudioByDomain,
   forgetStudioDomain,
@@ -33,7 +40,8 @@ import {
   subscriptionExpiringSoon,
   subscriptionExpired,
 } from "../notifications/templates/subscription";
-import { platformBrand } from "../notifications/brand";
+import { markExtrasBilled, pendingExtras, reserveExtras } from "../billing/extraCharges";
+import { platformBrandForPlan } from "../notifications/brand";
 import { ghs } from "../notifications/format";
 
 const DOMAIN_RE = /^(?!-)[a-z0-9-]{1,63}(\.[a-z0-9-]{1,63})+$/;
@@ -134,6 +142,21 @@ const sanitizeFeatureCards = (value: unknown): FeatureCard[] | undefined => {
 export const isStudioBillingReference = (reference: string) =>
   reference.startsWith("ZURI-RENEW-") || reference.startsWith("ZURI-BILLING-");
 
+// Kinds of studio (the website's default wording) and website layouts.
+// Mirrored by the frontend's lib/studioTemplates.ts.
+export const STUDIO_TYPES = [
+  "hair",
+  "braids",
+  "nails",
+  "lashes-brows",
+  "makeup",
+  "skin-spa",
+  "barber",
+  "wellness",
+  "general",
+] as const;
+export const SITE_TEMPLATES = ["editorial", "bold", "minimal"] as const;
+
 export class StudioService extends Connection {
   private notifications = new NotificationService();
 
@@ -166,6 +189,9 @@ export class StudioService extends Connection {
     return {
       name: studio.name,
       slug: studio.slug,
+      // What the shop sells: picks the shop website's design.
+      shopCategory: studio.shopCategory ?? null,
+      plan: studio.plan,
       branding: {
         logoUrl: this.s3.deliveryUrl(studio.branding?.logoUrl ?? null) ?? null,
         primaryColor: studio.branding?.primaryColor ?? null,
@@ -174,6 +200,7 @@ export class StudioService extends Connection {
       },
       content: this.publicContent(studio.content),
       settings: {
+        booking: studio.settings?.booking ?? true,
         commerce: studio.settings?.commerce ?? false,
         loyalty: studio.settings?.loyalty ?? true,
         referrals: studio.settings?.referrals ?? true,
@@ -182,6 +209,9 @@ export class StudioService extends Connection {
         onlinePayments: studio.settings?.onlinePayments ?? false,
         productsInBooking: studio.settings?.productsInBooking ?? false,
         loyaltyCapPercent: studio.settings?.loyaltyCapPercent ?? 30,
+        // So checkout can show the fee before the customer pays.
+        customerPaysFee: (studio.settings?.paystackFeePayer ?? "CUSTOMER") === "CUSTOMER",
+        processingFeePercent: env.paystack.feePercent,
       },
     };
   }
@@ -396,26 +426,43 @@ export class StudioService extends Connection {
     const s = await this.studio.findUnique({
       where: { id },
       select: {
-        plan: true,
         billingCadence: true,
         billingMode: true,
         platformFeePercent: true,
         subscriptionStatus: true,
         currentPeriodEnd: true,
+        ...STUDIO_PRICE_SELECT,
       },
     });
     if (!s) throw new ApiError("Studio not found", HttpCode.NOT_FOUND);
+    const cfg = await loadBillingConfig();
+    // What this studio pays per period for each plan, after its own terms.
+    const yourPrices = Object.fromEntries(
+      (["STANDARD", "PREMIUM", "STOREFRONT"] as Plan[]).map((p) => [
+        p,
+        {
+          MONTHLY: studioPriceFor(s, p, "MONTHLY", cfg).amount,
+          YEARLY: studioPriceFor(s, p, "YEARLY", cfg).amount,
+        },
+      ]),
+    );
     // Revenue-share studios have no billing period, so they never "lapse" —
     // the platform earns its cut per transaction instead.
     const revenueShare = s.billingMode === "REVENUE_SHARE";
     const lapsed = revenueShare ? false : isLapsed(s.currentPeriodEnd);
+    const extras = await pendingExtras(id);
     return {
       message: "Billing",
       data: {
+        // On top of the plan: added to the next renewal.
+        extras,
         plan: s.plan,
         cadence: s.billingCadence,
         billingMode: s.billingMode,
         commissionPercent: revenueShare ? s.platformFeePercent : 0,
+        yourPrices,
+        discountPercent: activeDiscount(s),
+        discountEndsAt: activeDiscount(s) ? s.billingDiscountEndsAt : null,
         // Derived from the period end so the UI always reflects reality even if
         // no webhook fired: "active" while paid, "lapsed" once the period ends.
         subscriptionStatus: revenueShare
@@ -439,16 +486,47 @@ export class StudioService extends Connection {
     kind: "RENEWAL" | "PLAN_CHANGE",
     plan: Plan,
     cadence: Cadence,
+    rawPromo?: unknown,
   ) {
-    const amount = planPriceFor(plan, cadence, await loadBillingConfig());
+    const studio = await this.studio.findUnique({
+      where: { id: studioId },
+      select: STUDIO_PRICE_SELECT,
+    });
+    const promo = await promoPercent(rawPromo, plan);
+    const { amount } = studioPriceFor(
+      studio,
+      plan,
+      cadence,
+      await loadBillingConfig(),
+      promo,
+    );
+    if (!(amount > 0)) {
+      throw new ApiError(
+        "This charge comes to nothing. Contact us to apply it.",
+        HttpCode.BAD_REQUEST,
+      );
+    }
+    // A renewal also settles what the studio owes on top of its plan (feature
+    // request fees, extra storage, training), added after any promo discount.
+    const extras = kind === "RENEWAL" ? await pendingExtras(studioId) : { items: [], total: 0 };
+    const chargeAmount = Math.round((amount + extras.total) * 100) / 100;
     const email = await this.ownerEmail(studioId);
     const reference = `${kind === "RENEWAL" ? "ZURI-RENEW-" : "ZURI-BILLING-"}${shortId()}`;
     await this.studioBillingCharge.create({
-      data: { reference, studioId, kind, plan, cadence, amount },
+      data: {
+        reference,
+        studioId,
+        kind,
+        plan,
+        cadence,
+        amount: chargeAmount,
+        ...(promo.code ? { promoCode: promo.code } : {}),
+      },
     });
+    if (extras.items.length) await reserveExtras(studioId, reference);
     const init = await paystack.initialize({
       email,
-      amountPesewas: toPesewas(amount),
+      amountPesewas: toPesewas(chargeAmount),
       reference,
       // Back to the studio's own site, where its admin is signed in.
       callbackUrl: await this.linkToStudio("/admin/billing", studioId),
@@ -472,9 +550,10 @@ export class StudioService extends Connection {
     studioId: string | null | undefined,
     plan: string,
     cadence: string,
+    promoCode?: unknown,
   ) {
     const id = this.requireStudioId(studioId);
-    if (!["STANDARD", "PREMIUM"].includes(plan)) {
+    if (!isPlan(plan)) {
       throw new ApiError("Invalid plan", HttpCode.BAD_REQUEST);
     }
     if (!["MONTHLY", "YEARLY"].includes(cadence)) {
@@ -485,6 +564,15 @@ export class StudioService extends Connection {
       select: { plan: true, billingCadence: true, billingMode: true },
     });
     if (!studio) throw new ApiError("Studio not found", HttpCode.NOT_FOUND);
+    // Zuri Stores and the studio plans are different products: a
+    // storefront can change billing period, a studio can move between
+    // Standard and Premium, but neither crosses over.
+    if ((plan === "STOREFRONT") !== (studio.plan === "STOREFRONT")) {
+      throw new ApiError(
+        "Storefront and studio plans can't be switched between. Contact us if you need to.",
+        HttpCode.BAD_REQUEST,
+      );
+    }
     // A pay-as-you-earn studio may move to a recurring plan (this is the switch
     // itself, so any plan/cadence is allowed). The reverse isn't offered.
     if (
@@ -499,12 +587,16 @@ export class StudioService extends Connection {
       "PLAN_CHANGE",
       plan as Plan,
       cadence as Cadence,
+      promoCode,
     );
     return { message: "Plan change started", data };
   }
 
   // Renew the current plan for another period (manual, before/after lapse).
-  public async startRenewal(studioId: string | null | undefined) {
+  public async startRenewal(
+    studioId: string | null | undefined,
+    promoCode?: unknown,
+  ) {
     const id = this.requireStudioId(studioId);
     const studio = await this.studio.findUnique({
       where: { id },
@@ -522,8 +614,48 @@ export class StudioService extends Connection {
       "RENEWAL",
       studio.plan as Plan,
       studio.billingCadence as Cadence,
+      promoCode,
     );
     return { message: "Renewal started", data };
+  }
+
+  /**
+   * Pay what's owed on top of the plan (feature request fees, storage,
+   * training) now rather than at the next renewal. This is also how a studio
+   * that pays per transaction, and so has no renewal, settles them.
+   */
+  public async startExtrasPayment(studioId: string | null | undefined) {
+    const id = this.requireStudioId(studioId);
+    const studio = await this.studio.findUnique({
+      where: { id },
+      select: { plan: true, billingCadence: true },
+    });
+    if (!studio) throw new ApiError("Studio not found", HttpCode.NOT_FOUND);
+    const extras = await pendingExtras(id);
+    if (!(extras.total > 0)) throw new ApiError("There's nothing to pay right now", HttpCode.BAD_REQUEST);
+    const email = await this.ownerEmail(id);
+    const reference = `ZURI-BILLING-${shortId()}`;
+    await this.studioBillingCharge.create({
+      data: { reference, studioId: id, kind: "EXTRAS", plan: studio.plan, cadence: studio.billingCadence, amount: extras.total },
+    });
+    await reserveExtras(id, reference);
+    const init = await paystack.initialize({
+      email,
+      amountPesewas: toPesewas(extras.total),
+      reference,
+      callbackUrl: await this.linkToStudio("/admin/billing", id),
+      metadata: { kind: "extras", studioId: id },
+    });
+    return {
+      message: "Payment started",
+      data: { reference, accessCode: init.access_code, publicKey: env.paystack.publicKey },
+    };
+  }
+
+  public async applyExtrasPayment(studioId: string | null | undefined, reference: string) {
+    const id = this.requireStudioId(studioId);
+    await this.applyBillingCharge(reference, { studioId: id, kind: "EXTRAS" });
+    return this.getBilling(id);
   }
 
   // The studio admin's return from checkout. The plan and cadence come from
@@ -615,7 +747,7 @@ export class StudioService extends Connection {
    */
   public async applyBillingCharge(
     reference: string,
-    expect: { studioId?: string; kind?: "RENEWAL" | "PLAN_CHANGE" } = {},
+    expect: { studioId?: string; kind?: "RENEWAL" | "PLAN_CHANGE" | "EXTRAS" } = {},
   ): Promise<"applied" | "already_applied"> {
     const charge = await this.studioBillingCharge.findUnique({
       where: { reference },
@@ -650,8 +782,14 @@ export class StudioService extends Connection {
     if (claimed.count === 0) return "already_applied";
 
     try {
-      if (charge.kind === "RENEWAL") await this.renewFromCharge(charge);
-      else await this.changePlanFromCharge(charge);
+      if (charge.kind === "RENEWAL") {
+        await this.renewFromCharge(charge);
+        await markExtrasBilled(charge.studioId, charge.reference);
+      } else if (charge.kind === "EXTRAS") {
+        // No change to the plan or period: this only settles what's owed on top.
+        await markExtrasBilled(charge.studioId, charge.reference);
+      } else await this.changePlanFromCharge(charge);
+      await countPromoUse(charge.promoCode);
     } catch (error) {
       // Nothing changed for the studio, so release the claim for a retry.
       await this.studioBillingCharge.update({
@@ -826,6 +964,12 @@ export class StudioService extends Connection {
       ...images,
       featureCards: content?.featureCards ?? null,
       showTestimonials: content?.showTestimonials ?? true,
+      studioType:
+        (content as { studioType?: string | null } | null | undefined)
+          ?.studioType ?? null,
+      siteTemplate:
+        (content as { siteTemplate?: string | null } | null | undefined)
+          ?.siteTemplate ?? null,
     };
   }
 
@@ -836,7 +980,50 @@ export class StudioService extends Connection {
       update: {},
       create: { studioId: id },
     });
-    return { message: "Content retrieved", data: this.publicContent(content) };
+    return {
+      message: "Content retrieved",
+      data: await this.withShopCategory(id, content),
+    };
+  }
+
+  // ---- Public: the studio's numbers, for its website ---------------------
+
+  /**
+   * Real figures for the website's metrics strip. A figure is only returned
+   * once it means something (a new studio doesn't advertise "0 clients"),
+   * so the strip shows what's true and hides what isn't there yet.
+   */
+  public async getPublicStats(studioId: string | null | undefined) {
+    const id = this.requireStudioId(studioId);
+    const [completed, clients, rating, services, studio] = await Promise.all([
+      this.appointment.count({ where: { status: "COMPLETED" } }),
+      this.appointment.groupBy({
+        by: ["phone"],
+        where: { status: { in: ["COMPLETED", "CONFIRMED"] } },
+      }),
+      this.review.aggregate({
+        where: { approved: true },
+        _avg: { rating: true },
+        _count: { _all: true },
+      }),
+      this.service.count({ where: { active: true } }),
+      this.studio.findUnique({ where: { id }, select: { createdAt: true } }),
+    ]);
+    const reviews = rating._count._all;
+    return {
+      message: "Studio stats",
+      data: {
+        appointmentsCompleted: completed >= 10 ? completed : null,
+        clientsServed: clients.length >= 10 ? clients.length : null,
+        averageRating:
+          reviews >= 3 && rating._avg.rating
+            ? Math.round(rating._avg.rating * 10) / 10
+            : null,
+        reviewCount: reviews >= 3 ? reviews : null,
+        servicesOffered: services || null,
+        onZuriSince: studio?.createdAt ?? null,
+      },
+    };
   }
 
   // ---- Admin: the studio's money ----------------------------------------
@@ -876,7 +1063,7 @@ export class StudioService extends Connection {
         select: { amount: true, refundedAmount: true, paidAt: true },
       }),
       this.order.findMany({
-        where: { status: { in: ["PAID", "FULFILLED"] } },
+        where: { status: { in: [...PAID_ORDER_STATUSES] } },
         select: {
           total: true,
           refundedAmount: true,
@@ -988,6 +1175,67 @@ export class StudioService extends Connection {
             : null,
       },
     };
+  }
+
+  // ---- Admin: WhatsApp messages to customers ------------------------------
+
+  public async getMessaging(studioId: string | null | undefined) {
+    const id = this.requireStudioId(studioId);
+    const settings = await this.studioSettings.findUnique({
+      where: { studioId: id },
+      select: { whatsappMessages: true },
+    });
+    return {
+      message: "Messaging settings",
+      data: {
+        // Whether the platform has WhatsApp set up at all.
+        whatsappAvailable: whatsappConfigured,
+        whatsappMessages: settings?.whatsappMessages ?? false,
+      },
+    };
+  }
+
+  public async setMessaging(studioId: string | null | undefined, whatsappMessages: unknown) {
+    const id = this.requireStudioId(studioId);
+    if (typeof whatsappMessages !== "boolean") throw new ApiError("Say whether to send WhatsApp messages", HttpCode.BAD_REQUEST);
+    if (whatsappMessages && !whatsappConfigured)
+      throw new ApiError("WhatsApp messages aren't available yet", HttpCode.BAD_REQUEST);
+    await this.studioSettings.upsert({
+      where: { studioId: id },
+      update: { whatsappMessages },
+      create: { studioId: id, whatsappMessages },
+    });
+    return this.getMessaging(id);
+  }
+
+  // ---- Admin: who pays Paystack's fee -------------------------------------
+
+  public async getFeePayer(studioId: string | null | undefined) {
+    const id = this.requireStudioId(studioId);
+    const settings = await this.studioSettings.findUnique({
+      where: { studioId: id },
+      select: { paystackFeePayer: true },
+    });
+    return {
+      message: "Fee settings",
+      data: {
+        payer: settings?.paystackFeePayer ?? "CUSTOMER",
+        feePercent: env.paystack.feePercent,
+      },
+    };
+  }
+
+  public async setFeePayer(studioId: string | null | undefined, payer: unknown) {
+    const id = this.requireStudioId(studioId);
+    if (payer !== "CUSTOMER" && payer !== "BUSINESS") {
+      throw new ApiError("Choose who pays the fee: CUSTOMER or BUSINESS", HttpCode.BAD_REQUEST);
+    }
+    await this.studioSettings.upsert({
+      where: { studioId: id },
+      update: { paystackFeePayer: payer },
+      create: { studioId: id, paystackFeePayer: payer },
+    });
+    return this.getFeePayer(id);
   }
 
   // ---- Admin: payout (Paystack subaccount for split settlement) ---------
@@ -1173,6 +1421,9 @@ export class StudioService extends Connection {
     input: Partial<Record<ContentTextField | ContentImageField, unknown>> & {
       featureCards?: unknown;
       showTestimonials?: unknown;
+      studioType?: unknown;
+      siteTemplate?: unknown;
+      shopCategory?: unknown;
     },
   ) {
     const id = this.requireStudioId(studioId);
@@ -1182,6 +1433,8 @@ export class StudioService extends Connection {
     > & {
       featureCards?: FeatureCard[];
       showTestimonials?: boolean;
+      studioType?: string | null;
+      siteTemplate?: string | null;
     } = {};
 
     // Omitted = leave unchanged; blank = back to the default.
@@ -1218,12 +1471,58 @@ export class StudioService extends Connection {
     if (input.showTestimonials !== undefined)
       data.showTestimonials = Boolean(input.showTestimonials);
 
+    // Fixed choices; blank = back to the default.
+    const choice = (v: unknown, allowed: readonly string[], label: string) => {
+      if (v === null || v === "") return null;
+      if (typeof v !== "string" || !allowed.includes(v)) {
+        throw new ApiError(`Unknown ${label}`, HttpCode.BAD_REQUEST);
+      }
+      return v;
+    };
+    if (input.studioType !== undefined)
+      data.studioType = choice(input.studioType, STUDIO_TYPES, "studio type");
+    // What the shop sells lives on the studio itself (set at signup).
+    if (input.shopCategory !== undefined) {
+      const cat = input.shopCategory;
+      if (cat !== null && cat !== "" && !isShopCategory(cat)) {
+        throw new ApiError("Unknown shop category", HttpCode.BAD_REQUEST);
+      }
+      await this.studio.update({
+        where: { id },
+        data: { shopCategory: (cat as string | null) || null },
+      });
+    }
+    if (input.siteTemplate !== undefined)
+      data.siteTemplate = choice(
+        input.siteTemplate,
+        SITE_TEMPLATES,
+        "website design",
+      );
+
     const content = await this.studioContent.upsert({
       where: { studioId: id },
       update: data,
       create: { studioId: id, ...data },
     });
-    return { message: "Content updated", data: this.publicContent(content) };
+    return {
+      message: "Content updated",
+      data: await this.withShopCategory(id, content),
+    };
+  }
+
+  // The admin editor shows what the shop sells next to the content.
+  private async withShopCategory(
+    id: string,
+    content: Parameters<StudioService["publicContent"]>[0],
+  ) {
+    const studio = await this.studio.findUnique({
+      where: { id },
+      select: { shopCategory: true },
+    });
+    return {
+      ...this.publicContent(content),
+      shopCategory: studio?.shopCategory ?? null,
+    };
   }
 
   // Background sweep (see queue/workers/billingReminderWorker.ts, run on a
@@ -1251,26 +1550,39 @@ export class StudioService extends Connection {
           currentPeriodEnd: true,
           ownerUserId: true,
           slug: true,
+          customPriceMonthly: true,
+          billingDiscountPercent: true,
+          billingDiscountEndsAt: true,
         },
       });
+
+      const owners = await this.user.findMany({
+        where: {
+          id: { in: studios.flatMap((s) => s.ownerUserId ?? []) },
+        },
+        select: { id: true, email: true },
+      });
+      const ownerById = new Map(owners.map((o) => [o.id, o]));
 
       let expiringSoon = 0;
       let expired = 0;
       for (const studio of studios) {
         if (!studio.ownerUserId || !studio.currentPeriodEnd) continue;
-        const owner = await this.user.findUnique({
-          where: { id: studio.ownerUserId },
-          select: { email: true },
-        });
+        const owner = ownerById.get(studio.ownerUserId);
         if (!owner?.email) continue;
 
         const lapsed = isLapsed(studio.currentPeriodEnd);
-        const planName = studio.plan === "PREMIUM" ? "Premium" : "Standard";
+        const planName =
+          studio.plan === "PREMIUM"
+            ? "Premium"
+            : studio.plan === "STOREFRONT"
+              ? "Storefront"
+              : "Standard";
         const periodKey = studio.currentPeriodEnd.toISOString().slice(0, 10);
 
         try {
           if (lapsed) {
-            const { subject, html } = subscriptionExpired(platformBrand, {
+            const { subject, html } = subscriptionExpired(platformBrandForPlan(studio.plan), {
               planName,
               expiredOn: studio.currentPeriodEnd.toLocaleDateString("en-GB", {
                 day: "numeric",
@@ -1291,13 +1603,14 @@ export class StudioService extends Connection {
             expired++;
           } else {
             const amountDue = ghs(
-              planPriceFor(
+              studioPriceFor(
+                studio,
                 studio.plan as Plan,
                 studio.billingCadence as Cadence,
                 billingConfig,
-              ),
+              ).amount,
             );
-            const { subject, html } = subscriptionExpiringSoon(platformBrand, {
+            const { subject, html } = subscriptionExpiringSoon(platformBrandForPlan(studio.plan), {
               planName,
               renewsOn: studio.currentPeriodEnd.toLocaleDateString("en-GB", {
                 day: "numeric",

@@ -13,6 +13,12 @@ export class OrderController {
       deliveryPhone,
       applyPoints,
       referralCode,
+      couponCode,
+      giftCardCode,
+      deliveryNote,
+      deliveryZoneId,
+      deliveryDate,
+      deliveryWindow,
     } = req.body ?? {};
     const result = await orderService.checkout(
       req.user.id,
@@ -21,6 +27,12 @@ export class OrderController {
         deliveryAddress,
         deliveryPhone,
         applyPoints: applyPoints === true || applyPoints === "true",
+        couponCode,
+        giftCardCode: typeof giftCardCode === "string" && giftCardCode.trim() ? giftCardCode : undefined,
+        deliveryNote: typeof deliveryNote === "string" ? deliveryNote : undefined,
+        deliveryZoneId: typeof deliveryZoneId === "string" ? deliveryZoneId : undefined,
+        deliveryDate: typeof deliveryDate === "string" ? deliveryDate : undefined,
+        deliveryWindow: typeof deliveryWindow === "string" ? deliveryWindow : undefined,
         referralCode,
       },
       req.headers.origin,
@@ -29,6 +41,15 @@ export class OrderController {
   };
 
   // Public — a guest buys one or more products without an account.
+  // Shows the discount before paying; checkout works it out again itself.
+  public static checkCoupon = async (req: Request, res: Response) => {
+    const data = await orderService.priceCoupon(
+      req.body?.code,
+      Number(req.body?.subtotal) || 0,
+    );
+    return res.status(200).json({ message: "Coupon applied", data });
+  };
+
   public static guestCheckout = async (req: Request, res: Response) => {
     const {
       items,
@@ -39,6 +60,12 @@ export class OrderController {
       deliveryAddress,
       deliveryPhone,
       referralCode,
+      couponCode,
+      giftCardCode,
+      deliveryNote,
+      deliveryZoneId,
+      deliveryDate,
+      deliveryWindow,
     } = req.body ?? {};
     if (!Array.isArray(items) || items.length === 0) {
       throw new ApiError("At least one product is required", 400);
@@ -53,6 +80,12 @@ export class OrderController {
         deliveryAddress,
         deliveryPhone,
         referralCode,
+        couponCode,
+        giftCardCode: typeof giftCardCode === "string" && giftCardCode.trim() ? giftCardCode : undefined,
+        deliveryNote: typeof deliveryNote === "string" ? deliveryNote : undefined,
+        deliveryZoneId: typeof deliveryZoneId === "string" ? deliveryZoneId : undefined,
+        deliveryDate: typeof deliveryDate === "string" ? deliveryDate : undefined,
+        deliveryWindow: typeof deliveryWindow === "string" ? deliveryWindow : undefined,
       },
       req.headers.origin,
     );
@@ -90,6 +123,12 @@ export class OrderController {
     return res.status(200).json(await orderService.verify(reference));
   };
 
+  public static chargeMomo = async (req: Request, res: Response) => {
+    const { reference, phone, provider } = req.body ?? {};
+    if (!reference || !phone || !provider) throw new ApiError("reference, phone and provider are required", 400);
+    return res.status(200).json(await orderService.chargeMomo(String(reference), String(phone).trim(), String(provider).trim().toLowerCase()));
+  };
+
   public static repay = async (req: Request, res: Response) => {
     const userId = req.user?.id;
     if (!userId) throw new ApiError("Authentication required", 401);
@@ -108,8 +147,8 @@ export class OrderController {
   public static updateStatus = async (req: Request, res: Response) => {
     const { id } = req.params;
     if (!id) throw new ApiError("Order ID is required", 400);
-    const { status } = req.body ?? {};
+    const { status, eta } = req.body ?? {};
     if (!status) throw new ApiError("status is required", 400);
-    return res.status(200).json(await orderService.updateStatus(id, status));
+    return res.status(200).json(await orderService.updateStatus(id, status, { eta }));
   };
 }

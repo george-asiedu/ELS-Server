@@ -1,7 +1,7 @@
 import { renderShell, button, esc } from "../design/shell";
 import { EmailBrand } from "../types";
 
-const ROSE = "#C23B65";
+const ROSE = "#FBC500";
 
 export const passwordResetRequested = (
   brand: EmailBrand,
@@ -49,6 +49,46 @@ export const passwordChanged = (
   };
 };
 
+export const accountLocked = (
+  brand: EmailBrand,
+  data: { lockedFor: string; recoveryUrl: string },
+) => ({
+  subject: "Sign-in to your account has been paused",
+  html: renderShell({
+    brand,
+    previewText: `Too many wrong passwords. Sign-in is locked for ${data.lockedFor}.`,
+    bodyHtml: `
+        <h1 style="margin: 0 0 12px; font-family: Georgia, serif; font-size: 22px; color: #2A1B1F;">Sign-in paused</h1>
+        <p style="margin: 0 0 16px; font-family: Arial, sans-serif; font-size: 15px; color: #2A1B1F; line-height: 1.6;">
+          Someone entered the wrong password for your account 3 times, so we've locked sign-in for ${esc(data.lockedFor)}. You can try again after that.
+        </p>
+        ${button("Reset your password", data.recoveryUrl, ROSE)}
+        <p class="muted" style="margin: 20px 0 0; font-family: Arial, sans-serif; font-size: 13px; color: #7A6A6E; line-height: 1.6;">
+          Resetting your password opens sign-in straight away. If this wasn't you, we recommend doing that now.
+        </p>`,
+  }),
+});
+
+export const emailVerificationCode = (
+  brand: EmailBrand,
+  data: { code: string; expiresInMinutes: number },
+) => ({
+  subject: `${data.code} is your Zuri verification code`,
+  html: renderShell({
+    brand,
+    previewText: `Your code is ${data.code}.`,
+    bodyHtml: `
+        <h1 style="margin: 0 0 12px; font-family: Georgia, serif; font-size: 22px; color: #2A1B1F;">Confirm your email</h1>
+        <p style="margin: 0 0 16px; font-family: Arial, sans-serif; font-size: 15px; color: #2A1B1F; line-height: 1.6;">
+          Enter this code to continue setting up your account. It expires in ${data.expiresInMinutes} minutes.
+        </p>
+        <p style="margin: 0 0 16px; font-family: Arial, sans-serif; font-size: 32px; font-weight: bold; letter-spacing: 6px; color: #2A1B1F;">${esc(data.code)}</p>
+        <p class="muted" style="margin: 0; font-family: Arial, sans-serif; font-size: 13px; color: #7A6A6E; line-height: 1.6;">
+          If you didn't ask for this, you can ignore this email.
+        </p>`,
+  }),
+});
+
 export const loginAlert = (
   brand: EmailBrand,
   data: {
@@ -90,17 +130,17 @@ export const customerWelcome = (
 ) => {
   const greeting = data.studioName
     ? `Welcome to ${esc(data.studioName)}`
-    : "Welcome to Zuri Studios";
-  const color = brand.kind === "studio" ? "#C23B65" : ROSE;
+    : "Welcome to Zuri";
+  const color = brand.kind === "studio" ? "#FBC500" : ROSE;
   return {
     subject: data.studioName
       ? `Welcome to ${data.studioName}, ${data.firstName}`
-      : `Welcome to Zuri Studios, ${data.firstName}`,
+      : `Welcome to Zuri, ${data.firstName}`,
     html: renderShell({
       brand,
       previewText: "Your account is ready.",
       bodyHtml: `
-        <h1 style="margin: 0 0 12px; font-family: Georgia, serif; font-size: 22px; color: #2A1B1F;">${greeting}, ${esc(data.firstName)} 👋</h1>
+        <h1 style="margin: 0 0 12px; font-family: Georgia, serif; font-size: 22px; color: #2A1B1F;">${greeting}, ${esc(data.firstName)}</h1>
         <p style="margin: 0; font-family: Arial, sans-serif; font-size: 15px; color: #2A1B1F; line-height: 1.6;">
           Your account is ready. Book appointments, track your visits, and earn loyalty
           points every time you come in.

@@ -39,6 +39,33 @@ export class PaymentController {
     return res.status(200).json(result);
   };
 
+  // Guest — pay for a booking made without an account, using its token.
+  public static guestInitialize = async (req: Request, res: Response) => {
+    const { appointmentId, type, guestToken } = req.body ?? {};
+    if (!appointmentId || !guestToken) throw new ApiError("appointmentId and guestToken are required", 400);
+    const result = await paymentService.initialize(
+      appointmentId,
+      type === "PARTIAL" ? "PARTIAL" : "FULL",
+      { guestToken: String(guestToken) },
+      req.headers.origin,
+    );
+    return res.status(200).json(result);
+  };
+
+  public static guestChargeMomo = async (req: Request, res: Response) => {
+    const { appointmentId, type, phone, provider, guestToken } = req.body ?? {};
+    if (!appointmentId || !guestToken) throw new ApiError("appointmentId and guestToken are required", 400);
+    if (!phone || !provider) throw new ApiError("phone and provider are required", 400);
+    const result = await paymentService.chargeMomoBooking(
+      appointmentId,
+      type === "PARTIAL" ? "PARTIAL" : "FULL",
+      { guestToken: String(guestToken) },
+      String(phone).trim(),
+      String(provider).trim().toLowerCase(),
+    );
+    return res.status(200).json(result);
+  };
+
   // Customer — charge their own booking via mobile money (phone prompt).
   public static chargeMomo = async (req: Request, res: Response) => {
     const { appointmentId, type, phone, provider } = req.body ?? {};

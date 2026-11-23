@@ -20,6 +20,10 @@ export const rateLimitStore = (namespace: string) => {
   `;
   return {
     localKeys: false,
+    // Tells express-rate-limit these keys are namespaced. Without it, a request
+    // that passes two limiters (e.g. the general and the recovery one) looks
+    // like one key counted twice and logs ERR_ERL_DOUBLE_COUNT.
+    prefix,
     init: (options: NonNullable<Parameters<typeof rateLimit>[0]>) => {
       windowMs = options.windowMs ?? 60_000;
     },

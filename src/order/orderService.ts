@@ -1,3 +1,9 @@
+import { randomBytes, randomInt } from "crypto";
+import { ORDER_STATUSES, PAID_ORDER_STATUSES } from "./orderStatus";
+import { orderStageUpdate } from "../notifications/templates/shop";
+import { studioLink } from "../utils/studioLink";
+import { checkStockAlerts } from "../product/stockAlerts";
+import { VoucherService } from "../vouchers/voucherService";
 import { randomUUID } from "crypto";
 import { Connection } from "../db/dbConnection";
 import {
@@ -21,6 +27,19 @@ import {
 import { MoneyLine } from "../notifications/types";
 import { ghs, receiptDate, receiptNumber } from "../notifications/format";
 import { buildReceiptPdf } from "../notifications/receiptPdf";
+import { cleanSlots, cleanZones } from "../commerce/commerceSettingsService";
+
+/** The day and window a customer chose, checked against the shop's windows. */
+const pickSlot = (windows: string[], date: string | undefined, window: string | undefined): string | null => {
+  if (!windows.length) return null;
+  if (!window || !windows.includes(window)) throw new ApiError("Choose a delivery time", 400);
+  const day = date && /^\d{4}-\d{2}-\d{2}$/.test(date) ? new Date(`${date}T12:00:00Z`) : null;
+  const today = new Date(new Date().toISOString().slice(0, 10) + "T12:00:00Z");
+  const ahead = day ? Math.round((day.getTime() - today.getTime()) / 86_400_000) : -1;
+  if (!day || ahead < 0 || ahead > 13) throw new ApiError("Choose a delivery day within the next two weeks", 400);
+  const label = day.toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short", timeZone: "UTC" });
+  return `${label}, ${window}`;
+};
 import { receiptMethodLabel } from "../notifications/design/shell";
 
 type FulfillmentType = "PICKUP" | "DELIVERY";
@@ -28,6 +47,8 @@ type FulfillmentType = "PICKUP" | "DELIVERY";
 interface ItemSpec {
   productId: string;
   quantity: number;
+  size?: string;
+  color?: string;
 }
 
 interface LineItem {
@@ -36,6 +57,8 @@ interface LineItem {
   unitPrice: number;
   costPrice: number;
   quantity: number;
+  size?: string | undefined;
+  color?: string | undefined;
 }
 
 interface Contact {
@@ -50,6 +73,12 @@ export interface CheckoutInput {
   deliveryPhone?: string;
   applyPoints?: boolean;
   referralCode?: string;
+  couponCode?: string;
+  giftCardCode?: string | undefined;
+  deliveryNote?: string | undefined;
+  deliveryZoneId?: string | undefined;
+  deliveryDate?: string | undefined;
+  deliveryWindow?: string | undefined;
 }
 
 export interface GuestCheckoutInput {
@@ -61,6 +90,12 @@ export interface GuestCheckoutInput {
   deliveryAddress?: string;
   deliveryPhone?: string;
   referralCode?: string;
+  couponCode?: string;
+  giftCardCode?: string | undefined;
+  deliveryNote?: string | undefined;
+  deliveryZoneId?: string | undefined;
+  deliveryDate?: string | undefined;
+  deliveryWindow?: string | undefined;
 }
 
 const orderInclude = { items: true } as const;
@@ -101,18 +136,43 @@ export class OrderService extends Connection {
   }
 
   // Load products, validate availability, and snapshot pricing/cost.
-  private async resolveLineItems(specs: ItemSpec[]): Promise<LineItem[]> {
+  // Bookings add products without choosing options, so they skip that check.
+  private async resolveLineItems(
+    specs: ItemSpec[],
+    requireOptions = true,
+  ): Promise<LineItem[]> {
     if (!specs.length) throw new ApiError("No products selected", 400);
+    const products = await this.product.findMany({
+      where: { id: { in: specs.map((s) => s.productId) } },
+    });
+    const byId = new Map(products.map((p) => [p.id, p]));
     const items: LineItem[] = [];
+    // Stock is per product: lines for different options share it.
+    const wanted = new Map<string, number>();
     for (const spec of specs) {
       const qty = Math.max(1, Math.floor(spec.quantity || 1));
-      const p = await this.product.findUnique({
-        where: { id: spec.productId },
-      });
+      const p = byId.get(spec.productId);
       if (!p || !p.active) {
         throw new ApiError("A selected product is no longer available", 400);
       }
-      if (p.trackStock && qty > p.stock) {
+      const size = spec.size || undefined;
+      const color = spec.color || undefined;
+      const colorNames = p.colors.map((c) => c.split("|")[0]);
+      if (size && !p.sizes.includes(size)) {
+        throw new ApiError(`"${size}" isn't a size of "${p.name}"`, 400);
+      }
+      if (color && !colorNames.includes(color)) {
+        throw new ApiError(`"${color}" isn't a colour of "${p.name}"`, 400);
+      }
+      if (requireOptions && p.sizes.length && !size) {
+        throw new ApiError(`Choose a size for "${p.name}"`, 400);
+      }
+      if (requireOptions && colorNames.length && !color) {
+        throw new ApiError(`Choose a colour for "${p.name}"`, 400);
+      }
+      const total = (wanted.get(p.id) ?? 0) + qty;
+      wanted.set(p.id, total);
+      if (p.trackStock && total > p.stock) {
         throw new ApiError(`Only ${p.stock} of "${p.name}" left in stock`, 400);
       }
       items.push({
@@ -121,6 +181,8 @@ export class OrderService extends Connection {
         unitPrice: effectivePrice(p),
         costPrice: p.costPrice ?? 0,
         quantity: qty,
+        size,
+        color,
       });
     }
     return items;
@@ -135,6 +197,12 @@ export class OrderService extends Connection {
     deliveryAddress?: string | undefined;
     deliveryPhone?: string | undefined;
     referralCode?: string | undefined;
+    couponCode?: string | undefined;
+    giftCardCode?: string | undefined;
+  deliveryNote?: string | undefined;
+  deliveryZoneId?: string | undefined;
+  deliveryDate?: string | undefined;
+  deliveryWindow?: string | undefined;
     applyPoints?: boolean | undefined;
     appointmentId?: string | undefined;
     callbackPath: string;
@@ -186,11 +254,36 @@ export class OrderService extends Connection {
       }
     }
 
-    const deliveryFee = fulfillment === "DELIVERY" ? settings.deliveryFee : 0;
-    const total =
+    // A coupon comes off what's left after points, and only off products.
+    const coupon = params.couponCode
+      ? await this.priceCoupon(params.couponCode, subtotal)
+      : null;
+    const couponDiscount = coupon
+      ? Math.min(coupon.discount, subtotal - discountAmount)
+      : 0;
+    discountAmount = Math.round((discountAmount + couponDiscount) * 100) / 100;
+
+    // Delivery areas price the trip; without any, the flat fee applies.
+    const zones = cleanZones(settings.deliveryZones);
+    const zone = fulfillment === "DELIVERY" && zones.length ? zones.find((z) => z.id === params.deliveryZoneId) : undefined;
+    if (fulfillment === "DELIVERY" && zones.length && !zone) throw new ApiError("Choose your delivery area", 400);
+    const deliveryFee = fulfillment !== "DELIVERY" ? 0 : zone ? zone.fee : settings.deliveryFee;
+    const deliverySlot = fulfillment === "DELIVERY" ? pickSlot(cleanSlots(settings.deliverySlots), params.deliveryDate, params.deliveryWindow) : null;
+    let total =
       Math.round((subtotal - discountAmount + deliveryFee) * 100) / 100;
     if (total <= 0)
       throw new ApiError("Order total must be greater than 0", 400);
+
+    // A gift card pays some or all of what's left. Taken now under a lock on
+    // the code, and given back if the order is cancelled.
+    let voucher: { voucherId: string; covered: number } | null = null;
+    if (params.giftCardCode) {
+      voucher = await this.withAdvisoryLock(`voucher-code:${params.giftCardCode.trim().toUpperCase()}`, (tx) =>
+        new VoucherService().redeem(tx, params.giftCardCode, { amount: total }),
+      );
+      discountAmount = Math.round((discountAmount + voucher.covered) * 100) / 100;
+      total = Math.round((total - voucher.covered) * 100) / 100;
+    }
 
     const reference = await this.makeReference("ORD");
     const orderNumber = await this.genOrderNumber();
@@ -213,7 +306,13 @@ export class OrderService extends Connection {
           fulfillment === "DELIVERY" ? params.deliveryAddress!.trim() : null,
         deliveryPhone:
           fulfillment === "DELIVERY" ? params.deliveryPhone!.trim() : null,
+        deliveryZone: zone?.name ?? null,
+        deliverySlot,
+        deliveryNote:
+          fulfillment === "DELIVERY" && params.deliveryNote?.trim() ? params.deliveryNote.trim().slice(0, 300) : null,
         referralCode: params.referralCode?.trim() || null,
+        ...(coupon ? { couponCode: coupon.code, couponDiscount } : {}),
+        ...(voucher ? { voucherId: voucher.voucherId, voucherAmount: voucher.covered } : {}),
         ...(params.appointmentId
           ? { appointmentId: params.appointmentId }
           : {}),
@@ -225,6 +324,8 @@ export class OrderService extends Connection {
             unitPrice: li.unitPrice,
             costPrice: li.costPrice,
             quantity: li.quantity,
+            size: li.size ?? null,
+            color: li.color ?? null,
           })),
         },
       },
@@ -247,22 +348,59 @@ export class OrderService extends Connection {
       });
     }
 
+    // Paid in full by a gift card: settle it now, with nothing to charge.
+    if (total <= 0) {
+      await this.ledger.openAttempt({
+        reference,
+        expectedAmount: 0,
+        orderId: order.id,
+        customerEmail: params.contact.email,
+        customerName: params.contact.name ?? null,
+      });
+      await this.finalizeByReference(reference, {
+        status: "success",
+        amount: 0,
+        currency: "GHS",
+        id: `giftcard-${order.id}`,
+        channel: "gift_card",
+        paid_at: new Date().toISOString(),
+      } as unknown as PaystackVerifyData);
+      return {
+        message: "Order paid with a gift card",
+        data: {
+          authorizationUrl: null,
+          accessCode: null,
+          reference,
+          orderId: order.id,
+          orderNumber,
+          total: 0,
+          processingFee: 0,
+          paidWithGiftCard: true,
+          email: params.contact.email,
+          subaccount: null,
+          publicKey: env.paystack.publicKey,
+        },
+      };
+    }
+
+    const split = await this.paystackChargeFor(total);
+    await this.order.update({ where: { id: order.id }, data: { processingFee: split.processingFee } });
     await this.ledger.openAttempt({
       reference,
       expectedAmount: total,
+      processingFee: split.processingFee,
       orderId: order.id,
       customerEmail: params.contact.email,
       customerName: params.contact.name ?? null,
     });
 
-    const subaccount = await this.currentStudioSubaccount();
+    const { subaccount } = split;
     const init = await paystack.initialize({
       email: params.contact.email,
-      amountPesewas: Math.round(total * 100),
       reference,
       callbackUrl: `${safeClientOrigin(params.origin)}${params.callbackPath}`,
       metadata: { orderId: order.id, orderNumber, kind: "order" },
-      subaccount,
+      ...split,
     });
 
     return {
@@ -273,11 +411,45 @@ export class OrderService extends Connection {
         reference,
         orderId: order.id,
         orderNumber,
-        total,
+        // Charged now: the order total plus any processing fee.
+        total: split.amountPesewas / 100,
+        processingFee: split.processingFee,
         email: params.contact.email,
         subaccount,
         publicKey: env.paystack.publicKey,
       },
+    };
+  }
+
+  /** Check a coupon against a subtotal. Throws why it can't be used. */
+  public async priceCoupon(rawCode: string, subtotal: number) {
+    const code = String(rawCode ?? "")
+      .trim()
+      .toUpperCase();
+    const coupon = code
+      ? await this.coupon.findFirst({ where: { code } })
+      : null;
+    if (
+      !coupon ||
+      !coupon.active ||
+      (coupon.expiresAt && coupon.expiresAt < new Date()) ||
+      (coupon.maxUses !== null && coupon.usedCount >= coupon.maxUses)
+    ) {
+      throw new ApiError("That code isn't valid", 400);
+    }
+    if (subtotal < coupon.minSubtotal) {
+      throw new ApiError(
+        `This code needs an order of at least GHS ${coupon.minSubtotal}`,
+        400,
+      );
+    }
+    const raw =
+      coupon.type === "PERCENT"
+        ? (subtotal * coupon.value) / 100
+        : coupon.value;
+    return {
+      code: coupon.code,
+      discount: Math.round(Math.min(raw, subtotal) * 100) / 100,
     };
   }
 
@@ -291,7 +463,12 @@ export class OrderService extends Connection {
       throw new ApiError("Your cart is empty", 400);
     }
     const lineItems = await this.resolveLineItems(
-      cart.items.map((i) => ({ productId: i.productId, quantity: i.quantity })),
+      cart.items.map((i) => ({
+        productId: i.productId,
+        quantity: i.quantity,
+        size: i.size,
+        color: i.color,
+      })),
     );
     const email = await this.userEmail(userId);
     if (!email) throw new ApiError("An email is required to check out", 400);
@@ -309,6 +486,12 @@ export class OrderService extends Connection {
       fulfillment: input.fulfillment,
       deliveryAddress: input.deliveryAddress,
       deliveryPhone: input.deliveryPhone,
+      couponCode: input.couponCode,
+      giftCardCode: input.giftCardCode,
+      deliveryNote: input.deliveryNote,
+      deliveryZoneId: input.deliveryZoneId,
+      deliveryDate: input.deliveryDate,
+      deliveryWindow: input.deliveryWindow,
       referralCode: input.referralCode,
       applyPoints: input.applyPoints,
       callbackPath: "/order/callback",
@@ -333,6 +516,12 @@ export class OrderService extends Connection {
       deliveryAddress: input.deliveryAddress,
       deliveryPhone: input.deliveryPhone,
       referralCode: input.referralCode,
+      couponCode: input.couponCode,
+      giftCardCode: input.giftCardCode,
+      deliveryNote: input.deliveryNote,
+      deliveryZoneId: input.deliveryZoneId,
+      deliveryDate: input.deliveryDate,
+      deliveryWindow: input.deliveryWindow,
       callbackPath: "/order/callback",
       origin,
     });
@@ -369,7 +558,7 @@ export class OrderService extends Connection {
       throw new ApiError("The shop is currently unavailable", 400);
     }
 
-    const lineItems = await this.resolveLineItems(input.items);
+    const lineItems = await this.resolveLineItems(input.items, false);
     const productSubtotal =
       Math.round(
         lineItems.reduce((s, li) => s + li.unitPrice * li.quantity, 0) * 100,
@@ -469,9 +658,13 @@ export class OrderService extends Connection {
       where: { appointmentId: appt.id },
       select: { id: true },
     });
+    // The processing fee covers the whole charge; it's kept on the order.
+    const split = await this.paystackChargeFor(combined);
+    await this.order.update({ where: { id: order.id }, data: { processingFee: split.processingFee } });
     await this.ledger.openAttempt({
       reference,
       expectedAmount: combined,
+      processingFee: split.processingFee,
       orderId: order.id,
       appointmentId: appt.id,
       ...(combinedPayment ? { paymentId: combinedPayment.id } : {}),
@@ -479,14 +672,13 @@ export class OrderService extends Connection {
       customerName: order.customerName ?? null,
     });
 
-    const subaccount = await this.currentStudioSubaccount();
+    const { subaccount } = split;
     const init = await paystack.initialize({
       email,
-      amountPesewas: Math.round(combined * 100),
       reference,
       callbackUrl: `${safeClientOrigin(origin)}/booking/callback`,
       metadata: { orderId: order.id, appointmentId: appt.id, kind: "booking" },
-      subaccount,
+      ...split,
     });
 
     return {
@@ -498,7 +690,8 @@ export class OrderService extends Connection {
         orderId: order.id,
         serviceDueNow,
         productSubtotal,
-        total: combined,
+        total: split.amountPesewas / 100,
+        processingFee: split.processingFee,
         serviceType,
         email,
         subaccount,
@@ -514,9 +707,12 @@ export class OrderService extends Connection {
       include: orderInclude,
       ...cursorPageArgs(page),
     });
+    // The handover code is the customer's proof of receipt, so the shop's
+    // own list never shows it.
+    const hidden = orders.map(({ handoverCode: _code, riderToken: _token, ...o }) => o);
     return {
       message: "Orders retrieved successfully",
-      ...cursorPageResult(orders, page),
+      ...cursorPageResult(hidden as typeof orders, page),
     };
   }
 
@@ -537,19 +733,54 @@ export class OrderService extends Connection {
     };
   }
 
-  public async updateStatus(id: string, status: string) {
-    const allowed = ["PENDING_PAYMENT", "PAID", "FULFILLED", "CANCELLED"];
-    if (!allowed.includes(status)) {
+  public async updateStatus(id: string, status: string, opts: { eta?: unknown } = {}) {
+    if (!(ORDER_STATUSES as readonly string[]).includes(status)) {
       throw new ApiError("Invalid order status", 400);
     }
     const existing = await this.order.findUnique({ where: { id } });
     if (!existing) throw new ApiError("Order not found", 404);
+    const delivery = existing.fulfillment === "DELIVERY";
+    if (status === "OUT_FOR_DELIVERY" && !delivery)
+      throw new ApiError("This is a pickup order. Mark it Ready for pickup instead.", 400);
+    if (status === "READY_FOR_PICKUP" && delivery)
+      throw new ApiError("This is a delivery order. Mark it Out for delivery instead.", 400);
+    if (existing.status === "PENDING_PAYMENT" && (PAID_ORDER_STATUSES as readonly string[]).includes(status) && status !== "PAID")
+      throw new ApiError("This order hasn't been paid yet", 400);
 
+    const eta = typeof opts.eta === "string" && opts.eta.trim() ? opts.eta.trim().slice(0, 60) : undefined;
+    // The handover code: given to the rider or at the counter to confirm it.
+    const needsCode = (status === "OUT_FOR_DELIVERY" || status === "READY_FOR_PICKUP") && !existing.handoverCode;
     const order = await this.order.update({
       where: { id },
-      data: { status: status as never },
+      data: {
+        status: status as never,
+        ...(status !== existing.status ? { statusUpdatedAt: new Date() } : {}),
+        ...(eta !== undefined ? { deliveryEta: eta } : {}),
+        ...(needsCode ? { handoverCode: String(randomInt(1000, 10000)) } : {}),
+        // A fresh rider link each time it goes out, valid for three days.
+        ...(status === "OUT_FOR_DELIVERY"
+          ? {
+              riderToken: randomBytes(18).toString("base64url"),
+              riderTokenExpires: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000),
+              deliveryFailedAt: null,
+              deliveryFailReason: null,
+            }
+          : {}),
+        ...(status === "FULFILLED" ? { deliveredAt: existing.deliveredAt ?? new Date(), riderToken: null } : {}),
+        ...(status === "CANCELLED" ? { riderToken: null } : {}),
+      },
       include: orderInclude,
     });
+
+    // Keep the customer posted at each stage before the handover.
+    if (status !== existing.status && ["PREPARING", "READY_FOR_PICKUP", "OUT_FOR_DELIVERY"].includes(status)) {
+      void this.notifyStage(order).catch((e) => console.warn("Order stage notice failed:", (e as Error).message));
+    }
+
+    // A cancelled order gives back what its gift card covered.
+    if (status === "CANCELLED" && existing.status !== "CANCELLED" && existing.voucherId) {
+      await new VoucherService().restore(existing.voucherId, existing.voucherAmount);
+    }
 
     // Refund redeemed points if a customer order is cancelled (once).
     if (
@@ -605,10 +836,63 @@ export class OrderService extends Connection {
       }
     }
 
-    return { message: "Order status updated", data: order };
+    const { handoverCode: _code, riderToken: _token, ...shown } = order;
+    return {
+      message: "Order status updated",
+      data: shown,
+      // For the admin to send to the rider (WhatsApp or SMS).
+      ...(status === "OUT_FOR_DELIVERY" && order.riderToken && order.studioId
+        ? { riderLink: await this.riderLink(order.studioId, order.riderToken) }
+        : {}),
+    };
+  }
+
+  private async riderLink(studioId: string, token: string) {
+    const studio = await this.studio.findUnique({ where: { id: studioId }, select: { slug: true } });
+    return studioLink(studio?.slug ?? "", `/delivery/${token}`);
+  }
+
+  /** Email and push to the customer for preparing, ready and out for delivery. */
+  private async notifyStage(order: {
+    id: string;
+    orderNumber: string;
+    status: string;
+    studioId: string | null;
+    customerEmail: string | null;
+    customerName: string | null;
+    deliveryEta: string | null;
+    handoverCode: string | null;
+  }) {
+    if (!order.customerEmail) return;
+    const brand = await this.studioEmailBrand(order.studioId);
+    const { subject, html, pushBody } = orderStageUpdate(brand, {
+      orderNumber: order.orderNumber,
+      customerFirstName: (order.customerName ?? "there").split(" ")[0] || "there",
+      stage: order.status as "PREPARING" | "READY_FOR_PICKUP" | "OUT_FOR_DELIVERY",
+      eta: order.deliveryEta,
+      handoverCode: order.handoverCode,
+      ...(brand.kind === "studio" && brand.studio.bookingUrl ? { viewUrl: brand.studio.bookingUrl } : {}),
+    });
+    await this.notifications.send({
+      template: NotificationTemplate.SHOP_ORDER_STAGE,
+      to: order.customerEmail,
+      subject,
+      html,
+      studioId: order.studioId,
+      entityType: "Order",
+      entityId: `${order.id}:${order.status}`,
+      pushBody,
+      pushUrl: "/account?tab=orders",
+    });
   }
 
   public async verify(reference: string) {
+    // Paid entirely with a gift card: there's no Paystack transaction.
+    const own = await this.order.findFirst({ where: { reference }, select: { status: true, voucherAmount: true, total: true } });
+    if (own && own.status !== "PENDING_PAYMENT" && own.total <= 0 && own.voucherAmount > 0) {
+      const order = await this.order.findFirst({ where: { reference }, include: orderInclude });
+      return { message: "Order paid with a gift card", data: order };
+    }
     const data = await paystack.verify(reference);
     const order = await this.finalizeByReference(reference, data);
     if (!order) throw new ApiError("Order not found", 404);
@@ -618,6 +902,43 @@ export class OrderService extends Connection {
   // Re-initialize payment for the customer's own still-unpaid order (retry after
   // a failed/abandoned charge). Issues a fresh reference and returns a new
   // Paystack access code for the inline popup.
+  /**
+   * Mobile Money for an order that is waiting for payment, started from the
+   * checkout page itself (no redirect). The order is found by its reference,
+   * which is the secret a guest holds. A new reference is used for the charge,
+   * and the attempt is recorded under it like any other payment.
+   */
+  public async chargeMomo(reference: string, phone: string, provider: string) {
+    const order = await this.order.findFirst({ where: { reference } });
+    if (!order) throw new ApiError("Order not found", 404);
+    if (order.status !== "PENDING_PAYMENT") throw new ApiError("This order is no longer awaiting payment", 400);
+    const email = order.customerEmail;
+    if (!email) throw new ApiError("An email is required to pay", 400);
+    const fresh = await this.makeReference("ORD");
+    const split = await this.paystackChargeFor(order.total);
+    await this.order.update({ where: { id: order.id }, data: { reference: fresh, processingFee: split.processingFee } });
+    await this.ledger.openAttempt({
+      reference: fresh,
+      expectedAmount: order.total,
+      processingFee: split.processingFee,
+      orderId: order.id,
+      customerEmail: email,
+      customerName: order.customerName ?? null,
+    });
+    const res = await paystack.chargeMobileMoney({
+      email,
+      reference: fresh,
+      phone,
+      provider,
+      metadata: { orderId: order.id, orderNumber: order.orderNumber, kind: "order" },
+      ...split,
+    });
+    return {
+      message: "Charge started",
+      data: { reference: fresh, status: res.status, displayText: res.display_text ?? res.message ?? null, amount: split.amountPesewas / 100, processingFee: split.processingFee },
+    };
+  }
+
   public async repay(userId: string, orderId: string, origin?: string) {
     const order = await this.order.findUnique({ where: { id: orderId } });
     if (!order || order.userId !== userId) {
@@ -630,10 +951,9 @@ export class OrderService extends Connection {
     if (!email) throw new ApiError("An email is required to pay", 400);
 
     const reference = await this.makeReference("ORD");
-    const subaccount = await this.currentStudioSubaccount();
+    const split = await this.paystackChargeFor(order.total);
     const init = await paystack.initialize({
       email,
-      amountPesewas: Math.round(order.total * 100),
       reference,
       callbackUrl: `${safeClientOrigin(origin)}/order/callback`,
       metadata: {
@@ -641,17 +961,18 @@ export class OrderService extends Connection {
         orderNumber: order.orderNumber,
         kind: "order",
       },
-      subaccount,
+      ...split,
     });
     await this.order.update({
       where: { id: order.id },
-      data: { reference },
+      data: { reference, processingFee: split.processingFee },
     });
     // The Order row's reference has just been rotated; the attempt preserves the
     // old one so a late completion of the previous checkout is still resolvable.
     await this.ledger.openAttempt({
       reference,
       expectedAmount: order.total,
+      processingFee: split.processingFee,
       orderId: order.id,
       customerEmail: email,
       customerName: order.customerName ?? null,
@@ -708,7 +1029,8 @@ export class OrderService extends Connection {
       // Confirm Paystack charged what we asked before releasing stock/loyalty.
       const expectedAmount = attempt?.expectedAmount ?? order.total;
       const check = this.ledger.assertAmountMatches(
-        expectedAmount,
+        // The customer was charged the total plus any processing fee.
+        expectedAmount + (attempt?.processingFee ?? 0),
         attempt?.currency ?? "GHS",
         data,
       );
@@ -754,7 +1076,7 @@ export class OrderService extends Connection {
       }
 
       // Already settled by a different reference — a real second charge.
-      if (order.status === "PAID" && order.reference !== reference) {
+      if ((PAID_ORDER_STATUSES as readonly string[]).includes(order.status) && order.reference !== reference) {
         await this.ledger.settleAttempt(reference, data, { status: "SUCCESS" });
         await this.audit.record({
           actor: { email: order.customerEmail ?? "system", role: "system" },
@@ -860,15 +1182,92 @@ export class OrderService extends Connection {
     // The webhook, reconcile sweep and customer verify can race here. Only the
     // caller that flips PENDING_PAYMENT → PAID runs the side effects below
     // (stock, loyalty, cart, receipt); the rest return the order as it stands.
-    const claimed = await this.order.updateMany({
-      where: { id: order.id, status: "PENDING_PAYMENT" },
-      data: {
-        status: "PAID",
-        transactionId: String(data.id),
-        channel: data.channel ?? null,
-        paidAt: data.paid_at ? new Date(data.paid_at) : new Date(),
+    // Claim, stock, cart and points commit together: a crash part-way can't
+    // leave an order marked paid with the rest undone, because nothing retries
+    // once the status has flipped. (Only tx-safe calls inside: see
+    // withAdvisoryLock.)
+    const claimedCount = await this.withAdvisoryLock(
+      `order:paid:${order.id}`,
+      async (tx) => {
+        const claim = await tx.order.updateMany({
+          where: { id: order.id, status: "PENDING_PAYMENT" },
+          data: {
+            status: "PAID",
+            transactionId: String(data.id),
+            channel: data.channel ?? null,
+            paidAt: data.paid_at ? new Date(data.paid_at) : new Date(),
+          },
+        });
+        if (claim.count === 0) return 0;
+        if (order.couponCode) {
+          await tx.coupon.updateMany({
+            where: { code: order.couponCode },
+            data: { usedCount: { increment: 1 } },
+          });
+        }
+        const items = await tx.orderItem.findMany({
+          where: { orderId: order.id },
+        });
+        // Decrement stock (never below zero). Done in the database rather than
+        // read-then-write, so concurrent orders can't overwrite each other.
+        for (const item of items) {
+          if (!item.productId) continue;
+          const decremented = await tx.product.updateMany({
+            where: {
+              id: item.productId,
+              trackStock: true,
+              stock: { gte: item.quantity },
+            },
+            data: { stock: { decrement: item.quantity } },
+          });
+          if (decremented.count === 0) {
+            await tx.product.updateMany({
+              where: {
+                id: item.productId,
+                trackStock: true,
+                stock: { lt: item.quantity },
+              },
+              data: { stock: 0 },
+            });
+          }
+        }
+        // Clear the buyer's cart (customers only) and earn loyalty on the
+        // product net (subtotal - discount), not delivery.
+        if (order.userId) {
+          const cart = await tx.cart.findFirst({
+            where: { userId: order.userId },
+          });
+          if (cart)
+            await tx.cartItem.deleteMany({ where: { cartId: cart.id } });
+          const net = order.subtotal - order.discountAmount;
+          const points = Math.floor(net / OrderService.POINTS_PER_GHS_EARN);
+          if (points > 0) {
+            await tx.loyaltyTransaction.create({
+              data: {
+                userId: order.userId,
+                points,
+                type: "EARNED",
+                description: `Purchase — order ${order.orderNumber}`,
+              },
+            });
+            const raised = await tx.loyaltyPoints.updateMany({
+              where: { userId: order.userId },
+              data: {
+                points: { increment: points },
+                lifetimePoints: { increment: points },
+              },
+            });
+            if (!raised.count) {
+              await tx.loyaltyPoints.create({
+                data: { userId: order.userId, points, lifetimePoints: points },
+              });
+            }
+          }
+        }
+        return claim.count;
       },
-    });
+    );
+    const claimed = { count: claimedCount };
     if (claimed.count === 0) {
       return this.order.findUnique({
         where: { id: order.id },
@@ -901,6 +1300,14 @@ export class OrderService extends Connection {
       ...(attempt ? { paymentAttemptId: attempt.id } : {}),
     });
 
+    // Tell admins about anything this order left running low or sold out.
+    if (paid.studioId) {
+      void checkStockAlerts(
+        paid.studioId,
+        paid.items.map((i) => i.productId).filter((x): x is string => Boolean(x)),
+      ).catch((e) => console.warn("Stock alert failed:", (e as Error).message));
+    }
+
     // Per-studio payment audit trail (best-effort).
     await this.audit.record({
       actor: { email: paid.customerEmail ?? "system", role: "customer" },
@@ -924,61 +1331,6 @@ export class OrderService extends Connection {
       },
     });
 
-    // Decrement stock (never below zero). Done in the database rather than
-    // read-then-write, so concurrent orders for one product can't overwrite
-    // each other's decrement.
-    for (const item of paid.items) {
-      if (!item.productId) continue;
-      const decremented = await this.product.updateMany({
-        where: {
-          id: item.productId,
-          trackStock: true,
-          stock: { gte: item.quantity },
-        },
-        data: { stock: { decrement: item.quantity } },
-      });
-      if (decremented.count === 0) {
-        await this.product.updateMany({
-          where: {
-            id: item.productId,
-            trackStock: true,
-            stock: { lt: item.quantity },
-          },
-          data: { stock: 0 },
-        });
-      }
-    }
-
-    // Clear the buyer's cart (customers only).
-    if (order.userId) {
-      const cart = await this.cart.findUnique({
-        where: { userId: order.userId },
-      });
-      if (cart) await this.cartItem.deleteMany({ where: { cartId: cart.id } });
-
-      // Earn loyalty on the product net (subtotal - discount), not delivery.
-      const net = paid.subtotal - paid.discountAmount;
-      const points = Math.floor(net / OrderService.POINTS_PER_GHS_EARN);
-      if (points > 0) {
-        await this.loyaltyTransaction.create({
-          data: {
-            userId: order.userId,
-            points,
-            type: "EARNED",
-            description: `Purchase — order ${paid.orderNumber}`,
-          },
-        });
-        await this.loyaltyPoints.upsert({
-          where: { userId: order.userId },
-          update: {
-            points: { increment: points },
-            lifetimePoints: { increment: points },
-          },
-          create: { userId: order.userId, points, lifetimePoints: points },
-        });
-      }
-    }
-
     // Referral reward — 50 pts to the code owner, once per buyer (by email).
     await this.awardReferralReward(
       paid.referralCode,
@@ -990,6 +1342,9 @@ export class OrderService extends Connection {
     if (paid.customerEmail) {
       try {
         const brand = await this.studioEmailBrand(paid.studioId);
+        // The fee the customer paid on top, when the studio has them pay it.
+        const fee = paid.processingFee ?? 0;
+        const paidNow = Math.round((paid.total + fee) * 100) / 100;
         const lines: MoneyLine[] = [
           { label: "Subtotal", value: ghs(paid.subtotal) },
           ...(paid.discountAmount > 0
@@ -1004,7 +1359,10 @@ export class OrderService extends Connection {
           ...(paid.deliveryFee > 0
             ? [{ label: "Delivery", value: ghs(paid.deliveryFee) }]
             : []),
-          { label: "Total", value: ghs(paid.total), emphasis: true },
+          ...(fee > 0
+            ? [{ label: "Payment processing fee", value: ghs(fee), muted: true }]
+            : []),
+          { label: "Total paid", value: ghs(paidNow), emphasis: true },
         ];
         const paidTo =
           brand.kind === "studio" ? brand.studio.name : brand.zuri.name;
@@ -1028,7 +1386,7 @@ export class OrderService extends Connection {
             transactionId: paid.transactionId ?? null,
             paidTo,
             paidToEmail: paidToEmail ?? null,
-            amountPaid: ghs(paid.total),
+            amountPaid: ghs(paidNow),
             balanceDue: null,
           },
           fulfillment: paid.fulfillment as "PICKUP" | "DELIVERY",
@@ -1060,7 +1418,10 @@ export class OrderService extends Connection {
             ...(paid.deliveryFee > 0
               ? [{ label: "Delivery", value: ghs(paid.deliveryFee) }]
               : []),
-            { label: "Total", value: ghs(paid.total), strong: true },
+            ...(fee > 0
+              ? [{ label: "Payment processing fee", value: ghs(fee) }]
+              : []),
+            { label: "Total paid", value: ghs(paidNow), strong: true },
             {
               label: "Fulfilment",
               value:
@@ -1069,7 +1430,7 @@ export class OrderService extends Connection {
                   : "Pickup at studio",
             },
           ],
-          amountPaid: ghs(paid.total),
+          amountPaid: ghs(paidNow),
           balanceDue: null,
           reference: paid.reference ?? paid.orderNumber,
           transactionId: paid.transactionId ?? null,

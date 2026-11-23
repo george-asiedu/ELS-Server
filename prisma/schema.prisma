@@ -37,6 +37,8 @@ enum AppointmentStatus {
   PENDING_RESCHEDULE
   COMPLETED
   CANCELLED
+  // The customer didn't come. Any deposit stays with the studio.
+  NO_SHOW
 }
 
 enum PaymentStatus {
@@ -68,6 +70,13 @@ enum MediaType {
 enum OrderStatus {
   PENDING_PAYMENT
   PAID
+  // Being packed or made.
+  PREPARING
+  // Pickup orders: ready to collect.
+  READY_FOR_PICKUP
+  // Delivery orders: with the rider.
+  OUT_FOR_DELIVERY
+  // Delivered or collected.
   FULFILLED
   CANCELLED
 }
@@ -85,9 +94,12 @@ enum PromoPlacement {
 }
 
 // Subscription plan a studio is on. Premium = Standard + the online shop.
+// STANDARD: booking. PREMIUM: booking + shop. STOREFRONT (Zuri Storefront):
+// a shop on its own, for any seller (not just beauty studios).
 enum StudioPlan {
   STANDARD
   PREMIUM
+  STOREFRONT
 }
 
 enum BillingCadence {
@@ -135,6 +147,9 @@ model Studio {
   // Percentage of each transaction the PLATFORM keeps (Paystack subaccount
   // percentage_charge). Set by the super admin; 0 = platform takes no cut.
   platformFeePercent     Float   @default(0)
+  // What a shop sells (clothing, food, perfume...), picked at signup. Chooses
+  // the shop website template. Null for booking-only studios.
+  shopCategory           String?
   // Mobile-money settlement account the subaccount pays out to (display only;
   // the authoritative copy lives on Paystack).
   // Settlement account type: "momo" (mobile money) or "bank".
@@ -144,24 +159,36 @@ model Studio {
   payoutAccountName      String?
 
   // Subscription / billing (platform revenue; the studio's plan gates features).
-  plan                 StudioPlan     @default(STANDARD)
-  billingCadence       BillingCadence @default(MONTHLY)
+  plan                   StudioPlan     @default(STANDARD)
+  billingCadence         BillingCadence @default(MONTHLY)
   // How the platform earns from this studio: a recurring plan fee
   // (SUBSCRIPTION) or a percentage cut of each customer transaction
   // (REVENUE_SHARE, where the plan sets the commission %). Chosen at signup.
-  billingMode          BillingMode    @default(SUBSCRIPTION)
-  paystackCustomerCode String?
-  subscriptionCode     String?
-  subscriptionStatus   String? // active | lapsed | revenue_share | ...
-  currentPeriodEnd     DateTime?
+  billingMode            BillingMode    @default(SUBSCRIPTION)
+  paystackCustomerCode   String?
+  subscriptionCode       String?
+  subscriptionStatus     String? // active | lapsed | revenue_share | ...
+  currentPeriodEnd       DateTime?
+  // Extra storage the studio has taken, in blocks (see PlatformConfig).
+  storageExtraBlocks     Int            @default(0)
+  // Set by the super admin for this customer only. A custom monthly price
+  // (yearly is 10x, like the list price) applies to its current plan; a
+  // discount applies to every charge until it ends (no end = ongoing).
+  customPriceMonthly     Float?
+  billingDiscountPercent Float?
+  billingDiscountEndsAt  DateTime?
+  billingNote            String?
 
   branding        StudioBranding?
   content         StudioContent?
+  generatedImages GeneratedImage[]
   settings        StudioSettings?
   featureRequests FeatureRequest[]
 
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  // The business whose invite link this one signed up through.
+  referredByStudioId String?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
 
   @@map("studios")
 }
@@ -208,6 +235,11 @@ model StudioContent {
   ctaImageUrl      String?
   contactHeading   String?
   showTestimonials Boolean @default(true)
+  // What kind of studio (hair, nails, spa...): picks the website's default
+  // wording. Null = general beauty studio.
+  studioType       String?
+  // The website's layout: editorial, bold or minimal. Null = editorial.
+  siteTemplate     String?
 
   studio Studio @relation(fields: [studioId], references: [id], onDelete: Cascade)
 
@@ -222,6 +254,20 @@ model StudioContent {
 model StudioSettings {
   id                String  @id @default(cuid())
   studioId          String  @unique
+  // Insights: a monthly money-in goal to track pace against, a weekly email
+  // digest of what needs attention, and a push when something urgent comes up.
+  revenueGoal       Float?
+  weeklyDigest      Boolean @default(true)
+  insightAlerts     Boolean @default(true)
+  // Appointment booking. Off for Zuri Storefront (shop-only) accounts.
+  booking           Boolean @default(true)
+  // Who pays Paystack's processing fee on customer payments: CUSTOMER (added
+  // at checkout, the default) or BUSINESS (taken from the studio's share; the
+  // customer pays the price). The platform's commission never pays it.
+  // Booking confirmations and reminders to customers on WhatsApp, when the
+  // platform has WhatsApp set up. Each message is billed by Meta.
+  whatsappMessages  Boolean @default(false)
+  paystackFeePayer  String  @default("CUSTOMER")
   commerce          Boolean @default(false)
   loyalty           Boolean @default(true)
   referrals         Boolean @default(true)
@@ -254,6 +300,12 @@ model FeatureRequest {
   description     String
   status          FeatureRequestStatus @default(NEW)
   createdByUserId String?
+  // A one-off fee the super admin sets for building it (GHS). Null until
+  // decided; 0 means free. Added to the studio's next renewal.
+  feeAmount       Float?
+  feeSetAt        DateTime?
+  // Pictures that show what they mean (up to 5), uploaded with the request.
+  images          String[] @default([])
 
   studio Studio @relation(fields: [studioId], references: [id], onDelete: Cascade)
 
@@ -365,6 +417,10 @@ model StudioSignup {
   plan              StudioPlan     @default(STANDARD)
   cadence           BillingCadence @default(MONTHLY)
   billingMode       BillingMode    @default(SUBSCRIPTION)
+  shopCategory      String?
+  // The inviting business's address (slug), from ?ref= on the signup link.
+  referralSlug      String?
+  promoCode         String?
   reference         String         @unique
   status            SignupStatus   @default(PENDING)
   studioId          String?
@@ -393,6 +449,8 @@ enum ScheduledJobStatus {
 enum StudioBillingChargeKind {
   RENEWAL
   PLAN_CHANGE
+  // Just the extras (feature request fees, storage, training), paid now.
+  EXTRAS
 }
 
 enum StudioBillingChargeStatus {
@@ -404,6 +462,43 @@ enum StudioBillingChargeStatus {
 // when it starts. Applying it uses these stored values (never ones sent by the
 // browser), checks Paystack collected `amount`, and flips PENDING -> APPLIED
 // once, so a paid reference can't be applied twice or for a different plan.
+enum ExtraChargeKind {
+  FEATURE_REQUEST
+  STORAGE_OVERAGE
+  TRAINING
+  OTHER
+}
+
+enum ExtraChargeStatus {
+  PENDING
+  BILLED
+  WAIVED
+}
+
+// Money a studio owes on top of its plan: a feature request fee, extra storage,
+// in-person training. Pending ones are added to the next renewal and marked
+// billed when that renewal is paid. One row per thing (kind + refId).
+model StudioExtraCharge {
+  id          String            @id @default(cuid())
+  studioId    String
+  kind        ExtraChargeKind
+  // What it's for, in words the studio sees on its bill.
+  description String
+  amount      Float
+  status      ExtraChargeStatus @default(PENDING)
+  // The thing it belongs to: a feature request id, a "2026-11" storage month.
+  refId       String
+  // The renewal that billed it.
+  billedReference String?
+  billedAt        DateTime?
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+
+  @@unique([studioId, kind, refId])
+  @@index([studioId, status])
+  @@map("studio_extra_charges")
+}
+
 model StudioBillingCharge {
   id        String                    @id @default(cuid())
   reference String                    @unique
@@ -416,6 +511,8 @@ model StudioBillingCharge {
   appliedAt DateTime?
   createdAt DateTime                  @default(now())
   updatedAt DateTime                  @updatedAt
+  // The billing promo used, counted once the charge is paid.
+  promoCode String?
 
   @@index([studioId])
   @@map("studio_billing_charges")
@@ -452,6 +549,22 @@ model ScheduledJob {
 
 model PlatformConfig {
   id                        String  @id @default(cuid())
+  // Free live online training: where to join, and when (shown to every studio and store).
+  trainingLiveUrl           String?
+  trainingLiveNote          String?
+  // Storage for Zuri Studios plans (not Zuri Stores): included amount per plan,
+  // and the size and monthly price of an extra block.
+  storageStandardMb         Int     @default(500)
+  storagePremiumMb          Int     @default(1024)
+  storageBlockMb            Int     @default(500)
+  storageBlockPrice         Float   @default(5)
+  // Guest key: the web app sends it to book, pay or buy without an account.
+  // Rotating moves the old one to "previous", which keeps working for a day so
+  // pages that are already open don't break.
+  guestKeyCurrent           String?
+  guestKeyPrevious          String?
+  guestKeyPreviousUntil     DateTime?
+  guestKeyRotatedAt         DateTime?
   // Master switch: when off, onboarding only offers subscription billing and the
   // revenue-share (% cut) option is hidden entirely. Subscription is always the
   // default; the super admin opts in to revenue-share.
@@ -473,10 +586,17 @@ model PlatformConfig {
 
   // Plan prices (GHS). Null = the built-in default (the PLAN_* env value,
   // else 150 / 1500 / 350 / 3500), so existing pricing holds until edited.
-  priceStandardMonthly Float?
-  priceStandardYearly  Float?
-  pricePremiumMonthly  Float?
-  pricePremiumYearly   Float?
+  priceStandardMonthly           Float?
+  priceStandardYearly            Float?
+  pricePremiumMonthly            Float?
+  pricePremiumYearly             Float?
+  // Zuri Storefront (shop only): price, signup setup fee, and the
+  // pay-as-you-earn commission and activation fee.
+  priceStorefrontMonthly         Float?
+  priceStorefrontYearly          Float?
+  subscriptionSetupFeeStorefront Float  @default(0)
+  commissionStorefrontPercent    Float  @default(5)
+  setupFeeStorefront             Float  @default(0)
 
   // Public site details shown on the platform pages. Null = the frontend's
   // built-in default.
@@ -504,12 +624,101 @@ model PromoBanner {
   placement PromoPlacement @default(BOTH)
   active    Boolean        @default(true)
   order     Int            @default(0)
+  // The scheduled sale this banner belongs to (shown only on its sale days).
+  salePromoId String?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@index([studioId])
   @@map("promo_banners")
+}
+
+// A scheduled sale for a studio's or store's products: a % off on certain
+// weekdays (Fridays by default) between two dates, like Black Friday. On sale
+// days it puts the price down on every product that has no price of its own
+// set, and shows a banner; the next day it puts them back.
+model SalePromo {
+  id         String   @id @default(cuid())
+  studioId   String?
+  name       String
+  percentOff Float
+  startsOn   DateTime // a day, at midnight UTC
+  endsOn     DateTime
+  // 0 = Sunday ... 6 = Saturday.
+  weekdays   Int[]    @default([5])
+  banner     Boolean  @default(true)
+  active     Boolean  @default(true)
+  createdAt  DateTime @default(now())
+
+  @@index([studioId])
+  @@map("sale_promos")
+}
+
+enum TrainingStatus {
+  NEW
+  SCHEDULED
+  DONE
+  DECLINED
+}
+
+// A studio or store asking for in-person training. Online training is free and
+// needs no request; in-person has a fee the super admin sets, added to the next bill.
+model TrainingRequest {
+  id              String         @id @default(cuid())
+  studioId        String
+  requestedByUserId String?
+  preferredDate   String?
+  location        String?
+  notes           String?
+  status          TrainingStatus @default(NEW)
+  feeAmount       Float?
+  scheduledFor    DateTime?
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  @@index([studioId])
+  @@map("training_requests")
+}
+
+enum BillStatus {
+  UNPAID
+  PAID
+  VOID
+}
+
+// A bill for a walk-in: lines the owner adds (services, products or anything
+// else), a link and QR code the customer pays through on their own phone, and
+// a record of it either way (paid online, paid in cash, or cancelled).
+model Bill {
+  id            String     @id @default(cuid())
+  studioId      String?
+  number        String
+  customerName  String
+  customerPhone String?
+  customerEmail String?
+  // Linked when the customer has an account with the same email.
+  userId        String?
+  // [{ name, quantity, unitPrice, kind: "service" | "product" | "custom" }]
+  items         Json
+  total         Float
+  note          String?
+  status        BillStatus @default(UNPAID)
+  // The secret in the pay link.
+  token         String     @unique
+  // The latest Paystack attempt, and the fee the customer paid on top.
+  reference     String?    @unique
+  processingFee Float      @default(0)
+  paidAt        DateTime?
+  // How it was paid: "paystack", "cash", "momo", "card".
+  paidVia       String?
+  paidNote      String?
+  createdByUserId String?
+  createdAt     DateTime   @default(now())
+
+  @@unique([studioId, number])
+  @@index([studioId, status])
+  @@map("bills")
 }
 
 // ------------------- Tenant-owned models -------------------
@@ -524,6 +733,18 @@ model User {
 
   resetToken       String?
   resetTokenExpiry DateTime?
+  // Set once the email is confirmed. Owners do it before paying; customers can
+  // choose to later, from their account. Nothing is blocked without it.
+  emailVerifiedAt  DateTime?
+
+  // Authenticator-app two-factor sign-in. The secret is AES-GCM encrypted;
+  // totpLastStep is the last 30-second step accepted, so a code can't be reused.
+  totpSecretEnc     String?
+  totpEnabled       Boolean            @default(false)
+  totpLastStep      Int?
+  recoveryCodes     RecoveryCode[]
+  pushSubscriptions PushSubscription[]
+  notifications     Notification[]
 
   profile             Profile?
   appointments        Appointment[]
@@ -535,6 +756,7 @@ model User {
   referralReceived    Referral?            @relation("Referred")
   cart                Cart?
   orders              Order[]
+  wishlist            WishlistItem[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -545,6 +767,50 @@ model User {
   @@index([studioId])
   @@index([role])
   @@map("users")
+}
+
+// One-time codes for signing in without the authenticator app. Hashed; shown once.
+model RecoveryCode {
+  id       String    @id @default(cuid())
+  userId   String
+  user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  codeHash String
+  usedAt   DateTime?
+
+  @@index([userId])
+  @@map("recovery_codes")
+}
+
+// The in-app notifications list: everything sent as a push is also kept here,
+// so it can be read in the app whether or not push is switched on.
+model Notification {
+  id        String    @id @default(cuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title     String    @db.VarChar(120)
+  body      String    @db.VarChar(400)
+  url       String    @db.VarChar(300)
+  readAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId, createdAt])
+  @@map("notifications")
+}
+
+// A browser or installed app that gets push notifications for this user.
+model PushSubscription {
+  id            String    @id @default(cuid())
+  userId        String
+  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  endpoint      String    @unique
+  p256dh        String
+  auth          String
+  userAgent     String?   @db.VarChar(300)
+  createdAt     DateTime  @default(now())
+  lastSuccessAt DateTime?
+
+  @@index([userId])
+  @@map("push_subscriptions")
 }
 
 // Server-side bearer-token sessions allow immediate revocation and enforce a
@@ -607,6 +873,9 @@ model Appointment {
   notes           String?
   designImageUrl  String?
   status          AppointmentStatus @default(PENDING)
+  // Guest bookings (no account): a private token, handed back once when the
+  // booking is made, is what lets that person pay for it.
+  guestToken      String?
 
   // Original service price at time of booking.
   totalPrice     Float?
@@ -624,6 +893,10 @@ model Appointment {
 
   // Nullable so guests (not logged in) can book
   userId    String?
+  // Who it's with, when the studio has staff. Null on older bookings and at
+  // studios without staff; such bookings hold the slot for everyone.
+  staffId   String?
+  staff     Staff?  @relation(fields: [staffId], references: [id], onDelete: SetNull)
   serviceId String
 
   user    User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
@@ -637,8 +910,21 @@ model Appointment {
   // product order per appointment is enforced in application code.
   productOrders       Order[]
 
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  // The customer asked to cancel; the studio approves (status CANCELLED) or
+  // declines (cleared). Refunds are settled by the studio outside the app.
+  cancelRequestedAt     DateTime?
+  cancelRequestReason   String?   @db.VarChar(500)
+  // The studio paid the customer back itself (Mobile Money, cash, bank) and
+  // recorded it here. No money moves through the platform.
+  refundedOutsideAt     DateTime?
+  refundedOutsideAmount Float?
+  refundedOutsideNote   String?   @db.VarChar(300)
+  // A gift card or package used on it, and how much it covered (already
+  // included in discountAmount).
+  voucherId             String?
+  voucherAmount         Float     @default(0)
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
 
   @@index([studioId])
   @@index([userId])
@@ -710,8 +996,10 @@ model Payment {
   appointmentId String      @unique
   appointment   Appointment @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
 
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  // Paystack fee the customer paid on top of the price (0 when the business pays it).
+  processingFee Float    @default(0)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
 
   @@index([studioId])
   @@map("payments")
@@ -744,15 +1032,19 @@ model Review {
   userId        String
   serviceId     String?
   appointmentId String?
+  // Set for a review of a product the customer bought.
+  productId     String?
 
   user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
   service     Service?     @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+  product     Product?     @relation(fields: [productId], references: [id], onDelete: Cascade)
   appointment Appointment? @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
 
   createdAt DateTime @default(now())
 
   @@index([studioId])
   @@index([approved])
+  @@index([productId])
   @@map("reviews")
 }
 
@@ -764,6 +1056,10 @@ model Gallery {
   mediaType MediaType @default(IMAGE)
   category  String // Category slug (see Category model)
   active    Boolean   @default(true)
+  // In the trash: hidden everywhere, still stored (and counted) until it is
+  // restored or purgeAfter passes.
+  deletedAt  DateTime?
+  purgeAfter DateTime?
   createdAt DateTime  @default(now())
 
   @@index([studioId])
@@ -798,6 +1094,120 @@ model BusinessHours {
   @@unique([studioId, dayOfWeek])
   @@index([studioId])
   @@map("business_hours")
+}
+
+// A stylist (or chair) at a studio. Bookings can be made with a particular
+// person; two staff can be booked at the same time.
+model Staff {
+  id           String        @id @default(cuid())
+  studioId     String?
+  name         String
+  role         String?
+  photoUrl     String?
+  // Services this person does; empty means all of them.
+  serviceIds   String[]      @default([])
+  active       Boolean       @default(true)
+  order        Int           @default(0)
+  appointments Appointment[]
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  @@index([studioId])
+  @@map("staff")
+}
+
+// Customers waiting for a slot on a full day. When a booking that day is
+// cancelled, everyone waiting is told and the first to book gets it.
+model WaitlistEntry {
+  id         String    @id @default(cuid())
+  studioId   String?
+  serviceId  String
+  date       DateTime
+  userId     String?
+  name       String
+  email      String?
+  phone      String?
+  notifiedAt DateTime?
+  createdAt  DateTime  @default(now())
+
+  @@index([studioId, date])
+  @@map("waitlist_entries")
+}
+
+// A package a studio sells: a number of sessions of one service, paid upfront.
+model PackageOffer {
+  id        String   @id @default(cuid())
+  studioId  String?
+  serviceId String
+  name      String
+  sessions  Int
+  price     Float
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([studioId])
+  @@map("package_offers")
+}
+
+// A gift card (a GHS balance) or a bought package (sessions of a service),
+// identified by a code the customer uses when booking or checking out.
+model Voucher {
+  id             String    @id @default(cuid())
+  studioId       String?
+  kind           String // GIFT_CARD | PACKAGE
+  code           String
+  status         String    @default("PENDING") // PENDING (awaiting payment) | ACTIVE | USED
+  // What was paid for it (the price), and Paystack's fee if the buyer paid it.
+  price          Float
+  processingFee  Float     @default(0)
+  reference      String    @unique
+  paidAt         DateTime?
+  // Gift card: the balance left to spend.
+  balance        Float     @default(0)
+  // Package: the service and sessions left.
+  packageOfferId String?
+  serviceId      String?
+  sessionsTotal  Int       @default(0)
+  sessionsLeft   Int       @default(0)
+  buyerUserId    String?
+  buyerName      String
+  buyerEmail     String
+  recipientName  String?
+  recipientEmail String?
+  message        String?   @db.VarChar(300)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  @@unique([studioId, code])
+  @@index([studioId])
+  @@map("vouchers")
+}
+
+// Money a business spent (rent, products, salaries…), so it can see profit.
+model Expense {
+  id          String   @id @default(cuid())
+  studioId    String?
+  date        DateTime
+  category    String
+  description String?  @db.VarChar(200)
+  amount      Float
+  createdAt   DateTime @default(now())
+
+  @@index([studioId, date])
+  @@map("expenses")
+}
+
+// A business's private notes about one of its customers ("allergic to X").
+model CustomerNote {
+  id        String   @id @default(cuid())
+  studioId  String?
+  userId    String
+  notes     String   @db.VarChar(2000)
+  updatedAt DateTime @updatedAt
+
+  @@unique([studioId, userId])
+  @@map("customer_notes")
 }
 
 model BlockedDate {
@@ -910,27 +1320,45 @@ model Referral {
 // ------------------- Commerce (mini shop) -------------------
 
 model Product {
-  id          String  @id @default(cuid())
+  id          String   @id @default(cuid())
   studioId    String?
   name        String
   description String?
   price       Float
   // Cost to the studio; profit (revenue) = selling price - cost. Optional.
-  costPrice   Float   @default(0)
+  costPrice   Float    @default(0)
   // When set (and below price), an active promotional price.
   promoPrice  Float?
+  // Set when promoPrice came from a scheduled sale (e.g. Black Friday) rather
+  // than the owner, so the sale can take it off again when the day ends.
+  salePromoId String?
   imageUrl    String?
+  // More photos shown after imageUrl on the product page.
+  images      String[] @default([])
+  // Options the buyer picks from. Stock is per product, not per option.
+  sizes       String[] @default([])
+  // "Name|#hex", e.g. "Sand|#C2B280".
+  colors      String[] @default([])
   category    String // ProductCategory slug
-  stock       Int     @default(0)
-  trackStock  Boolean @default(true)
-  active      Boolean @default(true)
-  popular     Boolean @default(false)
+  // Who it's for, so a shop can show Men and Women sections: MEN | WOMEN | UNISEX.
+  audience    String   @default("UNISEX")
+  brand       String?
+  // Facts shown as a table on the product page, "Label|Value" (e.g. "Fabric|Cotton").
+  attributes  String[] @default([])
+  stock       Int      @default(0)
+  trackStock  Boolean  @default(true)
+  active      Boolean  @default(true)
+  popular     Boolean  @default(false)
 
   cartItems  CartItem[]
   orderItems OrderItem[]
+  wishlist   WishlistItem[]
+  reviews    Review[]
 
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  // When admins were last told it was running low; cleared on restock.
+  lowStockAlertedAt DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
 
   @@index([studioId])
   @@map("products")
@@ -973,13 +1401,16 @@ model CartItem {
   cartId    String
   productId String
   quantity  Int     @default(1)
+  // The chosen options; empty when the product has none.
+  size      String  @default("")
+  color     String  @default("")
 
   cart    Cart    @relation(fields: [cartId], references: [id], onDelete: Cascade)
   product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
 
   createdAt DateTime @default(now())
 
-  @@unique([cartId, productId])
+  @@unique([cartId, productId, size, color])
   @@index([studioId])
   @@map("cart_items")
 }
@@ -1013,9 +1444,16 @@ model Order {
   fulfillment     FulfillmentType @default(PICKUP)
   deliveryAddress String?
   deliveryPhone   String?
+  deliveryZone    String?
+  // The day and window the customer chose, e.g. "Sat 15 Nov, Morning (9am–12pm)".
+  deliverySlot    String?
 
   // A referral code used at checkout (rewards the code owner once per buyer).
   referralCode String?
+
+  // A coupon used at checkout. Its amount is included in discountAmount.
+  couponCode     String?
+  couponDiscount Float   @default(0)
 
   // When products are bought as part of a booking, the order links here so
   // revenue can be split (service -> booking, products -> product). Not unique
@@ -1030,8 +1468,36 @@ model Order {
   channel       String?
   paidAt        DateTime?
 
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  // The customer asked to cancel; the studio approves (status CANCELLED) or
+  // declines (cleared). Refunds are settled by the studio outside the app.
+  cancelRequestedAt     DateTime?
+  cancelRequestReason   String?   @db.VarChar(500)
+  // The studio paid the customer back itself (Mobile Money, cash, bank) and
+  // recorded it here. No money moves through the platform.
+  refundedOutsideAt     DateTime?
+  refundedOutsideAmount Float?
+  refundedOutsideNote   String?   @db.VarChar(300)
+  // Paystack fee the customer paid on top of the price (0 when the business pays it).
+  processingFee         Float     @default(0)
+  // A gift card or package used on it, and how much it covered (already
+  // included in discountAmount).
+  voucherId             String?
+  voucherAmount         Float     @default(0)
+  // Delivery and pickup: the customer's note for the rider, the expected time
+  // the shop gives, and when the stage last changed (to spot stuck orders).
+  deliveryNote          String?   @db.VarChar(300)
+  deliveryEta           String?   @db.VarChar(60)
+  statusUpdatedAt       DateTime?
+  // The customer's code, given to the rider (or at the counter) to confirm
+  // the handover. The rider's link works with riderToken until it's used.
+  handoverCode          String?
+  riderToken            String?   @unique
+  riderTokenExpires     DateTime?
+  deliveredAt           DateTime?
+  deliveryFailedAt      DateTime?
+  deliveryFailReason    String?   @db.VarChar(200)
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
 
   @@unique([studioId, orderNumber])
   @@index([studioId])
@@ -1049,6 +1515,8 @@ model OrderItem {
   unitPrice Float
   costPrice Float   @default(0)
   quantity  Int
+  size      String?
+  color     String?
 
   order   Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
   product Product? @relation(fields: [productId], references: [id], onDelete: SetNull)
@@ -1072,12 +1540,18 @@ model ReferralOrderReward {
 
 // Per-studio shop policy (one document per studio).
 model CommerceSettings {
-  id             String  @id @default(cuid())
-  studioId       String? @unique
-  enabled        Boolean @default(true) // show the shop publicly
-  enablePickup   Boolean @default(true)
-  enableDelivery Boolean @default(true)
-  deliveryFee    Float   @default(0)
+  id                String  @id @default(cuid())
+  studioId          String? @unique
+  enabled           Boolean @default(true) // show the shop publicly
+  enablePickup      Boolean @default(true)
+  enableDelivery    Boolean @default(true)
+  deliveryFee       Float   @default(0)
+  // Delivery areas with their own fee: [{ id, name, fee }]. Empty = the flat fee above.
+  deliveryZones     Json    @default("[]")
+  // Time windows customers pick from: ["Morning (9am–12pm)", ...]. Empty = no choice.
+  deliverySlots     Json    @default("[]")
+  // Admins are told when a product's stock falls to this or below.
+  lowStockThreshold Int     @default(3)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -1131,10 +1605,13 @@ model PaymentAttempt {
   paymentId     String?
   orderId       String?
   appointmentId String?
+  billId        String?
 
   // What we asked Paystack to charge, in GHS. Compared against the verified
   // amount before anything is marked paid.
   expectedAmount Float
+  // Paystack fee the customer paid on top of the price (0 when the business pays it).
+  processingFee  Float  @default(0)
   currency       String @default("GHS")
 
   status LedgerStatus @default(PENDING)
@@ -1268,4 +1745,95 @@ model Refund {
   @@index([orderId])
   @@index([status, createdAt])
   @@map("refunds")
+}
+
+// Pictures a studio made with the image maker in its admin. Also counts
+// towards the monthly limit (env AI_IMAGES_PER_MONTH).
+model GeneratedImage {
+  id        String   @id @default(cuid())
+  studioId  String
+  studio    Studio   @relation(fields: [studioId], references: [id], onDelete: Cascade)
+  prompt    String
+  // hero | gallery | product | service: decides where the file is stored.
+  purpose   String
+  url       String
+  createdAt DateTime @default(now())
+
+  @@index([studioId, createdAt])
+}
+
+// Wrong-password tracking for login lockouts (auth/loginLockout). Keyed by a
+// hash of studio + email, so unknown emails behave the same as real ones.
+model LoginLockout {
+  key          String    @id
+  failedCount  Int       @default(0)
+  lockCount    Int       @default(0)
+  lockedUntil  DateTime?
+  lastFailedAt DateTime  @default(now())
+
+  @@index([lastFailedAt])
+}
+
+// A signup's email code, proving the owner controls the address before they
+// pay. The code is stored hashed and the row is removed once it's used.
+model EmailVerification {
+  email     String   @id
+  codeHash  String
+  attempts  Int      @default(0)
+  sentAt    DateTime
+  expiresAt DateTime
+}
+
+// A product a customer saved for later.
+model WishlistItem {
+  id        String   @id @default(cuid())
+  studioId  String?
+  userId    String
+  productId String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([userId, productId])
+  @@index([studioId])
+}
+
+enum CouponType {
+  PERCENT
+  FIXED
+}
+
+// A shop discount code. usedCount rises when an order using it is paid.
+model Coupon {
+  id          String     @id @default(cuid())
+  studioId    String?
+  code        String
+  type        CouponType
+  value       Float
+  minSubtotal Float      @default(0)
+  maxUses     Int?
+  usedCount   Int        @default(0)
+  expiresAt   DateTime?
+  active      Boolean    @default(true)
+  createdAt   DateTime   @default(now())
+
+  @@unique([studioId, code])
+  @@index([studioId])
+}
+
+// A platform billing promo: % off what a studio or store owner pays (signup,
+// renewal, plan change). Managed in the super admin's Billing page.
+model BillingPromo {
+  id         String    @id @default(cuid())
+  code       String    @unique
+  percentOff Float
+  // Plans it works for; empty means every plan.
+  plans      String[]  @default([])
+  expiresAt  DateTime?
+  maxUses    Int?
+  usedCount  Int       @default(0)
+  active     Boolean   @default(true)
+  createdAt  DateTime  @default(now())
+
+  @@map("billing_promos")
 }

@@ -35,7 +35,7 @@ export const bookingRequestCustomer = (
       documentType: "Booking request",
       bodyHtml: `
         ${statusBadge("pending", "PENDING CONFIRMATION")}
-        <h1 style="margin: 0 0 12px; font-family: Georgia, serif; font-size: 22px; color: #2A1B1F; text-align: center;">Thanks, ${esc(data.customerFirstName)}!</h1>
+        <h1 style="margin: 0 0 12px; font-family: Georgia, serif; font-size: 22px; color: #2A1B1F; text-align: center;">Thank you, ${esc(data.customerFirstName)}</h1>
         <p style="margin: 0 0 4px; font-family: Arial, sans-serif; font-size: 15px; color: #2A1B1F; line-height: 1.6; text-align: center;">
           We've received your appointment request and will confirm it shortly.
         </p>
@@ -91,13 +91,13 @@ export const bookingCompleted = (
 ) => {
   const color = brandColor(brand);
   return {
-    subject: `Thanks for visiting ${data.studioName} 💛`,
+    subject: `Thank you for visiting ${data.studioName}`,
     html: renderShell({
       brand,
       previewText: "We hope you love your new look.",
       documentType: "Appointment completed",
       bodyHtml: `
-        <h1 style="margin: 0 0 12px; font-family: Georgia, serif; font-size: 22px; color: #2A1B1F; text-align: center;">Thanks for visiting, ${esc(data.customerFirstName)}!</h1>
+        <h1 style="margin: 0 0 12px; font-family: Georgia, serif; font-size: 22px; color: #2A1B1F; text-align: center;">Thank you for visiting, ${esc(data.customerFirstName)}</h1>
         <p style="margin: 0 0 4px; font-family: Arial, sans-serif; font-size: 15px; color: #2A1B1F; line-height: 1.6; text-align: center;">
           We hope you love your ${esc(data.serviceName.toLowerCase())}.
         </p>
@@ -157,7 +157,7 @@ export const bookingConfirmed = (
 ) => {
   const color = brandColor(brand);
   return {
-    subject: "Your appointment is confirmed ✨",
+    subject: "Your appointment is confirmed",
     html: renderShell({
       brand,
       previewText: `${data.serviceName} on ${data.date} at ${data.time}.`,

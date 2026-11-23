@@ -1,6 +1,6 @@
 # Notifications
 
-Every transactional/lifecycle email Zuri Studios sends goes through this
+Every transactional/lifecycle email Zuri sends goes through this
 module. There is no other code path that calls `sendEmailNow`/`emailQueue`
 with a hand-rolled subject/HTML string — `notifications/registry.ts` is a
 complete, accurate inventory of every email the app can send.

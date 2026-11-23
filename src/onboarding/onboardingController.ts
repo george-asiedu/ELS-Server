@@ -17,6 +17,27 @@ export class OnboardingController {
     return res.status(200).json(result);
   };
 
+  public static sendEmailCode = async (req: Request, res: Response) => {
+    const result = await onboardingService.sendEmailCode(req.body?.email);
+    return res.status(200).json(result);
+  };
+
+  public static confirmEmailCode = async (req: Request, res: Response) => {
+    const result = await onboardingService.confirmEmailCode(
+      req.body?.email,
+      req.body?.code,
+    );
+    return res.status(200).json(result);
+  };
+
+  public static checkPromo = async (req: Request, res: Response) => {
+    const result = await onboardingService.checkPromo(
+      req.query.code,
+      req.query.plan,
+    );
+    return res.status(200).json(result);
+  };
+
   public static start = async (req: Request, res: Response) => {
     const result = await onboardingService.start(req.body ?? {});
     return res.status(201).json(result);

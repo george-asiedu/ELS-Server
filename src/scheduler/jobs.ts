@@ -18,6 +18,10 @@ export interface JobDefinition {
   // Longest a run may hold its lease. A run still going past this is assumed
   // dead (crashed process) and the next slot may start.
   maxRunMinutes: number;
+  // Jobs that do a lot of work (reports for every business, cleaning storage)
+  // run one at a time in their own lane, so they never delay the quick,
+  // frequent ones (payment checks, reminders).
+  lane?: "heavy";
   run: () => Promise<Record<string, unknown>>;
 }
 
@@ -39,7 +43,7 @@ export const JOBS: JobDefinition[] = [
     key: "booking-reminders-24h",
     label: "Day-before reminders",
     description:
-      "Emails customers about appointments roughly 24 hours away. Each booking gets this reminder at most once.",
+      "Reminds customers (by push, else email) and the studio's admins (by push) about appointments roughly 24 hours away. Each booking gets this reminder at most once.",
     schedule: { periodMinutes: 60, offsetMinutes: 5 },
     scheduleLabel: "Hourly, at 5 past",
     maxRunMinutes: 10,
@@ -53,7 +57,7 @@ export const JOBS: JobDefinition[] = [
     key: "booking-reminders-1h",
     label: "Hour-before reminders",
     description:
-      "Emails customers about appointments starting in the next 30–90 minutes. Each booking gets this reminder at most once.",
+      "Reminds customers (by push, else email) and the studio's admins (by push) about appointments starting in the next 30–90 minutes. Each booking gets this reminder at most once.",
     schedule: { periodMinutes: 15, offsetMinutes: 0 },
     scheduleLabel: "Every 15 minutes",
     maxRunMinutes: 10,
@@ -61,6 +65,95 @@ export const JOBS: JobDefinition[] = [
       const { AppointmentService } =
         await import("../appointment/appointmentService");
       return { ...(await new AppointmentService().sendDueReminders("1H")) };
+    },
+  },
+  {
+    key: "review-requests",
+    label: "Review requests",
+    description:
+      "Asks customers for a review (email and push) a day after a completed visit and a few days after an order was handed over. Each is asked once.",
+    schedule: { periodMinutes: 24 * 60, offsetMinutes: 10 * 60 },
+    scheduleLabel: "Daily at 10:00 UTC",
+    maxRunMinutes: 20,
+    lane: "heavy",
+    run: async () => {
+      const { ReviewRequestService } = await import("../reviews/reviewRequests");
+      return { ...(await new ReviewRequestService().sendDue()) };
+    },
+  },
+  {
+    key: "monthly-reports",
+    label: "Monthly reports",
+    description:
+      "Emails each studio's and store's admins last month's figures, with a push saying it's in their inbox. Runs daily; each studio gets each month's report once.",
+    schedule: { periodMinutes: 24 * 60, offsetMinutes: 7 * 60 },
+    scheduleLabel: "Daily at 07:00 UTC",
+    maxRunMinutes: 30,
+    lane: "heavy",
+    run: async () => {
+      const { MonthlyReportService } = await import("../reports/monthlyReport");
+      return { ...(await new MonthlyReportService().sendDue()) };
+    },
+  },
+  {
+    key: "insights-weekly",
+    label: "Weekly insights email",
+    description:
+      "Emails each Premium and Zuri Stores business its week: money in, profit and the top things to act on. Each business can turn it off.",
+    // Mondays at 07:30 UTC (the epoch began on a Thursday, hence the offset).
+    schedule: { periodMinutes: 7 * 24 * 60, offsetMinutes: 4 * 24 * 60 + 7 * 60 + 30 },
+    scheduleLabel: "Mondays at 07:30 UTC",
+    maxRunMinutes: 30,
+    lane: "heavy",
+    run: async () => {
+      const { sendWeeklyDigests } = await import("../insights/digest");
+      return { ...(await sendWeeklyDigests()) };
+    },
+  },
+  {
+    key: "insight-alerts",
+    label: "Urgent insight alerts",
+    description:
+      "Pushes only what can't wait (sold-out products, very late orders, old unpaid bills), at most once a week each. Each business can turn it off.",
+    schedule: { periodMinutes: 24 * 60, offsetMinutes: 9 * 60 },
+    scheduleLabel: "Daily at 09:00 UTC",
+    maxRunMinutes: 20,
+    lane: "heavy",
+    run: async () => {
+      const { sendInsightAlerts } = await import("../insights/digest");
+      return { ...(await sendInsightAlerts()) };
+    },
+  },
+  {
+    key: "sales-schedule",
+    label: "Scheduled sales",
+    description:
+      "Puts sale prices and banners on for stores whose sale (like Black Friday) runs today, and takes them off again afterwards.",
+    schedule: { periodMinutes: 60, offsetMinutes: 0 },
+    scheduleLabel: "Hourly",
+    maxRunMinutes: 10,
+    run: async () => {
+      const { reconcileAll } = await import("../sales/salesService");
+      return { ...(await reconcileAll()) };
+    },
+  },
+  {
+    key: "storage-maintenance",
+    label: "Storage",
+    description:
+      "Empties gallery trash items older than 30 days, and on the 1st adds each studio's extra storage for the new month to its next bill.",
+    schedule: { periodMinutes: 24 * 60, offsetMinutes: 3 * 60 },
+    scheduleLabel: "Daily at 03:00 UTC",
+    maxRunMinutes: 30,
+    lane: "heavy",
+    run: async () => {
+      const { GalleryService } = await import("../gallery/galleryService");
+      const { S3BucketService } = await import("../bucket/s3BucketService");
+      const { billStorageForMonth } = await import("../storage/storageService");
+      const purged = await new GalleryService(new S3BucketService()).purgeExpired();
+      // Extra storage is added for the month once; re-running it is harmless.
+      const billed = await billStorageForMonth();
+      return { ...purged, ...billed };
     },
   },
   {

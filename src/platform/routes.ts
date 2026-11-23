@@ -1,4 +1,9 @@
+import { billingAdminRoutes } from "./billingAdmin";
+import { cachePublic } from "../cache/cache";
 import { Router } from "express";
+import { AuthController } from "../auth/authController";
+import pushRoutes from "../push/routes";
+import inboxRoutes from "../push/inboxRoutes";
 import { PlatformController } from "./platformController";
 import { FeatureRequestController } from "../featureRequest/featureRequestController";
 import { PlatformReviewController } from "../platformReview/platformReviewController";
@@ -8,6 +13,12 @@ import { SchedulerController } from "../scheduler/schedulerController";
 import { PlatformActivityLogService } from "./platformActivityLog";
 import { LedgerController } from "../ledger/ledgerController";
 import { UserDirectoryController } from "../users/userDirectoryController";
+import { AuditService } from "../audit/auditService";
+import { currentGuestKey, guestKeyFetchLimiter, guestKeyStatus, rotateGuestKey } from "../middleware/guestKey";
+
+const audit = new AuditService();
+import { platformStorageSettings, savePlatformStorageSettings, storageSummary } from "../storage/storageService";
+import { platformList as platformTrainingList, platformUpdate as platformTrainingUpdate, saveSettings as saveTrainingSettings, settings as trainingSettings } from "../training/trainingService";
 
 const activityLogs = new PlatformActivityLogService();
 
@@ -19,17 +30,45 @@ router.post("/auth/forgot-password", PlatformController.forgotPassword);
 router.post("/auth/reset-password", PlatformController.resetPassword);
 
 // Public: site details, prices and setup fees for the platform pages.
-router.get("/public-config", PlatformController.publicConfig);
+router.get("/public-config", cachePublic(), PlatformController.publicConfig);
+// The web app reads the current guest key here (never cached, so a rotation
+// reaches it straight away).
+router.get("/guest-key", guestKeyFetchLimiter, async (_req, res) => {
+  res.set("Cache-Control", "no-store");
+  return res.status(200).json({ data: { key: await currentGuestKey() } });
+});
+router.get("/public-stats", cachePublic(300), PlatformController.publicStats);
+router.get("/directory", cachePublic(300), PlatformController.directory);
 
 // Everything below requires a signed-in super admin.
 router.use(authenticate, requireSuperAdmin);
 router.post("/auth/logout", PlatformController.logout);
+// Two-step sign-in for the super admin's own account.
+router.get("/auth/2fa", AuthController.twoFactorStatus);
+router.post("/auth/2fa/setup", AuthController.twoFactorSetup);
+router.post("/auth/2fa/enable", AuthController.twoFactorEnable);
+router.post("/auth/2fa/disable", AuthController.twoFactorDisable);
+router.post("/auth/2fa/recovery-codes", AuthController.twoFactorRecoveryCodes);
+router.use("/push", pushRoutes);
+router.use("/inbox", inboxRoutes);
 
 router.get("/me", PlatformController.me);
+router.use(billingAdminRoutes);
 router.get("/analytics", PlatformController.analytics);
 router.get("/earnings", PlatformController.earnings);
 router.get("/billing-config", PlatformController.getBillingConfig);
 router.patch("/billing-config", PlatformController.updateBillingConfig);
+router.get("/guest-key/status", async (_req, res) => res.status(200).json({ data: await guestKeyStatus() }));
+router.post("/guest-key/rotate", async (req, res) => {
+  const data = await rotateGuestKey();
+  await audit.record({
+    actor: { id: req.user.id, email: req.user.email, role: req.user.role },
+    action: "platform.guest_key.rotated",
+    targetType: "PlatformConfig",
+    metadata: { endsWith: data.endsWith },
+  });
+  return res.status(200).json({ message: "Guest key rotated. The old one works for 24 more hours.", data });
+});
 router.get("/site-settings", PlatformController.getSiteSettings);
 router.patch("/site-settings", PlatformController.updateSiteSettings);
 
@@ -110,7 +149,23 @@ router.patch("/jobs/:key", SchedulerController.setEnabled);
 router.post("/jobs/:key/run", SchedulerController.runNow);
 
 // Feature-request triage across all studios.
+router.get("/storage-settings", async (_req, res) => res.status(200).json({ data: await platformStorageSettings() }));
+router.patch("/storage-settings", async (req, res) => {
+  const data = await savePlatformStorageSettings(req.body ?? {});
+  await audit.record({
+    actor: { id: req.user.id, email: req.user.email, role: req.user.role },
+    action: "platform.storage_settings.updated",
+    targetType: "PlatformConfig",
+    metadata: data,
+  });
+  return res.status(200).json({ message: "Storage plans saved", data });
+});
+router.get("/studios/:id/storage", async (req, res) => res.status(200).json({ data: await storageSummary(String(req.params.id), req.query.refresh === "1") }));
+router.get("/training", async (_req, res) => res.status(200).json({ data: await platformTrainingList(), settings: await trainingSettings() }));
+router.patch("/training/settings", async (req, res) => res.status(200).json({ message: "Saved", data: await saveTrainingSettings(req.body ?? {}) }));
+router.patch("/training/:id", async (req, res) => res.status(200).json({ message: "Updated", data: await platformTrainingUpdate(String(req.params.id), req.body ?? {}) }));
 router.get("/feature-requests", FeatureRequestController.platformList);
+router.patch("/feature-requests/:id/fee", FeatureRequestController.platformSetFee);
 router.patch(
   "/feature-requests/:id",
   FeatureRequestController.platformUpdateStatus,

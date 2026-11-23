@@ -1,3 +1,4 @@
+import { cachePublic } from "../cache/cache";
 import { Router } from "express";
 import { ContactController } from "./contactController";
 import { authenticate, requireAdmin } from "../middleware/auth";
@@ -5,7 +6,7 @@ import { authenticate, requireAdmin } from "../middleware/auth";
 const router: Router = Router();
 
 // Public
-router.get("/", ContactController.get);
+router.get("/", cachePublic(), ContactController.get);
 
 // Admin
 router.put("/", authenticate, requireAdmin, ContactController.update);

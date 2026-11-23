@@ -3,7 +3,8 @@ export type AppointmentStatusInput =
   | "CONFIRMED"
   | "COMPLETED"
   | "CANCELLED"
-  | "PENDING_RESCHEDULE";
+  | "PENDING_RESCHEDULE"
+  | "NO_SHOW";
 
 export interface CreateAppointmentInput {
   fullName: string;
@@ -16,6 +17,8 @@ export interface CreateAppointmentInput {
   // Multipart field — "true" to apply the customer's loyalty points as a discount.
   applyPoints?: string;
   designImageUrl?: string;
+  staffId?: string | null;
+  voucherCode?: string | null;
 }
 
 export interface UpdateAppointmentStatusInput {

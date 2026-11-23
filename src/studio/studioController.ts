@@ -68,6 +68,7 @@ export class StudioController {
       req.studioId,
       plan,
       cadence,
+      req.body?.promoCode,
     );
     return res.status(200).json(result);
   };
@@ -84,13 +85,31 @@ export class StudioController {
   };
 
   public static startRenewal = async (req: Request, res: Response) => {
-    const result = await studioService.startRenewal(req.studioId);
+    const result = await studioService.startRenewal(
+      req.studioId,
+      req.body?.promoCode,
+    );
     return res.status(200).json(result);
+  };
+
+  public static startExtrasPayment = async (req: Request, res: Response) => {
+    return res.status(200).json(await studioService.startExtrasPayment(req.studioId));
+  };
+
+  public static applyExtrasPayment = async (req: Request, res: Response) => {
+    const reference = String(req.body?.reference ?? "");
+    if (!reference) throw new ApiError("reference is required", 400);
+    return res.status(200).json(await studioService.applyExtrasPayment(req.studioId, reference));
   };
 
   public static applyRenewal = async (req: Request, res: Response) => {
     const reference = String(req.body?.reference ?? "");
     const result = await studioService.applyRenewal(req.studioId, reference);
+    return res.status(200).json(result);
+  };
+
+  public static getPublicStats = async (req: Request, res: Response) => {
+    const result = await studioService.getPublicStats(req.studioId);
     return res.status(200).json(result);
   };
 
@@ -120,6 +139,22 @@ export class StudioController {
   };
 
   // ---- Admin: payout ----------------------------------------------------
+
+  public static getMessaging = async (req: Request, res: Response) => {
+    return res.status(200).json(await studioService.getMessaging(req.studioId));
+  };
+
+  public static setMessaging = async (req: Request, res: Response) => {
+    return res.status(200).json(await studioService.setMessaging(req.studioId, req.body?.whatsappMessages));
+  };
+
+  public static getFeePayer = async (req: Request, res: Response) => {
+    return res.status(200).json(await studioService.getFeePayer(req.studioId));
+  };
+
+  public static setFeePayer = async (req: Request, res: Response) => {
+    return res.status(200).json(await studioService.setFeePayer(req.studioId, req.body?.payer));
+  };
 
   public static getPayout = async (req: Request, res: Response) => {
     const result = await studioService.getPayout(req.studioId);
