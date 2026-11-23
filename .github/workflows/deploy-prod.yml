@@ -58,7 +58,11 @@ jobs:
           cache: yarn
 
       - run: yarn install --frozen-lockfile
+      # prisma generate reads the config, which needs the variable to exist.
+      # It never connects, so a placeholder is enough. No secrets in the build.
       - run: yarn build
+        env:
+          DATABASE_URL: postgresql://build:build@localhost:5432/build
 
       # Compiled code plus what install, migrate, backup and rollback need.
       # src/generated carries the Prisma client and its engine. No secrets.
