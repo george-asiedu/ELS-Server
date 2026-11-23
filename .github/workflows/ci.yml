@@ -22,3 +22,16 @@ jobs:
       - run: yarn build
         env:
           DATABASE_URL: postgresql://build:build@localhost:5432/build
+
+  # The develop branch deploys to Render, only after the checks pass. Turn OFF
+  # auto-deploy in the Render service so this is the only trigger. This lives
+  # here (not in a workflow_run file) because GitHub only runs workflow_run
+  # files that are on the default branch.
+  deploy-dev:
+    needs: check
+    if: github.event_name == 'push' && github.ref == 'refs/heads/develop'
+    runs-on: ubuntu-latest
+    environment: development
+    steps:
+      - name: Trigger Render deploy
+        run: curl -fsS -X POST "${{ secrets.RENDER_DEPLOY_HOOK_URL }}"
