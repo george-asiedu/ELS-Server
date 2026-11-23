@@ -30,14 +30,30 @@ import { buildReceiptPdf } from "../notifications/receiptPdf";
 import { cleanSlots, cleanZones } from "../commerce/commerceSettingsService";
 
 /** The day and window a customer chose, checked against the shop's windows. */
-const pickSlot = (windows: string[], date: string | undefined, window: string | undefined): string | null => {
+const pickSlot = (
+  windows: string[],
+  date: string | undefined,
+  window: string | undefined,
+): string | null => {
   if (!windows.length) return null;
-  if (!window || !windows.includes(window)) throw new ApiError("Choose a delivery time", 400);
-  const day = date && /^\d{4}-\d{2}-\d{2}$/.test(date) ? new Date(`${date}T12:00:00Z`) : null;
+  if (!window || !windows.includes(window))
+    throw new ApiError("Choose a delivery time", 400);
+  const day =
+    date && /^\d{4}-\d{2}-\d{2}$/.test(date)
+      ? new Date(`${date}T12:00:00Z`)
+      : null;
   const today = new Date(new Date().toISOString().slice(0, 10) + "T12:00:00Z");
-  const ahead = day ? Math.round((day.getTime() - today.getTime()) / 86_400_000) : -1;
-  if (!day || ahead < 0 || ahead > 13) throw new ApiError("Choose a delivery day within the next two weeks", 400);
-  const label = day.toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short", timeZone: "UTC" });
+  const ahead = day
+    ? Math.round((day.getTime() - today.getTime()) / 86_400_000)
+    : -1;
+  if (!day || ahead < 0 || ahead > 13)
+    throw new ApiError("Choose a delivery day within the next two weeks", 400);
+  const label = day.toLocaleDateString("en-GB", {
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+    timeZone: "UTC",
+  });
   return `${label}, ${window}`;
 };
 import { receiptMethodLabel } from "../notifications/design/shell";
@@ -199,10 +215,10 @@ export class OrderService extends Connection {
     referralCode?: string | undefined;
     couponCode?: string | undefined;
     giftCardCode?: string | undefined;
-  deliveryNote?: string | undefined;
-  deliveryZoneId?: string | undefined;
-  deliveryDate?: string | undefined;
-  deliveryWindow?: string | undefined;
+    deliveryNote?: string | undefined;
+    deliveryZoneId?: string | undefined;
+    deliveryDate?: string | undefined;
+    deliveryWindow?: string | undefined;
     applyPoints?: boolean | undefined;
     appointmentId?: string | undefined;
     callbackPath: string;
@@ -265,10 +281,22 @@ export class OrderService extends Connection {
 
     // Delivery areas price the trip; without any, the flat fee applies.
     const zones = cleanZones(settings.deliveryZones);
-    const zone = fulfillment === "DELIVERY" && zones.length ? zones.find((z) => z.id === params.deliveryZoneId) : undefined;
-    if (fulfillment === "DELIVERY" && zones.length && !zone) throw new ApiError("Choose your delivery area", 400);
-    const deliveryFee = fulfillment !== "DELIVERY" ? 0 : zone ? zone.fee : settings.deliveryFee;
-    const deliverySlot = fulfillment === "DELIVERY" ? pickSlot(cleanSlots(settings.deliverySlots), params.deliveryDate, params.deliveryWindow) : null;
+    const zone =
+      fulfillment === "DELIVERY" && zones.length
+        ? zones.find((z) => z.id === params.deliveryZoneId)
+        : undefined;
+    if (fulfillment === "DELIVERY" && zones.length && !zone)
+      throw new ApiError("Choose your delivery area", 400);
+    const deliveryFee =
+      fulfillment !== "DELIVERY" ? 0 : zone ? zone.fee : settings.deliveryFee;
+    const deliverySlot =
+      fulfillment === "DELIVERY"
+        ? pickSlot(
+            cleanSlots(settings.deliverySlots),
+            params.deliveryDate,
+            params.deliveryWindow,
+          )
+        : null;
     let total =
       Math.round((subtotal - discountAmount + deliveryFee) * 100) / 100;
     if (total <= 0)
@@ -278,10 +306,15 @@ export class OrderService extends Connection {
     // the code, and given back if the order is cancelled.
     let voucher: { voucherId: string; covered: number } | null = null;
     if (params.giftCardCode) {
-      voucher = await this.withAdvisoryLock(`voucher-code:${params.giftCardCode.trim().toUpperCase()}`, (tx) =>
-        new VoucherService().redeem(tx, params.giftCardCode, { amount: total }),
+      voucher = await this.withAdvisoryLock(
+        `voucher-code:${params.giftCardCode.trim().toUpperCase()}`,
+        (tx) =>
+          new VoucherService().redeem(tx, params.giftCardCode, {
+            amount: total,
+          }),
       );
-      discountAmount = Math.round((discountAmount + voucher.covered) * 100) / 100;
+      discountAmount =
+        Math.round((discountAmount + voucher.covered) * 100) / 100;
       total = Math.round((total - voucher.covered) * 100) / 100;
     }
 
@@ -309,10 +342,14 @@ export class OrderService extends Connection {
         deliveryZone: zone?.name ?? null,
         deliverySlot,
         deliveryNote:
-          fulfillment === "DELIVERY" && params.deliveryNote?.trim() ? params.deliveryNote.trim().slice(0, 300) : null,
+          fulfillment === "DELIVERY" && params.deliveryNote?.trim()
+            ? params.deliveryNote.trim().slice(0, 300)
+            : null,
         referralCode: params.referralCode?.trim() || null,
         ...(coupon ? { couponCode: coupon.code, couponDiscount } : {}),
-        ...(voucher ? { voucherId: voucher.voucherId, voucherAmount: voucher.covered } : {}),
+        ...(voucher
+          ? { voucherId: voucher.voucherId, voucherAmount: voucher.covered }
+          : {}),
         ...(params.appointmentId
           ? { appointmentId: params.appointmentId }
           : {}),
@@ -384,7 +421,10 @@ export class OrderService extends Connection {
     }
 
     const split = await this.paystackChargeFor(total);
-    await this.order.update({ where: { id: order.id }, data: { processingFee: split.processingFee } });
+    await this.order.update({
+      where: { id: order.id },
+      data: { processingFee: split.processingFee },
+    });
     await this.ledger.openAttempt({
       reference,
       expectedAmount: total,
@@ -660,7 +700,10 @@ export class OrderService extends Connection {
     });
     // The processing fee covers the whole charge; it's kept on the order.
     const split = await this.paystackChargeFor(combined);
-    await this.order.update({ where: { id: order.id }, data: { processingFee: split.processingFee } });
+    await this.order.update({
+      where: { id: order.id },
+      data: { processingFee: split.processingFee },
+    });
     await this.ledger.openAttempt({
       reference,
       expectedAmount: combined,
@@ -709,7 +752,9 @@ export class OrderService extends Connection {
     });
     // The handover code is the customer's proof of receipt, so the shop's
     // own list never shows it.
-    const hidden = orders.map(({ handoverCode: _code, riderToken: _token, ...o }) => o);
+    const hidden = orders.map(
+      ({ handoverCode: _code, riderToken: _token, ...o }) => o,
+    );
     return {
       message: "Orders retrieved successfully",
       ...cursorPageResult(hidden as typeof orders, page),
@@ -733,7 +778,11 @@ export class OrderService extends Connection {
     };
   }
 
-  public async updateStatus(id: string, status: string, opts: { eta?: unknown } = {}) {
+  public async updateStatus(
+    id: string,
+    status: string,
+    opts: { eta?: unknown } = {},
+  ) {
     if (!(ORDER_STATUSES as readonly string[]).includes(status)) {
       throw new ApiError("Invalid order status", 400);
     }
@@ -741,15 +790,30 @@ export class OrderService extends Connection {
     if (!existing) throw new ApiError("Order not found", 404);
     const delivery = existing.fulfillment === "DELIVERY";
     if (status === "OUT_FOR_DELIVERY" && !delivery)
-      throw new ApiError("This is a pickup order. Mark it Ready for pickup instead.", 400);
+      throw new ApiError(
+        "This is a pickup order. Mark it Ready for pickup instead.",
+        400,
+      );
     if (status === "READY_FOR_PICKUP" && delivery)
-      throw new ApiError("This is a delivery order. Mark it Out for delivery instead.", 400);
-    if (existing.status === "PENDING_PAYMENT" && (PAID_ORDER_STATUSES as readonly string[]).includes(status) && status !== "PAID")
+      throw new ApiError(
+        "This is a delivery order. Mark it Out for delivery instead.",
+        400,
+      );
+    if (
+      existing.status === "PENDING_PAYMENT" &&
+      (PAID_ORDER_STATUSES as readonly string[]).includes(status) &&
+      status !== "PAID"
+    )
       throw new ApiError("This order hasn't been paid yet", 400);
 
-    const eta = typeof opts.eta === "string" && opts.eta.trim() ? opts.eta.trim().slice(0, 60) : undefined;
+    const eta =
+      typeof opts.eta === "string" && opts.eta.trim()
+        ? opts.eta.trim().slice(0, 60)
+        : undefined;
     // The handover code: given to the rider or at the counter to confirm it.
-    const needsCode = (status === "OUT_FOR_DELIVERY" || status === "READY_FOR_PICKUP") && !existing.handoverCode;
+    const needsCode =
+      (status === "OUT_FOR_DELIVERY" || status === "READY_FOR_PICKUP") &&
+      !existing.handoverCode;
     const order = await this.order.update({
       where: { id },
       data: {
@@ -766,20 +830,37 @@ export class OrderService extends Connection {
               deliveryFailReason: null,
             }
           : {}),
-        ...(status === "FULFILLED" ? { deliveredAt: existing.deliveredAt ?? new Date(), riderToken: null } : {}),
+        ...(status === "FULFILLED"
+          ? {
+              deliveredAt: existing.deliveredAt ?? new Date(),
+              riderToken: null,
+            }
+          : {}),
         ...(status === "CANCELLED" ? { riderToken: null } : {}),
       },
       include: orderInclude,
     });
 
     // Keep the customer posted at each stage before the handover.
-    if (status !== existing.status && ["PREPARING", "READY_FOR_PICKUP", "OUT_FOR_DELIVERY"].includes(status)) {
-      void this.notifyStage(order).catch((e) => console.warn("Order stage notice failed:", (e as Error).message));
+    if (
+      status !== existing.status &&
+      ["PREPARING", "READY_FOR_PICKUP", "OUT_FOR_DELIVERY"].includes(status)
+    ) {
+      void this.notifyStage(order).catch((e) =>
+        console.warn("Order stage notice failed:", (e as Error).message),
+      );
     }
 
     // A cancelled order gives back what its gift card covered.
-    if (status === "CANCELLED" && existing.status !== "CANCELLED" && existing.voucherId) {
-      await new VoucherService().restore(existing.voucherId, existing.voucherAmount);
+    if (
+      status === "CANCELLED" &&
+      existing.status !== "CANCELLED" &&
+      existing.voucherId
+    ) {
+      await new VoucherService().restore(
+        existing.voucherId,
+        existing.voucherAmount,
+      );
     }
 
     // Refund redeemed points if a customer order is cancelled (once).
@@ -848,7 +929,10 @@ export class OrderService extends Connection {
   }
 
   private async riderLink(studioId: string, token: string) {
-    const studio = await this.studio.findUnique({ where: { id: studioId }, select: { slug: true } });
+    const studio = await this.studio.findUnique({
+      where: { id: studioId },
+      select: { slug: true },
+    });
     return studioLink(studio?.slug ?? "", `/delivery/${token}`);
   }
 
@@ -867,11 +951,17 @@ export class OrderService extends Connection {
     const brand = await this.studioEmailBrand(order.studioId);
     const { subject, html, pushBody } = orderStageUpdate(brand, {
       orderNumber: order.orderNumber,
-      customerFirstName: (order.customerName ?? "there").split(" ")[0] || "there",
-      stage: order.status as "PREPARING" | "READY_FOR_PICKUP" | "OUT_FOR_DELIVERY",
+      customerFirstName:
+        (order.customerName ?? "there").split(" ")[0] || "there",
+      stage: order.status as
+        | "PREPARING"
+        | "READY_FOR_PICKUP"
+        | "OUT_FOR_DELIVERY",
       eta: order.deliveryEta,
       handoverCode: order.handoverCode,
-      ...(brand.kind === "studio" && brand.studio.bookingUrl ? { viewUrl: brand.studio.bookingUrl } : {}),
+      ...(brand.kind === "studio" && brand.studio.bookingUrl
+        ? { viewUrl: brand.studio.bookingUrl }
+        : {}),
     });
     await this.notifications.send({
       template: NotificationTemplate.SHOP_ORDER_STAGE,
@@ -888,9 +978,20 @@ export class OrderService extends Connection {
 
   public async verify(reference: string) {
     // Paid entirely with a gift card: there's no Paystack transaction.
-    const own = await this.order.findFirst({ where: { reference }, select: { status: true, voucherAmount: true, total: true } });
-    if (own && own.status !== "PENDING_PAYMENT" && own.total <= 0 && own.voucherAmount > 0) {
-      const order = await this.order.findFirst({ where: { reference }, include: orderInclude });
+    const own = await this.order.findFirst({
+      where: { reference },
+      select: { status: true, voucherAmount: true, total: true },
+    });
+    if (
+      own &&
+      own.status !== "PENDING_PAYMENT" &&
+      own.total <= 0 &&
+      own.voucherAmount > 0
+    ) {
+      const order = await this.order.findFirst({
+        where: { reference },
+        include: orderInclude,
+      });
       return { message: "Order paid with a gift card", data: order };
     }
     const data = await paystack.verify(reference);
@@ -911,12 +1012,16 @@ export class OrderService extends Connection {
   public async chargeMomo(reference: string, phone: string, provider: string) {
     const order = await this.order.findFirst({ where: { reference } });
     if (!order) throw new ApiError("Order not found", 404);
-    if (order.status !== "PENDING_PAYMENT") throw new ApiError("This order is no longer awaiting payment", 400);
+    if (order.status !== "PENDING_PAYMENT")
+      throw new ApiError("This order is no longer awaiting payment", 400);
     const email = order.customerEmail;
     if (!email) throw new ApiError("An email is required to pay", 400);
     const fresh = await this.makeReference("ORD");
     const split = await this.paystackChargeFor(order.total);
-    await this.order.update({ where: { id: order.id }, data: { reference: fresh, processingFee: split.processingFee } });
+    await this.order.update({
+      where: { id: order.id },
+      data: { reference: fresh, processingFee: split.processingFee },
+    });
     await this.ledger.openAttempt({
       reference: fresh,
       expectedAmount: order.total,
@@ -930,12 +1035,22 @@ export class OrderService extends Connection {
       reference: fresh,
       phone,
       provider,
-      metadata: { orderId: order.id, orderNumber: order.orderNumber, kind: "order" },
+      metadata: {
+        orderId: order.id,
+        orderNumber: order.orderNumber,
+        kind: "order",
+      },
       ...split,
     });
     return {
       message: "Charge started",
-      data: { reference: fresh, status: res.status, displayText: res.display_text ?? res.message ?? null, amount: split.amountPesewas / 100, processingFee: split.processingFee },
+      data: {
+        reference: fresh,
+        status: res.status,
+        displayText: res.display_text ?? res.message ?? null,
+        amount: split.amountPesewas / 100,
+        processingFee: split.processingFee,
+      },
     };
   }
 
@@ -1076,7 +1191,10 @@ export class OrderService extends Connection {
       }
 
       // Already settled by a different reference — a real second charge.
-      if ((PAID_ORDER_STATUSES as readonly string[]).includes(order.status) && order.reference !== reference) {
+      if (
+        (PAID_ORDER_STATUSES as readonly string[]).includes(order.status) &&
+        order.reference !== reference
+      ) {
         await this.ledger.settleAttempt(reference, data, { status: "SUCCESS" });
         await this.audit.record({
           actor: { email: order.customerEmail ?? "system", role: "system" },
@@ -1304,7 +1422,9 @@ export class OrderService extends Connection {
     if (paid.studioId) {
       void checkStockAlerts(
         paid.studioId,
-        paid.items.map((i) => i.productId).filter((x): x is string => Boolean(x)),
+        paid.items
+          .map((i) => i.productId)
+          .filter((x): x is string => Boolean(x)),
       ).catch((e) => console.warn("Stock alert failed:", (e as Error).message));
     }
 
@@ -1360,7 +1480,13 @@ export class OrderService extends Connection {
             ? [{ label: "Delivery", value: ghs(paid.deliveryFee) }]
             : []),
           ...(fee > 0
-            ? [{ label: "Payment processing fee", value: ghs(fee), muted: true }]
+            ? [
+                {
+                  label: "Payment processing fee",
+                  value: ghs(fee),
+                  muted: true,
+                },
+              ]
             : []),
           { label: "Total paid", value: ghs(paidNow), emphasis: true },
         ];

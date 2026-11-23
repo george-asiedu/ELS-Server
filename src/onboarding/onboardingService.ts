@@ -265,7 +265,9 @@ export class OnboardingService extends Connection {
         reference,
         ...(promo.code ? { promoCode: promo.code } : {}),
         // An invite link from another business (checked when provisioning).
-        ...(typeof input.ref === "string" && /^[a-z0-9-]{2,60}$/.test(input.ref) ? { referralSlug: input.ref } : {}),
+        ...(typeof input.ref === "string" && /^[a-z0-9-]{2,60}$/.test(input.ref)
+          ? { referralSlug: input.ref }
+          : {}),
         status: "PENDING",
         // Recorded now, so finalize provisions exactly what was paid for even
         // if the super admin changes the fees in between.

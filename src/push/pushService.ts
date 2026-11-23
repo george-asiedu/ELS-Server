@@ -45,8 +45,18 @@ export const pushToUsers = async (
   // without Redis it is sent here as before.)
   if (opts.background && pushQueue) {
     await pushQueue
-      .add("push", { userIds: [...new Set(userIds)], payload: { title: payload.title, body: payload.body, url: payload.url, ...(payload.tag ? { tag: payload.tag } : {}) } })
-      .catch((e) => console.warn("Couldn't queue a push:", (e as Error).message));
+      .add("push", {
+        userIds: [...new Set(userIds)],
+        payload: {
+          title: payload.title,
+          body: payload.body,
+          url: payload.url,
+          ...(payload.tag ? { tag: payload.tag } : {}),
+        },
+      })
+      .catch((e) =>
+        console.warn("Couldn't queue a push:", (e as Error).message),
+      );
     return result;
   }
   const subs = await raw.pushSubscription.findMany({
@@ -71,7 +81,11 @@ export const pushToUsers = async (
           await webpush.sendNotification(
             { endpoint: s.endpoint, keys: { p256dh: s.p256dh, auth: s.auth } },
             JSON.stringify({ ...payload, unread: unread.get(s.userId) ?? 0 }),
-            { TTL: 6 * 3600, urgency: "normal", topic: payload.tag?.slice(0, 32) },
+            {
+              TTL: 6 * 3600,
+              urgency: "normal",
+              topic: payload.tag?.slice(0, 32),
+            },
           );
           ok.push(s.id);
         } catch (e) {
@@ -97,7 +111,9 @@ export const pushToUsers = async (
     dead.length
       ? raw.pushSubscription.deleteMany({ where: { id: { in: dead } } })
       : null,
-  ]).catch((e) => console.warn("Push bookkeeping failed:", (e as Error).message));
+  ]).catch((e) =>
+    console.warn("Push bookkeeping failed:", (e as Error).message),
+  );
   return result;
 };
 
@@ -137,7 +153,11 @@ const PUSH_ROUTES: Partial<Record<NotificationTemplateKey, string>> = {
  * Tell people something: a row in their in-app notifications list, plus a
  * push to every device they've switched on. Returns how many devices got it.
  */
-export const notifyUsers = async (userIds: string[], payload: PushPayload, opts: { background?: boolean } = { background: true }) => {
+export const notifyUsers = async (
+  userIds: string[],
+  payload: PushPayload,
+  opts: { background?: boolean } = { background: true },
+) => {
   const ids = [...new Set(userIds)];
   if (!ids.length) return 0;
   await raw.notification.createMany({

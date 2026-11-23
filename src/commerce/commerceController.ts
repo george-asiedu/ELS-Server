@@ -9,8 +9,15 @@ export class CommerceController {
   };
 
   public static updateSettings = async (req: Request, res: Response) => {
-    const { enabled, enablePickup, enableDelivery, deliveryFee, lowStockThreshold, deliveryZones, deliverySlots } =
-      req.body ?? {};
+    const {
+      enabled,
+      enablePickup,
+      enableDelivery,
+      deliveryFee,
+      lowStockThreshold,
+      deliveryZones,
+      deliverySlots,
+    } = req.body ?? {};
     return res.status(200).json(
       await service.update({
         enabled,

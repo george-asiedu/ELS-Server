@@ -248,7 +248,11 @@ app.use("/api/auth/login", loginIpLimiter);
 app.use("/api/platform/auth/login", loginIpLimiter);
 // The Zuri mark for emails. Public, cacheable, and built into the server.
 app.get("/api/brand/zuri-logo.png", (_req, res) => {
-  res.set({ "Content-Type": "image/png", "Cache-Control": "public, max-age=86400", "Cross-Origin-Resource-Policy": "cross-origin" });
+  res.set({
+    "Content-Type": "image/png",
+    "Cache-Control": "public, max-age=86400",
+    "Cross-Origin-Resource-Policy": "cross-origin",
+  });
   res.send(ZURI_LOGO_PNG);
 });
 app.use("/api/payments", sensitiveActionLimiter);

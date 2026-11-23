@@ -93,13 +93,17 @@ export class StudioController {
   };
 
   public static startExtrasPayment = async (req: Request, res: Response) => {
-    return res.status(200).json(await studioService.startExtrasPayment(req.studioId));
+    return res
+      .status(200)
+      .json(await studioService.startExtrasPayment(req.studioId));
   };
 
   public static applyExtrasPayment = async (req: Request, res: Response) => {
     const reference = String(req.body?.reference ?? "");
     if (!reference) throw new ApiError("reference is required", 400);
-    return res.status(200).json(await studioService.applyExtrasPayment(req.studioId, reference));
+    return res
+      .status(200)
+      .json(await studioService.applyExtrasPayment(req.studioId, reference));
   };
 
   public static applyRenewal = async (req: Request, res: Response) => {
@@ -145,7 +149,14 @@ export class StudioController {
   };
 
   public static setMessaging = async (req: Request, res: Response) => {
-    return res.status(200).json(await studioService.setMessaging(req.studioId, req.body?.whatsappMessages));
+    return res
+      .status(200)
+      .json(
+        await studioService.setMessaging(
+          req.studioId,
+          req.body?.whatsappMessages,
+        ),
+      );
   };
 
   public static getFeePayer = async (req: Request, res: Response) => {
@@ -153,7 +164,9 @@ export class StudioController {
   };
 
   public static setFeePayer = async (req: Request, res: Response) => {
-    return res.status(200).json(await studioService.setFeePayer(req.studioId, req.body?.payer));
+    return res
+      .status(200)
+      .json(await studioService.setFeePayer(req.studioId, req.body?.payer));
   };
 
   public static getPayout = async (req: Request, res: Response) => {

@@ -10,15 +10,23 @@ import { createTenantClient } from "./tenant/tenantClient";
 // (zuri-worker) with a lower priority than the API.
 
 if (env.appRole === "api") {
-  console.error("APP_ROLE=api: this is the web process. Start dist/app.js, or set APP_ROLE=worker.");
+  console.error(
+    "APP_ROLE=api: this is the web process. Start dist/app.js, or set APP_ROLE=worker.",
+  );
   process.exit(1);
 }
 
-bootstrapQueues().catch((error) => console.error("Failed to start queues:", error));
+bootstrapQueues().catch((error) =>
+  console.error("Failed to start queues:", error),
+);
 if (env.schedulerEnabled) {
-  startScheduler().catch((error) => console.error("Failed to start scheduler:", error));
+  startScheduler().catch((error) =>
+    console.error("Failed to start scheduler:", error),
+  );
 } else {
-  console.log("Scheduler off (SCHEDULER_ENABLED is not true): recurring jobs won't run here.");
+  console.log(
+    "Scheduler off (SCHEDULER_ENABLED is not true): recurring jobs won't run here.",
+  );
 }
 console.log(`Worker running (role: ${env.appRole}).`);
 
@@ -30,8 +38,12 @@ const shutdown = (signal: string) => {
   setTimeout(() => process.exit(1), 25_000).unref();
   void (async () => {
     await stopScheduler();
-    await shutdownQueues().catch((e) => console.error("Error closing queues:", e));
-    await createTenantClient().raw.$disconnect().catch(() => undefined);
+    await shutdownQueues().catch((e) =>
+      console.error("Error closing queues:", e),
+    );
+    await createTenantClient()
+      .raw.$disconnect()
+      .catch(() => undefined);
     process.exit(0);
   })();
 };

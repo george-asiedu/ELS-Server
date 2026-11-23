@@ -4,8 +4,17 @@ import { ApiError } from "../middleware/apiError";
 import { paystack, PaystackVerifyData } from "../payment/paystackClient";
 import { NotificationService } from "../notifications/notificationService";
 import { NotificationTemplate } from "../notifications/registry";
-import { brandFromStudio, firstName, storefrontFallbackBrand } from "../notifications/brand";
-import { renderShell, button, esc, brandColor } from "../notifications/design/shell";
+import {
+  brandFromStudio,
+  firstName,
+  storefrontFallbackBrand,
+} from "../notifications/brand";
+import {
+  renderShell,
+  button,
+  esc,
+  brandColor,
+} from "../notifications/design/shell";
 import { env } from "../config/env.config";
 import { getTenantContext, runWithTenant } from "../tenant/context";
 import { createTenantClient } from "../tenant/tenantClient";
@@ -21,18 +30,23 @@ const r2 = (n: number) => Math.round(n * 100) / 100;
 const MIN_GIFT = 20;
 const MAX_GIFT = 10000;
 export const VOUCHER_REF_PREFIX = "VCH-";
-export const isVoucherReference = (ref: string) => ref.startsWith(VOUCHER_REF_PREFIX);
+export const isVoucherReference = (ref: string) =>
+  ref.startsWith(VOUCHER_REF_PREFIX);
 
 // No 0/O or 1/I, so a code read out over the phone can't be misheard.
 const ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 const newCode = (prefix: "GIFT" | "PACK") => {
-  const part = () => Array.from({ length: 4 }, () => ALPHABET[randomInt(ALPHABET.length)]).join("");
+  const part = () =>
+    Array.from({ length: 4 }, () => ALPHABET[randomInt(ALPHABET.length)]).join(
+      "",
+    );
   return `${prefix}-${part()}-${part()}`;
 };
 export const normalizeCode = (raw: unknown) =>
   typeof raw === "string" ? raw.trim().toUpperCase().replace(/\s+/g, "") : "";
 
-const str = (v: unknown, max: number) => (typeof v === "string" ? v.trim().slice(0, max) : "");
+const str = (v: unknown, max: number) =>
+  typeof v === "string" ? v.trim().slice(0, max) : "";
 const email = (v: unknown) => {
   const e = str(v, 120).toLowerCase();
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e) ? e : "";
@@ -106,16 +120,30 @@ export class VoucherService extends Connection {
     const buyerName = str(input.buyerName, 80);
     const buyerEmail = email(input.buyerEmail);
     if (!buyerName) throw new ApiError("Enter your name", 400);
-    if (!buyerEmail) throw new ApiError("Enter a valid email for your receipt", 400);
+    if (!buyerEmail)
+      throw new ApiError("Enter a valid email for your receipt", 400);
     return { buyerName, buyerEmail };
   }
 
-  public async buyGiftCard(input: Record<string, unknown>, userId?: string, origin?: string) {
+  public async buyGiftCard(
+    input: Record<string, unknown>,
+    userId?: string,
+    origin?: string,
+  ) {
     const amount = r2(Number(input.amount));
     if (!Number.isFinite(amount) || amount < MIN_GIFT || amount > MAX_GIFT)
-      throw new ApiError(`Choose an amount from GHS ${MIN_GIFT} to GHS ${MAX_GIFT.toLocaleString("en-GB")}`, 400);
-    const recipientEmail = input.recipientEmail ? email(input.recipientEmail) : null;
-    if (input.recipientEmail && !recipientEmail) throw new ApiError("Enter a valid email for the person receiving it", 400);
+      throw new ApiError(
+        `Choose an amount from GHS ${MIN_GIFT} to GHS ${MAX_GIFT.toLocaleString("en-GB")}`,
+        400,
+      );
+    const recipientEmail = input.recipientEmail
+      ? email(input.recipientEmail)
+      : null;
+    if (input.recipientEmail && !recipientEmail)
+      throw new ApiError(
+        "Enter a valid email for the person receiving it",
+        400,
+      );
     return this.startPurchase({
       kind: "GIFT_CARD",
       price: amount,
@@ -129,9 +157,16 @@ export class VoucherService extends Connection {
     });
   }
 
-  public async buyPackage(input: Record<string, unknown>, userId?: string, origin?: string) {
-    const offer = await this.packageOffer.findUnique({ where: { id: str(input.packageId, 64) } });
-    if (!offer || !offer.active) throw new ApiError("That package isn't available", 404);
+  public async buyPackage(
+    input: Record<string, unknown>,
+    userId?: string,
+    origin?: string,
+  ) {
+    const offer = await this.packageOffer.findUnique({
+      where: { id: str(input.packageId, 64) },
+    });
+    if (!offer || !offer.active)
+      throw new ApiError("That package isn't available", 404);
     return this.startPurchase({
       kind: "PACKAGE",
       price: offer.price,
@@ -146,7 +181,10 @@ export class VoucherService extends Connection {
   }
 
   /** Called from the payment page and the webhook. Activates once. */
-  public async finalizeByReference(reference: string, data?: PaystackVerifyData) {
+  public async finalizeByReference(
+    reference: string,
+    data?: PaystackVerifyData,
+  ) {
     const v = await raw.voucher.findUnique({ where: { reference } });
     if (!v) return null;
     if (v.status !== "PENDING") return v;
@@ -154,15 +192,22 @@ export class VoucherService extends Connection {
     if (vd.status !== "success") return v;
     const expected = Math.round((v.price + v.processingFee) * 100);
     if (Math.abs(Number(vd.amount) - expected) > 0.5) {
-      console.warn(`Voucher ${reference}: expected ${expected} pesewas, Paystack reported ${vd.amount}`);
+      console.warn(
+        `Voucher ${reference}: expected ${expected} pesewas, Paystack reported ${vd.amount}`,
+      );
       return v;
     }
     const updated = await raw.voucher.updateMany({
       where: { id: v.id, status: "PENDING" },
-      data: { status: "ACTIVE", paidAt: vd.paid_at ? new Date(vd.paid_at) : new Date() },
+      data: {
+        status: "ACTIVE",
+        paidAt: vd.paid_at ? new Date(vd.paid_at) : new Date(),
+      },
     });
     if (updated.count === 1 && v.studioId) {
-      await runWithTenant({ studioId: v.studioId } as never, () => this.sendCode(v.id)).catch((e) =>
+      await runWithTenant({ studioId: v.studioId } as never, () =>
+        this.sendCode(v.id),
+      ).catch((e) =>
         console.warn("Voucher email failed:", (e as Error).message),
       );
     }
@@ -172,7 +217,13 @@ export class VoucherService extends Connection {
   public async verify(reference: string) {
     const v = await this.finalizeByReference(reference);
     if (!v) throw new ApiError("Purchase not found", 404);
-    return { message: v.status === "ACTIVE" ? "Payment confirmed" : "Payment not confirmed yet", data: this.publicView(v) };
+    return {
+      message:
+        v.status === "ACTIVE"
+          ? "Payment confirmed"
+          : "Payment not confirmed yet",
+      data: this.publicView(v),
+    };
   }
 
   /** The code goes to the recipient (gift card) or the buyer (package). */
@@ -181,11 +232,17 @@ export class VoucherService extends Connection {
     const studio = await this.currentStudioBranding(v.studioId ?? undefined);
     if (!studio) return;
     const brand = brandFromStudio(studio, storefrontFallbackBrand);
-    const service = v.serviceId ? await this.service.findUnique({ where: { id: v.serviceId }, select: { name: true } }) : null;
+    const service = v.serviceId
+      ? await this.service.findUnique({
+          where: { id: v.serviceId },
+          select: { name: true },
+        })
+      : null;
     const gift = v.kind === "GIFT_CARD";
     const to = gift ? (v.recipientEmail ?? v.buyerEmail) : v.buyerEmail;
     const name = gift ? (v.recipientName ?? v.buyerName) : v.buyerName;
-    const fromSomeoneElse = gift && v.recipientEmail && v.recipientEmail !== v.buyerEmail;
+    const fromSomeoneElse =
+      gift && v.recipientEmail && v.recipientEmail !== v.buyerEmail;
     const codeBox = `<p style="margin: 20px 0; padding: 16px; border: 1px dashed #C9CED6; text-align: left; font-family: 'Courier New', monospace; font-size: 22px; font-weight: bold; letter-spacing: 2px;">${esc(v.code)}</p>`;
     const subject = gift
       ? fromSomeoneElse
@@ -194,7 +251,9 @@ export class VoucherService extends Connection {
       : `Your ${service?.name ?? "package"} package at ${studio.name}`;
     const html = renderShell({
       brand,
-      previewText: gift ? `Use code ${v.code} when you book or buy.` : `${v.sessionsTotal} sessions, ready to book.`,
+      previewText: gift
+        ? `Use code ${v.code} when you book or buy.`
+        : `${v.sessionsTotal} sessions, ready to book.`,
       documentType: gift ? "Gift card" : "Package",
       bodyHtml: gift
         ? `<h1 style="margin: 0 0 12px; font-family: Georgia, serif; font-size: 22px; color: #2A1B1F;">Hi ${esc(firstName(name))}, here's your gift card</h1>
@@ -245,7 +304,10 @@ export class VoucherService extends Connection {
       sessionsTotal: v.sessionsTotal,
       serviceId: v.serviceId,
       // Where the code was sent (the code itself only goes by email).
-      sentTo: v.kind === "GIFT_CARD" ? (v.recipientEmail ?? v.buyerEmail) : v.buyerEmail,
+      sentTo:
+        v.kind === "GIFT_CARD"
+          ? (v.recipientEmail ?? v.buyerEmail)
+          : v.buyerEmail,
     };
   }
 
@@ -255,12 +317,26 @@ export class VoucherService extends Connection {
   public async check(rawCode: unknown, serviceId?: unknown) {
     const code = normalizeCode(rawCode);
     const v = code ? await this.voucher.findFirst({ where: { code } }) : null;
-    if (!v || v.status === "PENDING") throw new ApiError("That code isn't valid", 404);
-    if (v.status === "USED" || (v.kind === "GIFT_CARD" ? v.balance <= 0 : v.sessionsLeft <= 0))
+    if (!v || v.status === "PENDING")
+      throw new ApiError("That code isn't valid", 404);
+    if (
+      v.status === "USED" ||
+      (v.kind === "GIFT_CARD" ? v.balance <= 0 : v.sessionsLeft <= 0)
+    )
       throw new ApiError("That code has been used up", 400);
-    if (v.kind === "PACKAGE" && typeof serviceId === "string" && serviceId && v.serviceId !== serviceId)
+    if (
+      v.kind === "PACKAGE" &&
+      typeof serviceId === "string" &&
+      serviceId &&
+      v.serviceId !== serviceId
+    )
       throw new ApiError("That package is for a different service", 400);
-    const service = v.serviceId ? await this.service.findUnique({ where: { id: v.serviceId }, select: { name: true } }) : null;
+    const service = v.serviceId
+      ? await this.service.findUnique({
+          where: { id: v.serviceId },
+          select: { name: true },
+        })
+      : null;
     return {
       data: {
         code: v.code,
@@ -285,23 +361,37 @@ export class VoucherService extends Connection {
   ): Promise<{ voucherId: string; covered: number }> {
     const code = normalizeCode(rawCode);
     const v = await tx.voucher.findFirst({ where: { code, status: "ACTIVE" } });
-    if (!v) throw new ApiError("That gift card or package code isn't valid", 400);
+    if (!v)
+      throw new ApiError("That gift card or package code isn't valid", 400);
     if (v.kind === "PACKAGE") {
-      if (!use.serviceId || use.serviceId !== v.serviceId) throw new ApiError("That package is for a different service", 400);
+      if (!use.serviceId || use.serviceId !== v.serviceId)
+        throw new ApiError("That package is for a different service", 400);
       const res = await tx.voucher.updateMany({
         where: { id: v.id, sessionsLeft: { gt: 0 } },
-        data: { sessionsLeft: { decrement: 1 }, ...(v.sessionsLeft <= 1 ? { status: "USED" } : {}) },
+        data: {
+          sessionsLeft: { decrement: 1 },
+          ...(v.sessionsLeft <= 1 ? { status: "USED" } : {}),
+        },
       });
-      if (res.count !== 1) throw new ApiError("That package has no sessions left", 400);
+      if (res.count !== 1)
+        throw new ApiError("That package has no sessions left", 400);
       return { voucherId: v.id, covered: r2(use.amount) };
     }
     const covered = r2(Math.min(v.balance, use.amount));
-    if (covered <= 0) throw new ApiError("That gift card has no balance left", 400);
+    if (covered <= 0)
+      throw new ApiError("That gift card has no balance left", 400);
     const res = await tx.voucher.updateMany({
       where: { id: v.id, balance: { gte: covered } },
-      data: { balance: { decrement: covered }, ...(v.balance - covered <= 0.004 ? { status: "USED" } : {}) },
+      data: {
+        balance: { decrement: covered },
+        ...(v.balance - covered <= 0.004 ? { status: "USED" } : {}),
+      },
     });
-    if (res.count !== 1) throw new ApiError("That gift card has just been used. Check its balance and try again.", 409);
+    if (res.count !== 1)
+      throw new ApiError(
+        "That gift card has just been used. Check its balance and try again.",
+        409,
+      );
     return { voucherId: v.id, covered };
   }
 
@@ -328,18 +418,34 @@ export class VoucherService extends Connection {
     const rows = await this.voucher.findMany({
       where: {
         status: { not: "PENDING" },
-        OR: [{ buyerUserId: userId }, { buyerEmail: email }, { recipientEmail: email }],
+        OR: [
+          { buyerUserId: userId },
+          { buyerEmail: email },
+          { recipientEmail: email },
+        ],
       },
       orderBy: { createdAt: "desc" },
     });
     const services = new Map(
-      (await this.service.findMany({ where: { id: { in: rows.map((r) => r.serviceId).filter((x): x is string => Boolean(x)) } }, select: { id: true, name: true } })).map(
-        (sv) => [sv.id, sv.name],
-      ),
+      (
+        await this.service.findMany({
+          where: {
+            id: {
+              in: rows
+                .map((r) => r.serviceId)
+                .filter((x): x is string => Boolean(x)),
+            },
+          },
+          select: { id: true, name: true },
+        })
+      ).map((sv) => [sv.id, sv.name]),
     );
     return {
       data: rows.map((v) => {
-        const forSomeoneElse = v.kind === "GIFT_CARD" && Boolean(v.recipientEmail) && v.recipientEmail !== email;
+        const forSomeoneElse =
+          v.kind === "GIFT_CARD" &&
+          Boolean(v.recipientEmail) &&
+          v.recipientEmail !== email;
         const received = v.recipientEmail === email && v.buyerEmail !== email;
         return {
           id: v.id,
@@ -364,7 +470,11 @@ export class VoucherService extends Connection {
   // ---- Admin
 
   public async list() {
-    const data = await this.voucher.findMany({ where: { status: { not: "PENDING" } }, orderBy: { createdAt: "desc" }, take: 200 });
+    const data = await this.voucher.findMany({
+      where: { status: { not: "PENDING" } },
+      orderBy: { createdAt: "desc" },
+      take: 200,
+    });
     return { data };
   }
 
@@ -374,11 +484,22 @@ export class VoucherService extends Connection {
     if (!v || v.status === "PENDING") throw new ApiError("Not found", 404);
     const amount = v.kind === "GIFT_CARD" ? r2(Number(amountRaw)) : 0;
     if (v.kind === "GIFT_CARD" && (!(amount > 0) || amount > v.balance))
-      throw new ApiError(`Enter an amount up to GHS ${v.balance.toFixed(2)}`, 400);
+      throw new ApiError(
+        `Enter an amount up to GHS ${v.balance.toFixed(2)}`,
+        400,
+      );
     await this.withAdvisoryLock(`voucher:${v.id}`, (tx) =>
-      this.redeem(tx, v.code, { amount: v.kind === "GIFT_CARD" ? amount : 0, ...(v.serviceId ? { serviceId: v.serviceId } : {}) }),
+      this.redeem(tx, v.code, {
+        amount: v.kind === "GIFT_CARD" ? amount : 0,
+        ...(v.serviceId ? { serviceId: v.serviceId } : {}),
+      }),
     );
-    return { message: v.kind === "GIFT_CARD" ? `GHS ${amount.toFixed(2)} taken off the gift card` : "One session used" };
+    return {
+      message:
+        v.kind === "GIFT_CARD"
+          ? `GHS ${amount.toFixed(2)} taken off the gift card`
+          : "One session used",
+    };
   }
 
   public async listOffers(activeOnly: boolean) {
@@ -391,11 +512,15 @@ export class VoucherService extends Connection {
 
   public async saveOffer(id: string | null, input: Record<string, unknown>) {
     const serviceId = str(input.serviceId, 64);
-    const service = await this.service.findUnique({ where: { id: serviceId }, select: { name: true } });
+    const service = await this.service.findUnique({
+      where: { id: serviceId },
+      select: { name: true },
+    });
     if (!service) throw new ApiError("Pick a service", 400);
     const sessions = Math.trunc(Number(input.sessions));
     const price = r2(Number(input.price));
-    if (!(sessions >= 2 && sessions <= 50)) throw new ApiError("A package has 2 to 50 sessions", 400);
+    if (!(sessions >= 2 && sessions <= 50))
+      throw new ApiError("A package has 2 to 50 sessions", 400);
     if (!(price > 0)) throw new ApiError("Enter a price", 400);
     const data = {
       serviceId,
@@ -404,7 +529,9 @@ export class VoucherService extends Connection {
       name: str(input.name, 80) || `${sessions} × ${service.name}`,
       active: input.active === undefined ? true : input.active === true,
     };
-    const offer = id ? await this.packageOffer.update({ where: { id }, data }) : await this.packageOffer.create({ data });
+    const offer = id
+      ? await this.packageOffer.update({ where: { id }, data })
+      : await this.packageOffer.create({ data });
     return { message: "Saved", data: offer };
   }
 

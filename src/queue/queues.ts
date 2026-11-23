@@ -73,12 +73,18 @@ const lightJobs = {
 
 // Push notifications to people's devices, sent off the request path.
 export const pushQueue = isQueueEnabled()
-  ? new Queue<PushJobData>(QUEUE_NAMES.push, { connection: getRedisConnection()!, defaultJobOptions: lightJobs })
+  ? new Queue<PushJobData>(QUEUE_NAMES.push, {
+      connection: getRedisConnection()!,
+      defaultJobOptions: lightJobs,
+    })
   : null;
 
 // WhatsApp messages through Meta's API (rate limited on the worker side).
 export const whatsappQueue = isQueueEnabled()
-  ? new Queue<WhatsappJobData>(QUEUE_NAMES.whatsapp, { connection: getRedisConnection()!, defaultJobOptions: lightJobs })
+  ? new Queue<WhatsappJobData>(QUEUE_NAMES.whatsapp, {
+      connection: getRedisConnection()!,
+      defaultJobOptions: lightJobs,
+    })
   : null;
 
 export { QUEUE_NAMES };

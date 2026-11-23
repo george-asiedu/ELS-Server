@@ -40,7 +40,11 @@ import {
   subscriptionExpiringSoon,
   subscriptionExpired,
 } from "../notifications/templates/subscription";
-import { markExtrasBilled, pendingExtras, reserveExtras } from "../billing/extraCharges";
+import {
+  markExtrasBilled,
+  pendingExtras,
+  reserveExtras,
+} from "../billing/extraCharges";
 import { platformBrandForPlan } from "../notifications/brand";
 import { ghs } from "../notifications/format";
 
@@ -210,7 +214,8 @@ export class StudioService extends Connection {
         productsInBooking: studio.settings?.productsInBooking ?? false,
         loyaltyCapPercent: studio.settings?.loyaltyCapPercent ?? 30,
         // So checkout can show the fee before the customer pays.
-        customerPaysFee: (studio.settings?.paystackFeePayer ?? "CUSTOMER") === "CUSTOMER",
+        customerPaysFee:
+          (studio.settings?.paystackFeePayer ?? "CUSTOMER") === "CUSTOMER",
         processingFeePercent: env.paystack.feePercent,
       },
     };
@@ -508,7 +513,10 @@ export class StudioService extends Connection {
     }
     // A renewal also settles what the studio owes on top of its plan (feature
     // request fees, extra storage, training), added after any promo discount.
-    const extras = kind === "RENEWAL" ? await pendingExtras(studioId) : { items: [], total: 0 };
+    const extras =
+      kind === "RENEWAL"
+        ? await pendingExtras(studioId)
+        : { items: [], total: 0 };
     const chargeAmount = Math.round((amount + extras.total) * 100) / 100;
     const email = await this.ownerEmail(studioId);
     const reference = `${kind === "RENEWAL" ? "ZURI-RENEW-" : "ZURI-BILLING-"}${shortId()}`;
@@ -632,11 +640,22 @@ export class StudioService extends Connection {
     });
     if (!studio) throw new ApiError("Studio not found", HttpCode.NOT_FOUND);
     const extras = await pendingExtras(id);
-    if (!(extras.total > 0)) throw new ApiError("There's nothing to pay right now", HttpCode.BAD_REQUEST);
+    if (!(extras.total > 0))
+      throw new ApiError(
+        "There's nothing to pay right now",
+        HttpCode.BAD_REQUEST,
+      );
     const email = await this.ownerEmail(id);
     const reference = `ZURI-BILLING-${shortId()}`;
     await this.studioBillingCharge.create({
-      data: { reference, studioId: id, kind: "EXTRAS", plan: studio.plan, cadence: studio.billingCadence, amount: extras.total },
+      data: {
+        reference,
+        studioId: id,
+        kind: "EXTRAS",
+        plan: studio.plan,
+        cadence: studio.billingCadence,
+        amount: extras.total,
+      },
     });
     await reserveExtras(id, reference);
     const init = await paystack.initialize({
@@ -648,11 +667,18 @@ export class StudioService extends Connection {
     });
     return {
       message: "Payment started",
-      data: { reference, accessCode: init.access_code, publicKey: env.paystack.publicKey },
+      data: {
+        reference,
+        accessCode: init.access_code,
+        publicKey: env.paystack.publicKey,
+      },
     };
   }
 
-  public async applyExtrasPayment(studioId: string | null | undefined, reference: string) {
+  public async applyExtrasPayment(
+    studioId: string | null | undefined,
+    reference: string,
+  ) {
     const id = this.requireStudioId(studioId);
     await this.applyBillingCharge(reference, { studioId: id, kind: "EXTRAS" });
     return this.getBilling(id);
@@ -747,7 +773,10 @@ export class StudioService extends Connection {
    */
   public async applyBillingCharge(
     reference: string,
-    expect: { studioId?: string; kind?: "RENEWAL" | "PLAN_CHANGE" | "EXTRAS" } = {},
+    expect: {
+      studioId?: string;
+      kind?: "RENEWAL" | "PLAN_CHANGE" | "EXTRAS";
+    } = {},
   ): Promise<"applied" | "already_applied"> {
     const charge = await this.studioBillingCharge.findUnique({
       where: { reference },
@@ -1195,11 +1224,21 @@ export class StudioService extends Connection {
     };
   }
 
-  public async setMessaging(studioId: string | null | undefined, whatsappMessages: unknown) {
+  public async setMessaging(
+    studioId: string | null | undefined,
+    whatsappMessages: unknown,
+  ) {
     const id = this.requireStudioId(studioId);
-    if (typeof whatsappMessages !== "boolean") throw new ApiError("Say whether to send WhatsApp messages", HttpCode.BAD_REQUEST);
+    if (typeof whatsappMessages !== "boolean")
+      throw new ApiError(
+        "Say whether to send WhatsApp messages",
+        HttpCode.BAD_REQUEST,
+      );
     if (whatsappMessages && !whatsappConfigured)
-      throw new ApiError("WhatsApp messages aren't available yet", HttpCode.BAD_REQUEST);
+      throw new ApiError(
+        "WhatsApp messages aren't available yet",
+        HttpCode.BAD_REQUEST,
+      );
     await this.studioSettings.upsert({
       where: { studioId: id },
       update: { whatsappMessages },
@@ -1225,10 +1264,16 @@ export class StudioService extends Connection {
     };
   }
 
-  public async setFeePayer(studioId: string | null | undefined, payer: unknown) {
+  public async setFeePayer(
+    studioId: string | null | undefined,
+    payer: unknown,
+  ) {
     const id = this.requireStudioId(studioId);
     if (payer !== "CUSTOMER" && payer !== "BUSINESS") {
-      throw new ApiError("Choose who pays the fee: CUSTOMER or BUSINESS", HttpCode.BAD_REQUEST);
+      throw new ApiError(
+        "Choose who pays the fee: CUSTOMER or BUSINESS",
+        HttpCode.BAD_REQUEST,
+      );
     }
     await this.studioSettings.upsert({
       where: { studioId: id },
@@ -1582,15 +1627,18 @@ export class StudioService extends Connection {
 
         try {
           if (lapsed) {
-            const { subject, html } = subscriptionExpired(platformBrandForPlan(studio.plan), {
-              planName,
-              expiredOn: studio.currentPeriodEnd.toLocaleDateString("en-GB", {
-                day: "numeric",
-                month: "long",
-                year: "numeric",
-              }),
-              reactivateUrl: studioLink(studio.slug, "/admin/billing"),
-            });
+            const { subject, html } = subscriptionExpired(
+              platformBrandForPlan(studio.plan),
+              {
+                planName,
+                expiredOn: studio.currentPeriodEnd.toLocaleDateString("en-GB", {
+                  day: "numeric",
+                  month: "long",
+                  year: "numeric",
+                }),
+                reactivateUrl: studioLink(studio.slug, "/admin/billing"),
+              },
+            );
             await this.notifications.send({
               template: NotificationTemplate.SUBSCRIPTION_EXPIRED,
               to: owner.email,
@@ -1610,16 +1658,19 @@ export class StudioService extends Connection {
                 billingConfig,
               ).amount,
             );
-            const { subject, html } = subscriptionExpiringSoon(platformBrandForPlan(studio.plan), {
-              planName,
-              renewsOn: studio.currentPeriodEnd.toLocaleDateString("en-GB", {
-                day: "numeric",
-                month: "long",
-                year: "numeric",
-              }),
-              amountDue,
-              manageUrl: studioLink(studio.slug, "/admin/billing"),
-            });
+            const { subject, html } = subscriptionExpiringSoon(
+              platformBrandForPlan(studio.plan),
+              {
+                planName,
+                renewsOn: studio.currentPeriodEnd.toLocaleDateString("en-GB", {
+                  day: "numeric",
+                  month: "long",
+                  year: "numeric",
+                }),
+                amountDue,
+                manageUrl: studioLink(studio.slug, "/admin/billing"),
+              },
+            );
             await this.notifications.send({
               template: NotificationTemplate.SUBSCRIPTION_EXPIRING_SOON,
               to: owner.email,

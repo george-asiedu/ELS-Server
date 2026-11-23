@@ -21,7 +21,10 @@ const money = (n: number) => {
 };
 
 /** "+12%", "−8%", "new" or null, comparing two amounts. */
-const changeOf = (now: number, before: number): { change: string | null; up?: boolean } => {
+const changeOf = (
+  now: number,
+  before: number,
+): { change: string | null; up?: boolean } => {
   if (now === 0 && before === 0) return { change: null };
   if (before === 0) return { change: "New", up: true };
   const pct = Math.round(((now - before) / before) * 100);
@@ -41,30 +44,61 @@ export interface MonthFigures {
 export class MonthlyReportService extends Connection {
   private notifications = new NotificationService();
 
-  public async figures(studioId: string, from: Date, to: Date): Promise<MonthFigures> {
-    const [bookings, cancelled, payments, orders, newCustomers] = await Promise.all([
-      this.appointment.count({
-        where: { studioId, appointmentDate: { gte: from, lt: to }, status: { in: ["CONFIRMED", "COMPLETED"] } },
-      }),
-      this.appointment.count({
-        where: { studioId, appointmentDate: { gte: from, lt: to }, status: "CANCELLED" },
-      }),
-      this.payment.findMany({
-        where: { studioId, paidAt: { gte: from, lt: to }, status: { in: ["PAID", "PARTIALLY_REFUNDED"] } },
-        select: { amount: true, refundedAmount: true },
-      }),
-      this.order.findMany({
-        where: { studioId, paidAt: { gte: from, lt: to }, status: { in: [...PAID_ORDER_STATUSES] } },
-        select: { total: true, refundedAmount: true },
-      }),
-      this.user.count({ where: { studioId, role: "CUSTOMER", createdAt: { gte: from, lt: to } } }),
-    ]);
+  public async figures(
+    studioId: string,
+    from: Date,
+    to: Date,
+  ): Promise<MonthFigures> {
+    const [bookings, cancelled, payments, orders, newCustomers] =
+      await Promise.all([
+        this.appointment.count({
+          where: {
+            studioId,
+            appointmentDate: { gte: from, lt: to },
+            status: { in: ["CONFIRMED", "COMPLETED"] },
+          },
+        }),
+        this.appointment.count({
+          where: {
+            studioId,
+            appointmentDate: { gte: from, lt: to },
+            status: "CANCELLED",
+          },
+        }),
+        this.payment.findMany({
+          where: {
+            studioId,
+            paidAt: { gte: from, lt: to },
+            status: { in: ["PAID", "PARTIALLY_REFUNDED"] },
+          },
+          select: { amount: true, refundedAmount: true },
+        }),
+        this.order.findMany({
+          where: {
+            studioId,
+            paidAt: { gte: from, lt: to },
+            status: { in: [...PAID_ORDER_STATUSES] },
+          },
+          select: { total: true, refundedAmount: true },
+        }),
+        this.user.count({
+          where: {
+            studioId,
+            role: "CUSTOMER",
+            createdAt: { gte: from, lt: to },
+          },
+        }),
+      ]);
     return {
       bookings,
       cancelled,
-      bookingRevenue: r2(payments.reduce((t, p) => t + p.amount - p.refundedAmount, 0)),
+      bookingRevenue: r2(
+        payments.reduce((t, p) => t + p.amount - p.refundedAmount, 0),
+      ),
       orders: orders.length,
-      shopRevenue: r2(orders.reduce((t, o) => t + o.total - o.refundedAmount, 0)),
+      shopRevenue: r2(
+        orders.reduce((t, o) => t + o.total - o.refundedAmount, 0),
+      ),
       newCustomers,
     };
   }
@@ -72,39 +106,65 @@ export class MonthlyReportService extends Connection {
   private async topService(studioId: string, from: Date, to: Date) {
     const rows = await this.appointment.groupBy({
       by: ["serviceId"],
-      where: { studioId, appointmentDate: { gte: from, lt: to }, status: { in: ["CONFIRMED", "COMPLETED"] } },
+      where: {
+        studioId,
+        appointmentDate: { gte: from, lt: to },
+        status: { in: ["CONFIRMED", "COMPLETED"] },
+      },
       _count: { _all: true },
       orderBy: { _count: { serviceId: "desc" } },
       take: 1,
     });
     if (!rows[0]) return null;
-    const service = await this.service.findUnique({ where: { id: rows[0].serviceId }, select: { name: true } });
+    const service = await this.service.findUnique({
+      where: { id: rows[0].serviceId },
+      select: { name: true },
+    });
     return service ? { name: service.name, count: rows[0]._count._all } : null;
   }
 
   private async topProduct(studioId: string, from: Date, to: Date) {
     const rows = await this.orderItem.groupBy({
       by: ["name"],
-      where: { studioId, order: { paidAt: { gte: from, lt: to }, status: { in: [...PAID_ORDER_STATUSES] } } },
+      where: {
+        studioId,
+        order: {
+          paidAt: { gte: from, lt: to },
+          status: { in: [...PAID_ORDER_STATUSES] },
+        },
+      },
       _sum: { quantity: true },
       orderBy: { _sum: { quantity: "desc" } },
       take: 1,
     });
-    return rows[0] ? { name: rows[0].name, count: rows[0]._sum.quantity ?? 0 } : null;
+    return rows[0]
+      ? { name: rows[0].name, count: rows[0]._sum.quantity ?? 0 }
+      : null;
   }
 
   /** Sends last month's report to each studio's admins (once per studio-month). */
   public async sendDue(now = new Date()) {
     // Only in the first week: late enough to catch up after downtime, early
     // enough that "last month" still reads as recent.
-    if (now.getUTCDate() > 7) return { skipped: "Reports go out in the first week of the month" };
+    if (now.getUTCDate() > 7)
+      return { skipped: "Reports go out in the first week of the month" };
     return runAsSuperAdmin(async () => {
       // Last month, in UTC calendar months.
-      const thisMonth = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
-      const from = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 1));
-      const before = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 2, 1));
+      const thisMonth = new Date(
+        Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1),
+      );
+      const from = new Date(
+        Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 1),
+      );
+      const before = new Date(
+        Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 2, 1),
+      );
       const monthKey = from.toISOString().slice(0, 7);
-      const monthLabel = from.toLocaleDateString("en-GB", { month: "long", year: "numeric", timeZone: "UTC" });
+      const monthLabel = from.toLocaleDateString("en-GB", {
+        month: "long",
+        year: "numeric",
+        timeZone: "UTC",
+      });
 
       const studios = await this.studio.findMany({
         where: { status: "ACTIVE", createdAt: { lt: thisMonth } },
@@ -122,7 +182,10 @@ export class MonthlyReportService extends Connection {
           if (!admins.length) continue;
           // Already sent this month's report: skip the work of building it again.
           const done = await this.notificationLog.count({
-            where: { template: NotificationTemplate.STUDIO_MONTHLY_REPORT, entityId: `${studio.id}:${monthKey}` },
+            where: {
+              template: NotificationTemplate.STUDIO_MONTHLY_REPORT,
+              entityId: `${studio.id}:${monthKey}`,
+            },
           });
           if (done >= admins.length) continue;
           const settings = await this.studioSettings.findUnique({
@@ -142,38 +205,87 @@ export class MonthlyReportService extends Connection {
           const figures: ReportFigure[] = [
             ...(booking
               ? [
-                  { label: "Bookings", value: String(cur.bookings), ...changeOf(cur.bookings, prev.bookings) },
-                  { label: "Booking payments", value: money(cur.bookingRevenue), ...changeOf(cur.bookingRevenue, prev.bookingRevenue) },
+                  {
+                    label: "Bookings",
+                    value: String(cur.bookings),
+                    ...changeOf(cur.bookings, prev.bookings),
+                  },
+                  {
+                    label: "Booking payments",
+                    value: money(cur.bookingRevenue),
+                    ...changeOf(cur.bookingRevenue, prev.bookingRevenue),
+                  },
                 ]
               : []),
             ...(shop
               ? [
-                  { label: "Shop orders", value: String(cur.orders), ...changeOf(cur.orders, prev.orders) },
-                  { label: "Shop sales", value: money(cur.shopRevenue), ...changeOf(cur.shopRevenue, prev.shopRevenue) },
+                  {
+                    label: "Shop orders",
+                    value: String(cur.orders),
+                    ...changeOf(cur.orders, prev.orders),
+                  },
+                  {
+                    label: "Shop sales",
+                    value: money(cur.shopRevenue),
+                    ...changeOf(cur.shopRevenue, prev.shopRevenue),
+                  },
                 ]
               : []),
-            { label: "New customers", value: String(cur.newCustomers), ...changeOf(cur.newCustomers, prev.newCustomers) },
+            {
+              label: "New customers",
+              value: String(cur.newCustomers),
+              ...changeOf(cur.newCustomers, prev.newCustomers),
+            },
             ...(booking
-              ? [{ label: "Cancellations", value: String(cur.cancelled), ...changeOf(cur.cancelled, prev.cancelled), ...(cur.cancelled !== prev.cancelled ? { up: cur.cancelled < prev.cancelled } : {}) }]
+              ? [
+                  {
+                    label: "Cancellations",
+                    value: String(cur.cancelled),
+                    ...changeOf(cur.cancelled, prev.cancelled),
+                    ...(cur.cancelled !== prev.cancelled
+                      ? { up: cur.cancelled < prev.cancelled }
+                      : {}),
+                  },
+                ]
               : []),
           ];
 
           // Expenses and profit, once the business records its spending.
           const spent = Math.round(
-            (await this.expense.aggregate({ where: { studioId: studio.id, date: { gte: from, lt: thisMonth } }, _sum: { amount: true } }))._sum
-              .amount ?? 0,
+            (
+              await this.expense.aggregate({
+                where: {
+                  studioId: studio.id,
+                  date: { gte: from, lt: thisMonth },
+                },
+                _sum: { amount: true },
+              })
+            )._sum.amount ?? 0,
           );
           if (spent > 0) {
-            const profit = Math.round(cur.bookingRevenue + cur.shopRevenue - spent);
+            const profit = Math.round(
+              cur.bookingRevenue + cur.shopRevenue - spent,
+            );
             figures.push(
               { label: "Expenses", value: money(spent), change: null },
-              { label: "Profit", value: money(profit), change: null, up: profit >= 0 },
+              {
+                label: "Profit",
+                value: money(profit),
+                change: null,
+                up: profit >= 0,
+              },
             );
           }
 
           const highlights = [
-            ...(service ? [`Most booked: ${service.name} (${service.count} ${service.count === 1 ? "booking" : "bookings"})`] : []),
-            ...(product ? [`Best seller: ${product.name} (${product.count} sold)`] : []),
+            ...(service
+              ? [
+                  `Most booked: ${service.name} (${service.count} ${service.count === 1 ? "booking" : "bookings"})`,
+                ]
+              : []),
+            ...(product
+              ? [`Best seller: ${product.name} (${product.count} sold)`]
+              : []),
           ];
 
           // From the platform to the business, so it signs off as Zuri.
@@ -185,7 +297,10 @@ export class MonthlyReportService extends Connection {
               monthLabel,
               figures,
               highlights,
-              analyticsUrl: studioLink(studio.slug, booking ? "/admin/analytics" : "/admin"),
+              analyticsUrl: studioLink(
+                studio.slug,
+                booking ? "/admin/analytics" : "/admin",
+              ),
             });
             await this.notifications.send({
               template: NotificationTemplate.STUDIO_MONTHLY_REPORT,
@@ -200,7 +315,9 @@ export class MonthlyReportService extends Connection {
             sent++;
           }
         } catch (error) {
-          errors.push(`${studio.id}: ${error instanceof Error ? error.message : "unknown"}`);
+          errors.push(
+            `${studio.id}: ${error instanceof Error ? error.message : "unknown"}`,
+          );
         }
       }
       return { month: monthKey, studios: studios.length, sent, errors };

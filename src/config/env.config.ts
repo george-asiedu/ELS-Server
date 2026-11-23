@@ -92,7 +92,9 @@ export const env = {
   // adds jobs to the queues; "worker" runs the queue workers and the scheduler
   // and answers no requests; "all" (the default, for development) does both.
   // In production they are two services so background work can never slow the API.
-  appRole: (["api", "worker"].includes((process.env.APP_ROLE ?? "").trim().toLowerCase())
+  appRole: (["api", "worker"].includes(
+    (process.env.APP_ROLE ?? "").trim().toLowerCase(),
+  )
     ? (process.env.APP_ROLE as string).trim().toLowerCase()
     : "all") as "all" | "api" | "worker",
   schedulerEnabled:
@@ -101,18 +103,24 @@ export const env = {
       : (process.env.NODE_ENV ?? "").trim().toLowerCase() === "production",
   clientUrl: process.env.CLIENT_URL as string,
   // The API's public address, for things emails must fetch (the logo).
-  apiPublicUrl: ((process.env.API_PUBLIC_URL as string) || "https://api.zuristudios.com").replace(/\/$/, ""),
+  apiPublicUrl: (
+    (process.env.API_PUBLIC_URL as string) || "https://api.zuristudios.com"
+  ).replace(/\/$/, ""),
   // Encrypts authenticator-app secrets (32 random bytes, base64). Optional:
   // without it a key is derived from JWT_SECRET. Set it in production, and
   // never change it once set, or everyone's two-step sign-in stops working.
   // Studio admins and the super admin must turn on two-step sign-in before
   // using their dashboards. On unless REQUIRE_2FA_FOR_ADMINS=false.
   require2faForAdmins:
-    (process.env.REQUIRE_2FA_FOR_ADMINS ?? "true").trim().toLowerCase() !== "false",
+    (process.env.REQUIRE_2FA_FOR_ADMINS ?? "true").trim().toLowerCase() !==
+    "false",
   // Cloudflare Turnstile (the security check on guest actions). Required in production.
   turnstileSecret: (process.env.TURNSTILE_SECRET_KEY as string) || "",
   // Optional extra fixed guest keys (the live key is managed in the super admin).
-  guestApiKeys: (process.env.GUEST_API_KEYS ?? "").split(",").map((k) => k.trim()).filter(Boolean),
+  guestApiKeys: (process.env.GUEST_API_KEYS ?? "")
+    .split(",")
+    .map((k) => k.trim())
+    .filter(Boolean),
   totpEncryptionKey: (process.env.TOTP_ENCRYPTION_KEY as string) || "",
   // WhatsApp Cloud API (Meta). Business-started messages must use templates
   // Meta has approved; their names are configurable. Off until the token and
@@ -123,8 +131,12 @@ export const env = {
     apiVersion: (process.env.WHATSAPP_API_VERSION as string) || "v21.0",
     language: (process.env.WHATSAPP_TEMPLATE_LANGUAGE as string) || "en",
     templates: {
-      confirmed: (process.env.WHATSAPP_TEMPLATE_CONFIRMED as string) || "booking_confirmed",
-      reminder: (process.env.WHATSAPP_TEMPLATE_REMINDER as string) || "booking_reminder",
+      confirmed:
+        (process.env.WHATSAPP_TEMPLATE_CONFIRMED as string) ||
+        "booking_confirmed",
+      reminder:
+        (process.env.WHATSAPP_TEMPLATE_REMINDER as string) ||
+        "booking_reminder",
     },
   },
   // Web push (VAPID). Generate once with `npx web-push generate-vapid-keys`.

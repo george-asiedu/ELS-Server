@@ -42,7 +42,8 @@ export class PaymentController {
   // Guest — pay for a booking made without an account, using its token.
   public static guestInitialize = async (req: Request, res: Response) => {
     const { appointmentId, type, guestToken } = req.body ?? {};
-    if (!appointmentId || !guestToken) throw new ApiError("appointmentId and guestToken are required", 400);
+    if (!appointmentId || !guestToken)
+      throw new ApiError("appointmentId and guestToken are required", 400);
     const result = await paymentService.initialize(
       appointmentId,
       type === "PARTIAL" ? "PARTIAL" : "FULL",
@@ -54,8 +55,10 @@ export class PaymentController {
 
   public static guestChargeMomo = async (req: Request, res: Response) => {
     const { appointmentId, type, phone, provider, guestToken } = req.body ?? {};
-    if (!appointmentId || !guestToken) throw new ApiError("appointmentId and guestToken are required", 400);
-    if (!phone || !provider) throw new ApiError("phone and provider are required", 400);
+    if (!appointmentId || !guestToken)
+      throw new ApiError("appointmentId and guestToken are required", 400);
+    if (!phone || !provider)
+      throw new ApiError("phone and provider are required", 400);
     const result = await paymentService.chargeMomoBooking(
       appointmentId,
       type === "PARTIAL" ? "PARTIAL" : "FULL",

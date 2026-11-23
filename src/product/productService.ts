@@ -140,7 +140,9 @@ export class ProductService extends Connection {
     await this.review.create({
       data: { userId, productId, rating, ...(text ? { content: text } : {}) },
     });
-    return { message: "Thank you. Your review will appear once it's approved." };
+    return {
+      message: "Thank you. Your review will appear once it's approved.",
+    };
   }
 
   private async assertCategoryExists(slug: string) {

@@ -28,11 +28,18 @@ export class OrderController {
         deliveryPhone,
         applyPoints: applyPoints === true || applyPoints === "true",
         couponCode,
-        giftCardCode: typeof giftCardCode === "string" && giftCardCode.trim() ? giftCardCode : undefined,
-        deliveryNote: typeof deliveryNote === "string" ? deliveryNote : undefined,
-        deliveryZoneId: typeof deliveryZoneId === "string" ? deliveryZoneId : undefined,
-        deliveryDate: typeof deliveryDate === "string" ? deliveryDate : undefined,
-        deliveryWindow: typeof deliveryWindow === "string" ? deliveryWindow : undefined,
+        giftCardCode:
+          typeof giftCardCode === "string" && giftCardCode.trim()
+            ? giftCardCode
+            : undefined,
+        deliveryNote:
+          typeof deliveryNote === "string" ? deliveryNote : undefined,
+        deliveryZoneId:
+          typeof deliveryZoneId === "string" ? deliveryZoneId : undefined,
+        deliveryDate:
+          typeof deliveryDate === "string" ? deliveryDate : undefined,
+        deliveryWindow:
+          typeof deliveryWindow === "string" ? deliveryWindow : undefined,
         referralCode,
       },
       req.headers.origin,
@@ -81,11 +88,18 @@ export class OrderController {
         deliveryPhone,
         referralCode,
         couponCode,
-        giftCardCode: typeof giftCardCode === "string" && giftCardCode.trim() ? giftCardCode : undefined,
-        deliveryNote: typeof deliveryNote === "string" ? deliveryNote : undefined,
-        deliveryZoneId: typeof deliveryZoneId === "string" ? deliveryZoneId : undefined,
-        deliveryDate: typeof deliveryDate === "string" ? deliveryDate : undefined,
-        deliveryWindow: typeof deliveryWindow === "string" ? deliveryWindow : undefined,
+        giftCardCode:
+          typeof giftCardCode === "string" && giftCardCode.trim()
+            ? giftCardCode
+            : undefined,
+        deliveryNote:
+          typeof deliveryNote === "string" ? deliveryNote : undefined,
+        deliveryZoneId:
+          typeof deliveryZoneId === "string" ? deliveryZoneId : undefined,
+        deliveryDate:
+          typeof deliveryDate === "string" ? deliveryDate : undefined,
+        deliveryWindow:
+          typeof deliveryWindow === "string" ? deliveryWindow : undefined,
       },
       req.headers.origin,
     );
@@ -125,8 +139,17 @@ export class OrderController {
 
   public static chargeMomo = async (req: Request, res: Response) => {
     const { reference, phone, provider } = req.body ?? {};
-    if (!reference || !phone || !provider) throw new ApiError("reference, phone and provider are required", 400);
-    return res.status(200).json(await orderService.chargeMomo(String(reference), String(phone).trim(), String(provider).trim().toLowerCase()));
+    if (!reference || !phone || !provider)
+      throw new ApiError("reference, phone and provider are required", 400);
+    return res
+      .status(200)
+      .json(
+        await orderService.chargeMomo(
+          String(reference),
+          String(phone).trim(),
+          String(provider).trim().toLowerCase(),
+        ),
+      );
   };
 
   public static repay = async (req: Request, res: Response) => {
@@ -149,6 +172,8 @@ export class OrderController {
     if (!id) throw new ApiError("Order ID is required", 400);
     const { status, eta } = req.body ?? {};
     if (!status) throw new ApiError("status is required", 400);
-    return res.status(200).json(await orderService.updateStatus(id, status, { eta }));
+    return res
+      .status(200)
+      .json(await orderService.updateStatus(id, status, { eta }));
   };
 }

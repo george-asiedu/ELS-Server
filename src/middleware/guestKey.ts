@@ -19,16 +19,31 @@ const { raw } = createTenantClient();
 const GRACE_MS = 24 * 60 * 60 * 1000;
 const newKey = () => "gk_" + randomBytes(24).toString("base64url");
 
-type Keys = { current: string; previous: string | null; previousUntil: Date | null; rotatedAt: Date | null };
+type Keys = {
+  current: string;
+  previous: string | null;
+  previousUntil: Date | null;
+  rotatedAt: Date | null;
+};
 let cache: { at: number; keys: Keys } | null = null;
 
 const load = async (): Promise<Keys> => {
   if (cache && Date.now() - cache.at < 15_000) return cache.keys;
-  let row = (await raw.platformConfig.findFirst()) ?? (await raw.platformConfig.create({ data: {} }));
+  let row =
+    (await raw.platformConfig.findFirst()) ??
+    (await raw.platformConfig.create({ data: {} }));
   if (!row.guestKeyCurrent) {
-    row = await raw.platformConfig.update({ where: { id: row.id }, data: { guestKeyCurrent: newKey(), guestKeyRotatedAt: new Date() } });
+    row = await raw.platformConfig.update({
+      where: { id: row.id },
+      data: { guestKeyCurrent: newKey(), guestKeyRotatedAt: new Date() },
+    });
   }
-  const keys = { current: row.guestKeyCurrent!, previous: row.guestKeyPrevious, previousUntil: row.guestKeyPreviousUntil, rotatedAt: row.guestKeyRotatedAt };
+  const keys = {
+    current: row.guestKeyCurrent!,
+    previous: row.guestKeyPrevious,
+    previousUntil: row.guestKeyPreviousUntil,
+    rotatedAt: row.guestKeyRotatedAt,
+  };
   cache = { at: Date.now(), keys };
   return keys;
 };
@@ -39,7 +54,9 @@ export const currentGuestKey = async () => (await load()).current;
 /** For the super admin: when it last changed and how it ends, never the key itself. */
 export const guestKeyStatus = async () => {
   const k = await load();
-  const previousActive = Boolean(k.previous && k.previousUntil && k.previousUntil > new Date());
+  const previousActive = Boolean(
+    k.previous && k.previousUntil && k.previousUntil > new Date(),
+  );
   return {
     endsWith: k.current.slice(-4),
     rotatedAt: k.rotatedAt,
@@ -70,17 +87,24 @@ const same = (a: string, b: string) => {
   return x.length === y.length && timingSafeEqual(x, y);
 };
 
-export const requireGuestKey = async (req: Request, _res: Response, next: NextFunction) => {
+export const requireGuestKey = async (
+  req: Request,
+  _res: Response,
+  next: NextFunction,
+) => {
   try {
     const given = String(req.header("x-guest-key") ?? "");
     if (!given) throw new ApiError("This request isn't allowed", 401);
     const k = await load();
     const valid = [
       k.current,
-      ...(k.previous && k.previousUntil && k.previousUntil > new Date() ? [k.previous] : []),
+      ...(k.previous && k.previousUntil && k.previousUntil > new Date()
+        ? [k.previous]
+        : []),
       ...env.guestApiKeys, // optional fixed keys, for tests or a partner
     ];
-    if (!valid.some((v) => same(given, v))) throw new ApiError("This request isn't allowed", 401);
+    if (!valid.some((v) => same(given, v)))
+      throw new ApiError("This request isn't allowed", 401);
     return next();
   } catch (e) {
     return next(e);
@@ -89,20 +113,31 @@ export const requireGuestKey = async (req: Request, _res: Response, next: NextFu
 
 /** At most 20 guest bookings, payments or orders per IP every 10 minutes. */
 export const guestLimiter = rateLimit({
-  ...(rateLimitStore("guest") ? { store: rateLimitStore("guest") as never } : {}),
+  ...(rateLimitStore("guest")
+    ? { store: rateLimitStore("guest") as never }
+    : {}),
   windowMs: 10 * 60 * 1000,
   limit: 20,
   standardHeaders: "draft-8",
   legacyHeaders: false,
-  message: { status: "fail", message: "Too many attempts from this connection. Please wait a few minutes and try again." },
+  message: {
+    status: "fail",
+    message:
+      "Too many attempts from this connection. Please wait a few minutes and try again.",
+  },
 });
 
 /** Fetching the key is limited too, so it can't be hammered. */
 export const guestKeyFetchLimiter = rateLimit({
-  ...(rateLimitStore("guest-key") ? { store: rateLimitStore("guest-key") as never } : {}),
+  ...(rateLimitStore("guest-key")
+    ? { store: rateLimitStore("guest-key") as never }
+    : {}),
   windowMs: 60 * 1000,
   limit: 30,
   standardHeaders: "draft-8",
   legacyHeaders: false,
-  message: { status: "fail", message: "Too many requests. Please wait a minute." },
+  message: {
+    status: "fail",
+    message: "Too many requests. Please wait a minute.",
+  },
 });

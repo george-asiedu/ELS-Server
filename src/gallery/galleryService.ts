@@ -1,7 +1,11 @@
 import { Connection } from "../db/dbConnection";
 import { S3BucketService } from "../bucket/s3BucketService";
 import { ApiError } from "../middleware/apiError";
-import { TRASH_DAYS, forgetStorage, keyFromUrl } from "../storage/storageService";
+import {
+  TRASH_DAYS,
+  forgetStorage,
+  keyFromUrl,
+} from "../storage/storageService";
 import { runAsSuperAdmin } from "../tenant/context";
 import {
   CursorPage,
@@ -173,9 +177,14 @@ export class GalleryService extends Connection {
     }
     await this.gallery.update({
       where: { id },
-      data: { deletedAt: new Date(), purgeAfter: new Date(Date.now() + TRASH_DAYS * 86_400_000) },
+      data: {
+        deletedAt: new Date(),
+        purgeAfter: new Date(Date.now() + TRASH_DAYS * 86_400_000),
+      },
     });
-    return { message: `Moved to the trash. You can restore it for ${TRASH_DAYS} days.` };
+    return {
+      message: `Moved to the trash. You can restore it for ${TRASH_DAYS} days.`,
+    };
   }
 
   public async listTrash() {
@@ -191,15 +200,24 @@ export class GalleryService extends Connection {
 
   public async restore(id: string) {
     const existing = await this.gallery.findUnique({ where: { id } });
-    if (!existing?.deletedAt) throw new ApiError("That item isn't in the trash", 404);
+    if (!existing?.deletedAt)
+      throw new ApiError("That item isn't in the trash", 404);
     // Its category may have been removed meanwhile: put it back where it can be seen.
-    const category = await this.category.findFirst({ where: { slug: existing.category } });
+    const category = await this.category.findFirst({
+      where: { slug: existing.category },
+    });
     const restored = await this.gallery.update({
       where: { id },
-      data: { deletedAt: null, purgeAfter: null, ...(category ? {} : { active: false }) },
+      data: {
+        deletedAt: null,
+        purgeAfter: null,
+        ...(category ? {} : { active: false }),
+      },
     });
     return {
-      message: category ? "Restored." : "Restored, but its category no longer exists, so it's hidden until you move it.",
+      message: category
+        ? "Restored."
+        : "Restored, but its category no longer exists, so it's hidden until you move it.",
       data: restored,
     };
   }
@@ -207,18 +225,31 @@ export class GalleryService extends Connection {
   /** Delete one trashed item for good, and its file. */
   public async purge(id: string) {
     const existing = await this.gallery.findUnique({ where: { id } });
-    if (!existing?.deletedAt) throw new ApiError("Move it to the trash first", 400);
+    if (!existing?.deletedAt)
+      throw new ApiError("Move it to the trash first", 400);
     await this.purgeRow(existing);
     return { message: "Deleted for good." };
   }
 
   /** The row and the file behind it. A file shared by another item is kept. */
-  private async purgeRow(item: { id: string; studioId: string | null; imageUrl: string }) {
+  private async purgeRow(item: {
+    id: string;
+    studioId: string | null;
+    imageUrl: string;
+  }) {
     const key = keyFromUrl(item.imageUrl);
-    const sharedBy = key ? await this.gallery.count({ where: { id: { not: item.id }, imageUrl: item.imageUrl } }) : 0;
+    const sharedBy = key
+      ? await this.gallery.count({
+          where: { id: { not: item.id }, imageUrl: item.imageUrl },
+        })
+      : 0;
     await this.gallery.delete({ where: { id: item.id } });
     if (key && !sharedBy) {
-      await this.s3.deleteFile(key).catch((e) => console.warn("Couldn't delete a stored file:", (e as Error).message));
+      await this.s3
+        .deleteFile(key)
+        .catch((e) =>
+          console.warn("Couldn't delete a stored file:", (e as Error).message),
+        );
     }
     if (item.studioId) forgetStorage(item.studioId);
   }

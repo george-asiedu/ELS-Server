@@ -37,13 +37,21 @@ export class FeatureRequestService extends Connection {
 
   /** Zuri, Zuri Studios or Zuri Stores, to match the studio being written to. */
   private async brandFor(studioId: string) {
-    const studio = await runAsSuperAdmin(() => this.studio.findUnique({ where: { id: studioId }, select: { plan: true } })).catch(() => null);
+    const studio = await runAsSuperAdmin(() =>
+      this.studio.findUnique({
+        where: { id: studioId },
+        select: { plan: true },
+      }),
+    ).catch(() => null);
     return platformBrandForPlan(studio?.plan);
   }
 
   /** Image addresses ready to show. */
   private shown<T extends { images?: string[] }>(r: T): T {
-    return { ...r, images: (r.images ?? []).map((u) => this.s3.deliveryUrl(u) ?? u) };
+    return {
+      ...r,
+      images: (r.images ?? []).map((u) => this.s3.deliveryUrl(u) ?? u),
+    };
   }
 
   /**
@@ -110,8 +118,11 @@ export class FeatureRequestService extends Connection {
 
     // Up to 5 pictures, each one this studio uploaded for requests.
     const rawImages = Array.isArray(input.images) ? input.images : [];
-    if (rawImages.length > 5) throw new ApiError("Attach up to 5 images", HttpCode.BAD_REQUEST);
-    const images = rawImages.map((u) => this.s3.assertOwnedMediaUrl(String(u), "requests"));
+    if (rawImages.length > 5)
+      throw new ApiError("Attach up to 5 images", HttpCode.BAD_REQUEST);
+    const images = rawImages.map((u) =>
+      this.s3.assertOwnedMediaUrl(String(u), "requests"),
+    );
 
     const created = await this.featureRequest.create({
       data: {
@@ -122,7 +133,15 @@ export class FeatureRequestService extends Connection {
         description,
       },
     });
-    await this.notifySuperAdmins(created.id, id, title, images.length ? `${description}\n\n(${images.length} image${images.length === 1 ? "" : "s"} attached. See them on the review page.)` : description, userId);
+    await this.notifySuperAdmins(
+      created.id,
+      id,
+      title,
+      images.length
+        ? `${description}\n\n(${images.length} image${images.length === 1 ? "" : "s"} attached. See them on the review page.)`
+        : description,
+      userId,
+    );
     return { message: "Feature request submitted", data: this.shown(created) };
   }
 
@@ -181,7 +200,10 @@ export class FeatureRequestService extends Connection {
       where: { studioId: id },
       orderBy: { createdAt: "desc" },
     });
-    return { message: "Feature requests", data: requests.map((r) => this.shown(r)) };
+    return {
+      message: "Feature requests",
+      data: requests.map((r) => this.shown(r)),
+    };
   }
 
   // ---- Platform (super-admin) side --------------------------------------
@@ -197,7 +219,10 @@ export class FeatureRequestService extends Connection {
       orderBy: { createdAt: "desc" },
       include: { studio: { select: { id: true, name: true, slug: true } } },
     });
-    return { message: "Feature requests", data: requests.map((r) => this.shown(r)) };
+    return {
+      message: "Feature requests",
+      data: requests.map((r) => this.shown(r)),
+    };
   }
 
   /**
@@ -217,14 +242,17 @@ export class FeatureRequestService extends Connection {
     try {
       const to = await this.studioNotifyEmail(studioId);
       if (!to) return;
-      const { subject, html } = featureRequestStatusChanged(await this.brandFor(studioId), {
-        title,
-        status,
-        dashboardUrl: await this.linkToStudio(
-          "/admin/feature-requests",
-          studioId,
-        ),
-      });
+      const { subject, html } = featureRequestStatusChanged(
+        await this.brandFor(studioId),
+        {
+          title,
+          status,
+          dashboardUrl: await this.linkToStudio(
+            "/admin/feature-requests",
+            studioId,
+          ),
+        },
+      );
       await this.notifications.send({
         template: NotificationTemplate.FEATURE_REQUEST_STATUS_STUDIO,
         to,
@@ -246,12 +274,19 @@ export class FeatureRequestService extends Connection {
   public async setFee(id: string, rawAmount: unknown) {
     const amount = Math.round(Number(rawAmount) * 100) / 100;
     if (!Number.isFinite(amount) || amount < 0 || amount > 100000) {
-      throw new ApiError("Enter a fee between 0 and 100,000", HttpCode.BAD_REQUEST);
+      throw new ApiError(
+        "Enter a fee between 0 and 100,000",
+        HttpCode.BAD_REQUEST,
+      );
     }
     const existing = await this.featureRequest.findUnique({ where: { id } });
-    if (!existing) throw new ApiError("Feature request not found", HttpCode.NOT_FOUND);
+    if (!existing)
+      throw new ApiError("Feature request not found", HttpCode.NOT_FOUND);
     if (existing.status === "DONE" || existing.status === "DECLINED") {
-      throw new ApiError("This request is closed, so its fee can't change", HttpCode.BAD_REQUEST);
+      throw new ApiError(
+        "This request is closed, so its fee can't change",
+        HttpCode.BAD_REQUEST,
+      );
     }
     const updated = await this.featureRequest.update({
       where: { id },
@@ -265,17 +300,33 @@ export class FeatureRequestService extends Connection {
       description: `Feature request: ${existing.title}`,
       amount,
     });
-    await this.notifyStudioOfFee(updated.id, updated.studioId, updated.title, amount);
+    await this.notifyStudioOfFee(
+      updated.id,
+      updated.studioId,
+      updated.title,
+      amount,
+    );
     return { message: "Fee set. The studio has been told.", data: updated };
   }
 
   // Best-effort, like the other notices: email plus a push to the studio's admins.
-  private async notifyStudioOfFee(requestId: string, studioId: string, title: string, amount: number) {
+  private async notifyStudioOfFee(
+    requestId: string,
+    studioId: string,
+    title: string,
+    amount: number,
+  ) {
     try {
       const to = await this.studioNotifyEmail(studioId);
-      const dashboardUrl = await this.linkToStudio("/admin/feature-requests", studioId);
+      const dashboardUrl = await this.linkToStudio(
+        "/admin/feature-requests",
+        studioId,
+      );
       if (to) {
-        const { subject, html } = featureRequestFeeSet(await this.brandFor(studioId), { title, amount, dashboardUrl });
+        const { subject, html } = featureRequestFeeSet(
+          await this.brandFor(studioId),
+          { title, amount, dashboardUrl },
+        );
         await this.notifications.send({
           template: NotificationTemplate.FEATURE_REQUEST_FEE_STUDIO,
           to,
@@ -289,10 +340,20 @@ export class FeatureRequestService extends Connection {
       }
       await notifyStudioAdmins(
         studioId,
-        { template: "FEATURE_REQUEST_FEE_PUSH", entityId: `${requestId}:fee:${amount}`, entityType: "FeatureRequest" },
         {
-          title: amount > 0 ? "A fee for your feature request" : "Your feature request is free",
-          body: amount > 0 ? `"${title}" will cost GHS ${amount.toFixed(2)}, added to your next renewal.` : `"${title}" won't cost anything.`,
+          template: "FEATURE_REQUEST_FEE_PUSH",
+          entityId: `${requestId}:fee:${amount}`,
+          entityType: "FeatureRequest",
+        },
+        {
+          title:
+            amount > 0
+              ? "A fee for your feature request"
+              : "Your feature request is free",
+          body:
+            amount > 0
+              ? `"${title}" will cost GHS ${amount.toFixed(2)}, added to your next renewal.`
+              : `"${title}" won't cost anything.`,
           url: "/admin/feature-requests",
         },
       );
@@ -305,13 +366,23 @@ export class FeatureRequestService extends Connection {
   public async withdraw(studioId: string | null | undefined, id: string) {
     const sid = this.requireStudioId(studioId);
     const existing = await this.featureRequest.findUnique({ where: { id } });
-    if (!existing || existing.studioId !== sid) throw new ApiError("Feature request not found", HttpCode.NOT_FOUND);
+    if (!existing || existing.studioId !== sid)
+      throw new ApiError("Feature request not found", HttpCode.NOT_FOUND);
     if (existing.status === "IN_PROGRESS" || existing.status === "DONE") {
-      throw new ApiError("Work on this has started, so it can't be withdrawn", HttpCode.BAD_REQUEST);
+      throw new ApiError(
+        "Work on this has started, so it can't be withdrawn",
+        HttpCode.BAD_REQUEST,
+      );
     }
-    const updated = await this.featureRequest.update({ where: { id }, data: { status: "DECLINED" } });
+    const updated = await this.featureRequest.update({
+      where: { id },
+      data: { status: "DECLINED" },
+    });
     await waiveExtraCharge(sid, "FEATURE_REQUEST", id);
-    return { message: "Request withdrawn. Any fee has been removed.", data: updated };
+    return {
+      message: "Request withdrawn. Any fee has been removed.",
+      data: updated,
+    };
   }
 
   public async updateStatus(id: string, status: string) {
@@ -323,7 +394,8 @@ export class FeatureRequestService extends Connection {
       throw new ApiError("Feature request not found", HttpCode.NOT_FOUND);
     }
     // Declined by the platform: no fee for something that won't be built.
-    if (status === "DECLINED") await waiveExtraCharge(existing.studioId, "FEATURE_REQUEST", id);
+    if (status === "DECLINED")
+      await waiveExtraCharge(existing.studioId, "FEATURE_REQUEST", id);
     const updated = await this.featureRequest.update({
       where: { id },
       data: { status: status as FeatureRequestStatus },

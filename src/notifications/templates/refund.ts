@@ -104,7 +104,12 @@ export const refundFailed = (
  */
 export const refundedByStudio = (
   brand: EmailBrand,
-  data: { customerFirstName: string; studioName: string; amount: number; what: string },
+  data: {
+    customerFirstName: string;
+    studioName: string;
+    amount: number;
+    what: string;
+  },
 ) => {
   const amount = `GHS ${data.amount.toFixed(2)}`;
   return {

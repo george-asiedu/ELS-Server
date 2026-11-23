@@ -9,8 +9,12 @@ const router: Router = Router();
 router.post("/", optionalAuth, async (req: Request, res: Response) =>
   res.status(201).json(await service.join(req.body ?? {}, req.user?.id)),
 );
-router.get("/", authenticate, requireAdmin, async (req: Request, res: Response) =>
-  res.status(200).json(await service.forDay(req.query.date)),
+router.get(
+  "/",
+  authenticate,
+  requireAdmin,
+  async (req: Request, res: Response) =>
+    res.status(200).json(await service.forDay(req.query.date)),
 );
 
 export default router;

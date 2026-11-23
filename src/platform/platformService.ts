@@ -951,28 +951,63 @@ export class PlatformService extends Connection {
       orderBy: { createdAt: "asc" },
     });
     const ids = studios.map((s) => s.id);
-    const [contacts, services, ratings, images, categories] = await Promise.all([
-      this.contactInfo.findMany({ where: { studioId: { in: ids } }, select: { studioId: true, address: true } }),
-      this.service.findMany({ where: { studioId: { in: ids }, active: true }, select: { studioId: true, name: true, popular: true } }),
-      this.review.groupBy({ by: ["studioId"], where: { studioId: { in: ids }, approved: true }, _avg: { rating: true }, _count: { _all: true } }),
-      // A photo for businesses without a hero image: their newest product or gallery shot.
-      this.product.findMany({ where: { studioId: { in: ids }, active: true, imageUrl: { not: null } }, select: { studioId: true, imageUrl: true }, orderBy: { createdAt: "desc" } }),
-      // A shop's tags are its product categories.
-      this.productCategory.findMany({ where: { studioId: { in: ids }, active: true }, select: { studioId: true, name: true }, orderBy: { order: "asc" } }),
-    ]);
+    const [contacts, services, ratings, images, categories] = await Promise.all(
+      [
+        this.contactInfo.findMany({
+          where: { studioId: { in: ids } },
+          select: { studioId: true, address: true },
+        }),
+        this.service.findMany({
+          where: { studioId: { in: ids }, active: true },
+          select: { studioId: true, name: true, popular: true },
+        }),
+        this.review.groupBy({
+          by: ["studioId"],
+          where: { studioId: { in: ids }, approved: true },
+          _avg: { rating: true },
+          _count: { _all: true },
+        }),
+        // A photo for businesses without a hero image: their newest product or gallery shot.
+        this.product.findMany({
+          where: {
+            studioId: { in: ids },
+            active: true,
+            imageUrl: { not: null },
+          },
+          select: { studioId: true, imageUrl: true },
+          orderBy: { createdAt: "desc" },
+        }),
+        // A shop's tags are its product categories.
+        this.productCategory.findMany({
+          where: { studioId: { in: ids }, active: true },
+          select: { studioId: true, name: true },
+          orderBy: { order: "asc" },
+        }),
+      ],
+    );
     const s3 = new S3BucketService();
     // Searches start at 3 characters; shorter is treated as no search.
-    const raw = typeof q === "string" ? q.trim().toLowerCase().slice(0, 80) : "";
+    const raw =
+      typeof q === "string" ? q.trim().toLowerCase().slice(0, 80) : "";
     const query = raw.length >= 3 ? raw : "";
     const data = studios
       .map((st) => {
         const booking = st.settings?.booking !== false;
         const own = services.filter((x) => x.studioId === st.id);
         const top = booking
-          ? [...own].sort((a, b) => Number(b.popular) - Number(a.popular)).slice(0, 3).map((x) => x.name)
-          : categories.filter((c) => c.studioId === st.id).slice(0, 3).map((c) => c.name);
+          ? [...own]
+              .sort((a, b) => Number(b.popular) - Number(a.popular))
+              .slice(0, 3)
+              .map((x) => x.name)
+          : categories
+              .filter((c) => c.studioId === st.id)
+              .slice(0, 3)
+              .map((c) => c.name);
         const rating = ratings.find((r) => r.studioId === st.id);
-        const photo = st.content?.heroImageUrl ?? images.find((i) => i.studioId === st.id)?.imageUrl ?? null;
+        const photo =
+          st.content?.heroImageUrl ??
+          images.find((i) => i.studioId === st.id)?.imageUrl ??
+          null;
         return {
           name: st.name,
           slug: st.slug,
@@ -989,15 +1024,22 @@ export class PlatformService extends Connection {
             st.name,
             contacts.find((c) => c.studioId === st.id)?.address ?? "",
             ...own.map((x) => x.name),
-            ...categories.filter((c) => c.studioId === st.id).map((c) => c.name),
+            ...categories
+              .filter((c) => c.studioId === st.id)
+              .map((c) => c.name),
             st.shopCategory ?? "",
           ]
             .join(" ")
             .toLowerCase(),
         };
       })
-      .filter((d) => (kind === "studio" || kind === "store" ? d.kind === kind : true))
-      .filter((d) => !query || query.split(/\s+/).every((w) => d.searchText.includes(w)))
+      .filter((d) =>
+        kind === "studio" || kind === "store" ? d.kind === kind : true,
+      )
+      .filter(
+        (d) =>
+          !query || query.split(/\s+/).every((w) => d.searchText.includes(w)),
+      )
       .map(({ searchText: _searchText, ...rest }) => rest);
     return { message: "Directory", data };
   }
@@ -1463,10 +1505,13 @@ export class PlatformService extends Connection {
           select: { email: true },
         });
         if (owner?.email) {
-          const { subject, html } = studioAccountSuspended(platformBrandForPlan(studio.plan), {
-            studioName: studio.name,
-            supportEmail: env.senderEmail,
-          });
+          const { subject, html } = studioAccountSuspended(
+            platformBrandForPlan(studio.plan),
+            {
+              studioName: studio.name,
+              supportEmail: env.senderEmail,
+            },
+          );
           await this.notifications.send({
             template: NotificationTemplate.STUDIO_ACCOUNT_SUSPENDED,
             to: owner.email,

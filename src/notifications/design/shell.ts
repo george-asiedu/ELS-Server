@@ -281,7 +281,12 @@ const supportLine = (brand: EmailBrand): string => {
   if (brand.kind === "zuri")
     return `Need a hand with anything? Just reply to this email or write to <a href="mailto:${esc(brand.zuri.supportEmail)}" style="color: #0972D3;">${esc(brand.zuri.supportEmail)}</a> and our team will get back to you.`;
   const s = brand.studio;
-  const ways = [s.phone ? esc(s.phone) : null, s.email ? `<a href="mailto:${esc(s.email)}" style="color: #0972D3;">${esc(s.email)}</a>` : null].filter(Boolean);
+  const ways = [
+    s.phone ? esc(s.phone) : null,
+    s.email
+      ? `<a href="mailto:${esc(s.email)}" style="color: #0972D3;">${esc(s.email)}</a>`
+      : null,
+  ].filter(Boolean);
   return `Questions? Just reply to this email${ways.length ? ` or contact ${esc(s.name)} on ${ways.join(" or ")}` : ""}.`;
 };
 
@@ -319,7 +324,10 @@ export const renderShell = (args: {
     .replace(/<table[^>]*>\s*<tr>\s*<td class="badge[\s\S]*?<\/table>/g, "")
     .replace(/text-align:\s*center;?/g, "text-align: left;")
     .replace(/margin: 0 auto 20px;/g, "margin: 0 0 20px;")
-    .replace(/font-family: Georgia, serif; font-size: 22px;/g, "font-family: Arial, Helvetica, sans-serif; font-size: 16px; font-weight: bold;");
+    .replace(
+      /font-family: Georgia, serif; font-size: 22px;/g,
+      "font-family: Arial, Helvetica, sans-serif; font-size: 16px; font-weight: bold;",
+    );
   const cta = /<a href="([^"]+)"[^>]*data-cta="1"/.exec(bodyHtml)?.[1];
 
   return `<!DOCTYPE html>

@@ -98,7 +98,8 @@ const TWO_FACTOR_EXEMPT = /^\/(auth\/(2fa|logout)|me$|push|inbox)/;
  * shows the setup screen when it gets TWO_FACTOR_SETUP_REQUIRED.
  */
 const requireTwoFactor = (req: Request, res: Response, next: NextFunction) => {
-  if (!env.require2faForAdmins || TWO_FACTOR_EXEMPT.test(req.path)) return next();
+  if (!env.require2faForAdmins || TWO_FACTOR_EXEMPT.test(req.path))
+    return next();
   rawDb.user
     .findUnique({ where: { id: req.user!.id }, select: { totpEnabled: true } })
     .then((u) =>

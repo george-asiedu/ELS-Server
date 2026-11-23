@@ -8,6 +8,11 @@ const router: Router = Router();
 router.post("/", authenticate, requireAdmin, FeatureRequestController.create);
 router.get("/", authenticate, requireAdmin, FeatureRequestController.listMine);
 
-router.post("/:id/withdraw", authenticate, requireAdmin, FeatureRequestController.withdraw);
+router.post(
+  "/:id/withdraw",
+  authenticate,
+  requireAdmin,
+  FeatureRequestController.withdraw,
+);
 
 export default router;

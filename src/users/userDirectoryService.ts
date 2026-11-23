@@ -198,10 +198,18 @@ export class UserDirectoryService extends Connection {
         select: { appointmentDate: true },
       }),
       this.appointment.count({ where: { userId: id, status: "NO_SHOW" } }),
-      user.studioId ? this.customerNote.findFirst({ where: { userId: id }, select: { notes: true } }) : null,
+      user.studioId
+        ? this.customerNote.findFirst({
+            where: { userId: id },
+            select: { notes: true },
+          })
+        : null,
     ]);
     const favouriteService = favourite[0]
-      ? await this.service.findUnique({ where: { id: favourite[0].serviceId }, select: { name: true } })
+      ? await this.service.findUnique({
+          where: { id: favourite[0].serviceId },
+          select: { name: true },
+        })
       : null;
 
     return {
@@ -252,11 +260,20 @@ export class UserDirectoryService extends Connection {
 
   /** A business's private notes about a customer. */
   public async saveNotes(id: string, notes: unknown) {
-    const user = await this.user.findFirst({ where: { id }, select: { id: true } });
+    const user = await this.user.findFirst({
+      where: { id },
+      select: { id: true },
+    });
     if (!user) throw new ApiError("User not found", HttpCode.NOT_FOUND);
     const text = typeof notes === "string" ? notes.trim().slice(0, 2000) : "";
-    const existing = await this.customerNote.findFirst({ where: { userId: id } });
-    if (existing) await this.customerNote.update({ where: { id: existing.id }, data: { notes: text } });
+    const existing = await this.customerNote.findFirst({
+      where: { userId: id },
+    });
+    if (existing)
+      await this.customerNote.update({
+        where: { id: existing.id },
+        data: { notes: text },
+      });
     else await this.customerNote.create({ data: { userId: id, notes: text } });
     return { message: "Notes saved", data: { notes: text } };
   }
@@ -372,7 +389,10 @@ export class UserDirectoryService extends Connection {
         },
       }),
       this.order.findMany({
-        where: { userId: { in: ids }, status: { in: [...PAID_ORDER_STATUSES] } },
+        where: {
+          userId: { in: ids },
+          status: { in: [...PAID_ORDER_STATUSES] },
+        },
         select: { userId: true, total: true, refundedAmount: true },
       }),
     ]);

@@ -217,7 +217,8 @@ export class Connection {
         ])
       : [null, null];
     const subaccount = studio?.paystackSubaccountCode ?? null;
-    const customerPays = (settings?.paystackFeePayer ?? "CUSTOMER") === "CUSTOMER";
+    const customerPays =
+      (settings?.paystackFeePayer ?? "CUSTOMER") === "CUSTOMER";
     const rate = env.paystack.feePercent / 100;
     const totalPesewas = customerPays
       ? Math.ceil(basePesewas / (1 - rate))

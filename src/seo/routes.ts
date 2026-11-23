@@ -12,39 +12,71 @@ import { studioLink } from "../utils/studioLink";
 const { db, raw } = createTenantClient();
 const router: Router = Router();
 
-const xmlEscape = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+const xmlEscape = (s: string) =>
+  s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
 const siteBase = async () => {
   const studioId = getTenantContext()?.studioId;
-  if (!studioId) return { studioId: null, base: env.clientUrl.replace(/\/$/, "") };
-  const studio = await raw.studio.findUnique({ where: { id: studioId }, select: { slug: true } });
-  return { studioId, base: studio ? studioLink(studio.slug).replace(/\/$/, "") : env.clientUrl.replace(/\/$/, "") };
+  if (!studioId)
+    return { studioId: null, base: env.clientUrl.replace(/\/$/, "") };
+  const studio = await raw.studio.findUnique({
+    where: { id: studioId },
+    select: { slug: true },
+  });
+  return {
+    studioId,
+    base: studio
+      ? studioLink(studio.slug).replace(/\/$/, "")
+      : env.clientUrl.replace(/\/$/, ""),
+  };
 };
 
 router.get("/sitemap.xml", async (_req: Request, res: Response) => {
   const { studioId, base } = await siteBase();
   const urls: { loc: string; lastmod?: Date }[] = [];
   if (!studioId) {
-    for (const p of ["/", "/discover", "/onboarding"]) urls.push({ loc: `${base}${p}` });
+    for (const p of ["/", "/discover", "/onboarding"])
+      urls.push({ loc: `${base}${p}` });
   } else {
-    const settings = await db.studioSettings.findFirst({ select: { booking: true, commerce: true, gallery: true } });
+    const settings = await db.studioSettings.findFirst({
+      select: { booking: true, commerce: true, gallery: true },
+    });
     const booking = settings?.booking !== false;
     const pages = booking
-      ? ["/", "/services", "/book", "/contact", "/gift-cards", ...(settings?.gallery !== false ? ["/gallery"] : []), ...(settings?.commerce ? ["/shop", "/shop/products"] : [])]
+      ? [
+          "/",
+          "/services",
+          "/book",
+          "/contact",
+          "/gift-cards",
+          ...(settings?.gallery !== false ? ["/gallery"] : []),
+          ...(settings?.commerce ? ["/shop", "/shop/products"] : []),
+        ]
       : ["/", "/shop/products", "/gift-cards"];
     for (const p of pages) urls.push({ loc: `${base}${p}` });
     if (settings?.commerce || !booking) {
-      const products = await db.product.findMany({ where: { active: true }, select: { id: true, updatedAt: true }, take: 5000 });
-      for (const p of products) urls.push({ loc: `${base}/shop/${p.id}`, lastmod: p.updatedAt });
+      const products = await db.product.findMany({
+        where: { active: true },
+        select: { id: true, updatedAt: true },
+        take: 5000,
+      });
+      for (const p of products)
+        urls.push({ loc: `${base}/shop/${p.id}`, lastmod: p.updatedAt });
     }
   }
   const body = `<?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
 ${urls
-  .map((u) => `  <url><loc>${xmlEscape(u.loc)}</loc>${u.lastmod ? `<lastmod>${u.lastmod.toISOString().slice(0, 10)}</lastmod>` : ""}</url>`)
+  .map(
+    (u) =>
+      `  <url><loc>${xmlEscape(u.loc)}</loc>${u.lastmod ? `<lastmod>${u.lastmod.toISOString().slice(0, 10)}</lastmod>` : ""}</url>`,
+  )
   .join("\n")}
 </urlset>`;
-  res.set("Cache-Control", "public, max-age=3600").type("application/xml").send(body);
+  res
+    .set("Cache-Control", "public, max-age=3600")
+    .type("application/xml")
+    .send(body);
 });
 
 router.get("/robots.txt", async (_req: Request, res: Response) => {
@@ -52,7 +84,9 @@ router.get("/robots.txt", async (_req: Request, res: Response) => {
   res
     .set("Cache-Control", "public, max-age=3600")
     .type("text/plain")
-    .send(`User-agent: *\nAllow: /\nDisallow: /admin\nDisallow: /account\nDisallow: /platform\nDisallow: /cart\nDisallow: /checkout\n\nSitemap: ${base}/sitemap.xml\n`);
+    .send(
+      `User-agent: *\nAllow: /\nDisallow: /admin\nDisallow: /account\nDisallow: /platform\nDisallow: /cart\nDisallow: /checkout\n\nSitemap: ${base}/sitemap.xml\n`,
+    );
 });
 
 export default router;

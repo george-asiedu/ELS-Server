@@ -10,7 +10,11 @@ export interface CommerceSettingsInput {
   deliverySlots?: unknown;
 }
 
-export interface DeliveryZone { id: string; name: string; fee: number }
+export interface DeliveryZone {
+  id: string;
+  name: string;
+  fee: number;
+}
 
 /** Clean an admin's list of delivery areas: named, non-negative fees, at most 30. */
 export const cleanZones = (v: unknown): DeliveryZone[] => {
@@ -22,7 +26,10 @@ export const cleanZones = (v: unknown): DeliveryZone[] => {
     const fee = Math.round(Math.max(0, Number(z?.fee) || 0) * 100) / 100;
     if (!name || seen.has(name.toLowerCase())) continue;
     seen.add(name.toLowerCase());
-    const id = typeof z?.id === "string" && /^[\w-]{1,40}$/.test(z.id) ? z.id : Math.random().toString(36).slice(2, 10);
+    const id =
+      typeof z?.id === "string" && /^[\w-]{1,40}$/.test(z.id)
+        ? z.id
+        : Math.random().toString(36).slice(2, 10);
     out.push({ id, name, fee });
   }
   return out;
@@ -30,7 +37,14 @@ export const cleanZones = (v: unknown): DeliveryZone[] => {
 
 export const cleanSlots = (v: unknown): string[] =>
   Array.isArray(v)
-    ? [...new Set(v.filter((x): x is string => typeof x === "string").map((x) => x.trim().slice(0, 40)).filter(Boolean))].slice(0, 8)
+    ? [
+        ...new Set(
+          v
+            .filter((x): x is string => typeof x === "string")
+            .map((x) => x.trim().slice(0, 40))
+            .filter(Boolean),
+        ),
+      ].slice(0, 8)
     : [];
 
 export class CommerceSettingsService extends Connection {
@@ -68,10 +82,20 @@ export class CommerceSettingsService extends Connection {
           ? { enableDelivery: data.enableDelivery }
           : {}),
         ...(deliveryFee !== undefined ? { deliveryFee } : {}),
-        ...(data.deliveryZones !== undefined ? { deliveryZones: cleanZones(data.deliveryZones) as never } : {}),
-        ...(data.deliverySlots !== undefined ? { deliverySlots: cleanSlots(data.deliverySlots) as never } : {}),
-        ...(data.lowStockThreshold !== undefined && Number.isFinite(Number(data.lowStockThreshold))
-          ? { lowStockThreshold: Math.max(0, Math.min(1000, Math.trunc(Number(data.lowStockThreshold)))) }
+        ...(data.deliveryZones !== undefined
+          ? { deliveryZones: cleanZones(data.deliveryZones) as never }
+          : {}),
+        ...(data.deliverySlots !== undefined
+          ? { deliverySlots: cleanSlots(data.deliverySlots) as never }
+          : {}),
+        ...(data.lowStockThreshold !== undefined &&
+        Number.isFinite(Number(data.lowStockThreshold))
+          ? {
+              lowStockThreshold: Math.max(
+                0,
+                Math.min(1000, Math.trunc(Number(data.lowStockThreshold))),
+              ),
+            }
           : {}),
       },
     });

@@ -17,9 +17,19 @@ const orders = new OrderService();
 const MAX_TRIES = 5;
 
 const findByToken = async (token: string) => {
-  const order = await raw.order.findUnique({ where: { riderToken: token }, include: { items: true } });
-  if (!order || !order.riderTokenExpires || order.riderTokenExpires < new Date())
-    throw new ApiError("This delivery link has expired or already been used", 404);
+  const order = await raw.order.findUnique({
+    where: { riderToken: token },
+    include: { items: true },
+  });
+  if (
+    !order ||
+    !order.riderTokenExpires ||
+    order.riderTokenExpires < new Date()
+  )
+    throw new ApiError(
+      "This delivery link has expired or already been used",
+      404,
+    );
   return order;
 };
 
@@ -29,7 +39,12 @@ const tries = new Map<string, number>();
 /** What the rider needs: address, who to call, what's in the bag. */
 router.get("/:token", async (req: Request, res: Response) => {
   const o = await findByToken(String(req.params.token));
-  const studio = o.studioId ? await raw.studio.findUnique({ where: { id: o.studioId }, select: { name: true } }) : null;
+  const studio = o.studioId
+    ? await raw.studio.findUnique({
+        where: { id: o.studioId },
+        select: { name: true },
+      })
+    : null;
   return res.status(200).json({
     data: {
       orderNumber: o.orderNumber,
@@ -41,7 +56,12 @@ router.get("/:token", async (req: Request, res: Response) => {
       eta: o.deliveryEta,
       zone: o.deliveryZone,
       slot: o.deliverySlot,
-      items: o.items.map((i) => ({ name: i.name, quantity: i.quantity, size: i.size, color: i.color })),
+      items: o.items.map((i) => ({
+        name: i.name,
+        quantity: i.quantity,
+        size: i.size,
+        color: i.color,
+      })),
       status: o.status,
       failedReason: o.deliveryFailReason,
     },
@@ -52,31 +72,58 @@ router.post("/:token/delivered", async (req: Request, res: Response) => {
   const o = await findByToken(String(req.params.token));
   const code = String(req.body?.code ?? "").trim();
   const used = tries.get(o.id) ?? 0;
-  if (used >= MAX_TRIES) throw new ApiError("Too many wrong codes. Ask the shop to confirm the delivery.", 429);
+  if (used >= MAX_TRIES)
+    throw new ApiError(
+      "Too many wrong codes. Ask the shop to confirm the delivery.",
+      429,
+    );
   if (!o.handoverCode || code !== o.handoverCode) {
     tries.set(o.id, used + 1);
-    throw new ApiError("That code isn't right. Ask the customer for the 4-digit code in their order.", 400);
+    throw new ApiError(
+      "That code isn't right. Ask the customer for the 4-digit code in their order.",
+      400,
+    );
   }
   tries.delete(o.id);
-  await runWithTenant({ studioId: o.studioId } as never, () => orders.updateStatus(o.id, "FULFILLED"));
+  await runWithTenant({ studioId: o.studioId } as never, () =>
+    orders.updateStatus(o.id, "FULFILLED"),
+  );
   if (o.studioId)
     await notifyStudioAdmins(
       o.studioId,
       { template: "ORDER_DELIVERED", entityId: o.id, entityType: "Order" },
-      { title: "Delivered", body: `Order ${o.orderNumber} was delivered to ${o.customerName ?? "the customer"}.`, url: "/admin/orders" },
+      {
+        title: "Delivered",
+        body: `Order ${o.orderNumber} was delivered to ${o.customerName ?? "the customer"}.`,
+        url: "/admin/orders",
+      },
     ).catch(() => 0);
   return res.status(200).json({ message: "Marked as delivered. Thank you." });
 });
 
 router.post("/:token/failed", async (req: Request, res: Response) => {
   const o = await findByToken(String(req.params.token));
-  const reason = typeof req.body?.reason === "string" && req.body.reason.trim() ? req.body.reason.trim().slice(0, 200) : "No reason given";
-  await raw.order.update({ where: { id: o.id }, data: { deliveryFailedAt: new Date(), deliveryFailReason: reason } });
+  const reason =
+    typeof req.body?.reason === "string" && req.body.reason.trim()
+      ? req.body.reason.trim().slice(0, 200)
+      : "No reason given";
+  await raw.order.update({
+    where: { id: o.id },
+    data: { deliveryFailedAt: new Date(), deliveryFailReason: reason },
+  });
   if (o.studioId)
     await notifyStudioAdmins(
       o.studioId,
-      { template: "ORDER_DELIVERY_FAILED", entityId: `${o.id}:${Date.now()}`, entityType: "Order" },
-      { title: "Delivery didn't happen", body: `Order ${o.orderNumber}: ${reason}`, url: "/admin/orders" },
+      {
+        template: "ORDER_DELIVERY_FAILED",
+        entityId: `${o.id}:${Date.now()}`,
+        entityType: "Order",
+      },
+      {
+        title: "Delivery didn't happen",
+        body: `Order ${o.orderNumber}: ${reason}`,
+        url: "/admin/orders",
+      },
     ).catch(() => 0);
   if (o.userId)
     await notifyUsers([o.userId], {
@@ -89,18 +136,31 @@ router.post("/:token/failed", async (req: Request, res: Response) => {
 
 /** Admin, at the counter: the customer shows their code to collect a pickup. */
 export const handoverRouter: Router = Router();
-handoverRouter.post("/:id/handover", authenticate, requireAdmin, async (req: Request, res: Response) => {
-  const id = String(req.params.id);
-  const o = await raw.order.findUnique({ where: { id } });
-  if (!o || o.studioId !== req.studioId) throw new ApiError("Order not found", 404);
-  const used = tries.get(o.id) ?? 0;
-  if (used >= MAX_TRIES) throw new ApiError("Too many wrong codes. Check the customer's order page with them.", 429);
-  if (!o.handoverCode || String(req.body?.code ?? "").trim() !== o.handoverCode) {
-    tries.set(o.id, used + 1);
-    throw new ApiError("That code doesn't match this order", 400);
-  }
-  tries.delete(o.id);
-  return res.status(200).json(await orders.updateStatus(o.id, "FULFILLED"));
-});
+handoverRouter.post(
+  "/:id/handover",
+  authenticate,
+  requireAdmin,
+  async (req: Request, res: Response) => {
+    const id = String(req.params.id);
+    const o = await raw.order.findUnique({ where: { id } });
+    if (!o || o.studioId !== req.studioId)
+      throw new ApiError("Order not found", 404);
+    const used = tries.get(o.id) ?? 0;
+    if (used >= MAX_TRIES)
+      throw new ApiError(
+        "Too many wrong codes. Check the customer's order page with them.",
+        429,
+      );
+    if (
+      !o.handoverCode ||
+      String(req.body?.code ?? "").trim() !== o.handoverCode
+    ) {
+      tries.set(o.id, used + 1);
+      throw new ApiError("That code doesn't match this order", 400);
+    }
+    tries.delete(o.id);
+    return res.status(200).json(await orders.updateStatus(o.id, "FULFILLED"));
+  },
+);
 
 export default router;

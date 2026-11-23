@@ -2,7 +2,11 @@ import { Connection } from "../db/dbConnection";
 import { runAsSuperAdmin } from "../tenant/context";
 import { NotificationService } from "../notifications/notificationService";
 import { NotificationTemplate } from "../notifications/registry";
-import { brandFromStudio, firstName, storefrontFallbackBrand } from "../notifications/brand";
+import {
+  brandFromStudio,
+  firstName,
+  storefrontFallbackBrand,
+} from "../notifications/brand";
 import { reviewRequest } from "../notifications/templates/review";
 import { studioLink } from "../utils/studioLink";
 
@@ -20,7 +24,12 @@ export class ReviewRequestService extends Connection {
     return runAsSuperAdmin(async () => {
       const result = { bookings: 0, orders: 0, errors: [] as string[] };
       const reviewsOn = new Set(
-        (await this.studioSettings.findMany({ where: { reviews: true }, select: { studioId: true } })).map((s) => s.studioId),
+        (
+          await this.studioSettings.findMany({
+            where: { reviews: true },
+            select: { studioId: true },
+          })
+        ).map((s) => s.studioId),
       );
 
       // Visits that were completed, held 1 to 7 days ago, not yet reviewed.
@@ -28,10 +37,16 @@ export class ReviewRequestService extends Connection {
         where: {
           status: "COMPLETED",
           userId: { not: null },
-          appointmentDate: { gte: new Date(now.getTime() - 8 * DAY), lte: new Date(now.getTime() - DAY) },
+          appointmentDate: {
+            gte: new Date(now.getTime() - 8 * DAY),
+            lte: new Date(now.getTime() - DAY),
+          },
           reviews: { none: {} },
         },
-        include: { service: { select: { id: true, name: true } }, user: { select: { email: true } } },
+        include: {
+          service: { select: { id: true, name: true } },
+          user: { select: { email: true } },
+        },
         take: 500,
       });
       for (const a of appointments) {
@@ -42,12 +57,15 @@ export class ReviewRequestService extends Connection {
           const studio = await this.currentStudioBranding(a.studioId);
           if (!studio) continue;
           const path = `/review?appointment=${a.id}${a.service ? `&service=${a.service.id}` : ""}`;
-          const { subject, html } = reviewRequest(brandFromStudio(studio, storefrontFallbackBrand), {
-            customerFirstName: firstName(a.fullName),
-            studioName: studio.name,
-            what: `your ${a.service?.name ?? "visit"}`,
-            reviewUrl: studioLink(studio.slug, path),
-          });
+          const { subject, html } = reviewRequest(
+            brandFromStudio(studio, storefrontFallbackBrand),
+            {
+              customerFirstName: firstName(a.fullName),
+              studioName: studio.name,
+              what: `your ${a.service?.name ?? "visit"}`,
+              reviewUrl: studioLink(studio.slug, path),
+            },
+          );
           await this.notifications.send({
             template: NotificationTemplate.REVIEW_REQUEST,
             to: email,
@@ -70,9 +88,15 @@ export class ReviewRequestService extends Connection {
         where: {
           status: "FULFILLED",
           userId: { not: null },
-          updatedAt: { gte: new Date(now.getTime() - 10 * DAY), lte: new Date(now.getTime() - 3 * DAY) },
+          updatedAt: {
+            gte: new Date(now.getTime() - 10 * DAY),
+            lte: new Date(now.getTime() - 3 * DAY),
+          },
         },
-        include: { items: { select: { productId: true, name: true }, take: 1 }, user: { select: { email: true } } },
+        include: {
+          items: { select: { productId: true, name: true }, take: 1 },
+          user: { select: { email: true } },
+        },
         take: 500,
       });
       for (const o of orders) {
@@ -81,17 +105,26 @@ export class ReviewRequestService extends Connection {
         const email = o.customerEmail ?? o.user?.email;
         if (!item?.productId || !email) continue;
         // Already reviewed it.
-        if (await this.review.findFirst({ where: { userId: o.userId!, productId: item.productId }, select: { id: true } })) continue;
+        if (
+          await this.review.findFirst({
+            where: { userId: o.userId!, productId: item.productId },
+            select: { id: true },
+          })
+        )
+          continue;
         try {
           const studio = await this.currentStudioBranding(o.studioId);
           if (!studio) continue;
           const path = `/shop/${item.productId}#description`;
-          const { subject, html } = reviewRequest(brandFromStudio(studio, storefrontFallbackBrand), {
-            customerFirstName: firstName(o.customerName ?? "there"),
-            studioName: studio.name,
-            what: item.name,
-            reviewUrl: studioLink(studio.slug, path),
-          });
+          const { subject, html } = reviewRequest(
+            brandFromStudio(studio, storefrontFallbackBrand),
+            {
+              customerFirstName: firstName(o.customerName ?? "there"),
+              studioName: studio.name,
+              what: item.name,
+              reviewUrl: studioLink(studio.slug, path),
+            },
+          );
           await this.notifications.send({
             template: NotificationTemplate.REVIEW_REQUEST,
             to: email,

@@ -2,7 +2,11 @@ import { Connection } from "../db/dbConnection";
 import { ApiError } from "../middleware/apiError";
 import { NotificationService } from "../notifications/notificationService";
 import { NotificationTemplate } from "../notifications/registry";
-import { brandFromStudio, firstName, storefrontFallbackBrand } from "../notifications/brand";
+import {
+  brandFromStudio,
+  firstName,
+  storefrontFallbackBrand,
+} from "../notifications/brand";
 import { refundedByStudio } from "../notifications/templates/refund";
 import { notifyStudioAdmins, notifyUsers } from "../push/pushService";
 import { getTenantContext } from "../tenant/context";
@@ -37,7 +41,11 @@ export class CancellationService extends Connection {
   // ---- Bookings
 
   /** The customer asks to cancel their own upcoming booking. */
-  public async requestBookingCancel(userId: string, id: string, reason: unknown) {
+  public async requestBookingCancel(
+    userId: string,
+    id: string,
+    reason: unknown,
+  ) {
     const appt = await this.appointment.findUnique({
       where: { id },
       include: { service: { select: { name: true } } },
@@ -45,10 +53,14 @@ export class CancellationService extends Connection {
     if (!appt || appt.userId !== userId) throw bad("Booking not found", 404);
     if (!["PENDING", "CONFIRMED", "PENDING_RESCHEDULE"].includes(appt.status))
       throw bad("This booking can't be cancelled");
-    if (appt.cancelRequestedAt) throw bad("You've already asked to cancel this booking");
+    if (appt.cancelRequestedAt)
+      throw bad("You've already asked to cancel this booking");
     await this.appointment.update({
       where: { id },
-      data: { cancelRequestedAt: new Date(), cancelRequestReason: cleanReason(reason) },
+      data: {
+        cancelRequestedAt: new Date(),
+        cancelRequestReason: cleanReason(reason),
+      },
     });
     await notifyStudioAdmins(
       this.studioId(),
@@ -59,14 +71,20 @@ export class CancellationService extends Connection {
         url: "/admin/appointments?status=cancel_requested",
         tag: `cancel-request:${id}`,
       },
-    ).catch((e) => console.warn("Cancel request notice failed:", (e as Error).message));
-    return { message: "Your request has been sent. The studio will confirm the cancellation." };
+    ).catch((e) =>
+      console.warn("Cancel request notice failed:", (e as Error).message),
+    );
+    return {
+      message:
+        "Your request has been sent. The studio will confirm the cancellation.",
+    };
   }
 
   /** The studio keeps the booking: the request is cleared and the customer told. */
   public async declineBookingCancel(id: string) {
     const appt = await this.appointment.findUnique({ where: { id } });
-    if (!appt?.cancelRequestedAt) throw bad("There's no cancellation request on this booking");
+    if (!appt?.cancelRequestedAt)
+      throw bad("There's no cancellation request on this booking");
     await this.appointment.update({
       where: { id },
       data: { cancelRequestedAt: null, cancelRequestReason: null },
@@ -81,24 +99,43 @@ export class CancellationService extends Connection {
   }
 
   /** Record that the studio paid the customer back for a cancelled booking. */
-  public async markBookingRefunded(id: string, amountRaw: unknown, note: unknown) {
+  public async markBookingRefunded(
+    id: string,
+    amountRaw: unknown,
+    note: unknown,
+  ) {
     const appt = await this.appointment.findUnique({
       where: { id },
       include: { payment: true, service: { select: { name: true } } },
     });
     if (!appt) throw bad("Booking not found", 404);
-    if (appt.status !== "CANCELLED") throw bad("Cancel the booking first, then mark it as refunded");
-    if (appt.refundedOutsideAt) throw bad("This booking is already marked as refunded");
-    const paid = appt.payment && ["PAID", "PARTIALLY_REFUNDED"].includes(appt.payment.status)
-      ? round2(appt.payment.amount - appt.payment.refundedAmount)
-      : 0;
-    if (paid <= 0) throw bad("The customer didn't pay for this booking in the app, so there's nothing to record");
-    const amount = amountRaw === undefined || amountRaw === null || amountRaw === "" ? paid : round2(Number(amountRaw));
-    if (!(amount > 0) || amount > paid) throw bad(`Enter an amount up to ${paid.toFixed(2)}`);
+    if (appt.status !== "CANCELLED")
+      throw bad("Cancel the booking first, then mark it as refunded");
+    if (appt.refundedOutsideAt)
+      throw bad("This booking is already marked as refunded");
+    const paid =
+      appt.payment &&
+      ["PAID", "PARTIALLY_REFUNDED"].includes(appt.payment.status)
+        ? round2(appt.payment.amount - appt.payment.refundedAmount)
+        : 0;
+    if (paid <= 0)
+      throw bad(
+        "The customer didn't pay for this booking in the app, so there's nothing to record",
+      );
+    const amount =
+      amountRaw === undefined || amountRaw === null || amountRaw === ""
+        ? paid
+        : round2(Number(amountRaw));
+    if (!(amount > 0) || amount > paid)
+      throw bad(`Enter an amount up to ${paid.toFixed(2)}`);
 
     await this.appointment.update({
       where: { id },
-      data: { refundedOutsideAt: new Date(), refundedOutsideAmount: amount, refundedOutsideNote: cleanNote(note) },
+      data: {
+        refundedOutsideAt: new Date(),
+        refundedOutsideAmount: amount,
+        refundedOutsideNote: cleanNote(note),
+      },
     });
     await this.tellCustomerRefunded({
       userId: appt.userId,
@@ -120,11 +157,17 @@ export class CancellationService extends Connection {
     if (!order || order.userId !== userId) throw bad("Order not found", 404);
     // Before it's on its way or ready to collect.
     if (order.status !== "PAID" && order.status !== "PREPARING")
-      throw bad("Only orders that haven't been sent or made ready to collect can be cancelled");
-    if (order.cancelRequestedAt) throw bad("You've already asked to cancel this order");
+      throw bad(
+        "Only orders that haven't been sent or made ready to collect can be cancelled",
+      );
+    if (order.cancelRequestedAt)
+      throw bad("You've already asked to cancel this order");
     await this.order.update({
       where: { id },
-      data: { cancelRequestedAt: new Date(), cancelRequestReason: cleanReason(reason) },
+      data: {
+        cancelRequestedAt: new Date(),
+        cancelRequestReason: cleanReason(reason),
+      },
     });
     await notifyStudioAdmins(
       this.studioId(),
@@ -135,13 +178,19 @@ export class CancellationService extends Connection {
         url: "/admin/orders?status=cancel_requested",
         tag: `order-cancel-request:${id}`,
       },
-    ).catch((e) => console.warn("Order cancel request notice failed:", (e as Error).message));
-    return { message: "Your request has been sent. The shop will confirm the cancellation." };
+    ).catch((e) =>
+      console.warn("Order cancel request notice failed:", (e as Error).message),
+    );
+    return {
+      message:
+        "Your request has been sent. The shop will confirm the cancellation.",
+    };
   }
 
   public async declineOrderCancel(id: string) {
     const order = await this.order.findUnique({ where: { id } });
-    if (!order?.cancelRequestedAt) throw bad("There's no cancellation request on this order");
+    if (!order?.cancelRequestedAt)
+      throw bad("There's no cancellation request on this order");
     await this.order.update({
       where: { id },
       data: { cancelRequestedAt: null, cancelRequestReason: null },
@@ -155,19 +204,34 @@ export class CancellationService extends Connection {
     return { message: "Request declined. The customer has been told." };
   }
 
-  public async markOrderRefunded(id: string, amountRaw: unknown, note: unknown) {
+  public async markOrderRefunded(
+    id: string,
+    amountRaw: unknown,
+    note: unknown,
+  ) {
     const order = await this.order.findUnique({ where: { id } });
     if (!order) throw bad("Order not found", 404);
-    if (order.status !== "CANCELLED") throw bad("Cancel the order first, then mark it as refunded");
-    if (order.refundedOutsideAt) throw bad("This order is already marked as refunded");
-    if (!order.paidAt) throw bad("This order was never paid, so there's nothing to record");
+    if (order.status !== "CANCELLED")
+      throw bad("Cancel the order first, then mark it as refunded");
+    if (order.refundedOutsideAt)
+      throw bad("This order is already marked as refunded");
+    if (!order.paidAt)
+      throw bad("This order was never paid, so there's nothing to record");
     const paid = round2(order.total - order.refundedAmount);
-    const amount = amountRaw === undefined || amountRaw === null || amountRaw === "" ? paid : round2(Number(amountRaw));
-    if (!(amount > 0) || amount > paid) throw bad(`Enter an amount up to ${paid.toFixed(2)}`);
+    const amount =
+      amountRaw === undefined || amountRaw === null || amountRaw === ""
+        ? paid
+        : round2(Number(amountRaw));
+    if (!(amount > 0) || amount > paid)
+      throw bad(`Enter an amount up to ${paid.toFixed(2)}`);
 
     await this.order.update({
       where: { id },
-      data: { refundedOutsideAt: new Date(), refundedOutsideAmount: amount, refundedOutsideNote: cleanNote(note) },
+      data: {
+        refundedOutsideAt: new Date(),
+        refundedOutsideAmount: amount,
+        refundedOutsideNote: cleanNote(note),
+      },
     });
     await this.tellCustomerRefunded({
       userId: order.userId,
@@ -195,12 +259,15 @@ export class CancellationService extends Connection {
     const studio = await this.currentStudioBranding();
     const studioName = studio?.name ?? "The studio";
     if (args.email) {
-      const { subject, html } = refundedByStudio(brandFromStudio(studio, storefrontFallbackBrand), {
-        customerFirstName: firstName(args.name || "there"),
-        studioName,
-        amount: args.amount,
-        what: args.what,
-      });
+      const { subject, html } = refundedByStudio(
+        brandFromStudio(studio, storefrontFallbackBrand),
+        {
+          customerFirstName: firstName(args.name || "there"),
+          studioName,
+          amount: args.amount,
+          what: args.what,
+        },
+      );
       await this.notifications.send({
         template: NotificationTemplate.REFUNDED_BY_STUDIO,
         to: args.email,

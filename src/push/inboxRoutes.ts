@@ -13,7 +13,14 @@ router.get("/", authenticate, async (req: Request, res: Response) => {
       where: { userId },
       orderBy: { createdAt: "desc" },
       take: 50,
-      select: { id: true, title: true, body: true, url: true, readAt: true, createdAt: true },
+      select: {
+        id: true,
+        title: true,
+        body: true,
+        url: true,
+        readAt: true,
+        createdAt: true,
+      },
     }),
     raw.notification.count({ where: { userId, readAt: null } }),
   ]);
@@ -23,10 +30,16 @@ router.get("/", authenticate, async (req: Request, res: Response) => {
 /** Mark some (ids) or all of them read. */
 router.post("/read", authenticate, async (req: Request, res: Response) => {
   const ids = Array.isArray(req.body?.ids)
-    ? (req.body.ids as unknown[]).filter((x): x is string => typeof x === "string").slice(0, 100)
+    ? (req.body.ids as unknown[])
+        .filter((x): x is string => typeof x === "string")
+        .slice(0, 100)
     : null;
   await raw.notification.updateMany({
-    where: { userId: req.user!.id, readAt: null, ...(ids ? { id: { in: ids } } : {}) },
+    where: {
+      userId: req.user!.id,
+      readAt: null,
+      ...(ids ? { id: { in: ids } } : {}),
+    },
     data: { readAt: new Date() },
   });
   return res.status(204).end();

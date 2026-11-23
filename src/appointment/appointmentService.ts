@@ -185,15 +185,29 @@ export class AppointmentService extends Connection {
   /** For mail to the business itself: from Zuri Studios, not from its own name. */
   private async zuriBrand() {
     const id = getTenantContext()?.studioId;
-    const studio = id ? await this.studio.findUnique({ where: { id }, select: { plan: true } }).catch(() => null) : null;
+    const studio = id
+      ? await this.studio
+          .findUnique({ where: { id }, select: { plan: true } })
+          .catch(() => null)
+      : null;
     return platformBrandForPlan(studio?.plan);
   }
 
-  public async create(data: CreateAppointmentInput, userId?: string, opts: { guest?: boolean } = {}) {
+  public async create(
+    data: CreateAppointmentInput,
+    userId?: string,
+    opts: { guest?: boolean } = {},
+  ) {
     // A guest has no account, so the studio can only reach them by email to
     // take payment and confirm.
-    if (opts.guest && !data.email?.trim()) throw new ApiError("Enter your email so we can confirm your booking", 400);
-    const guestToken = opts.guest ? randomBytes(18).toString("base64url") : null;
+    if (opts.guest && !data.email?.trim())
+      throw new ApiError(
+        "Enter your email so we can confirm your booking",
+        400,
+      );
+    const guestToken = opts.guest
+      ? randomBytes(18).toString("base64url")
+      : null;
     // The studio confirms and follows up on WhatsApp, so the number has to be
     // one a wa.me link can open.
     if (!toWhatsappNumber(data.phone)) {
@@ -225,7 +239,12 @@ export class AppointmentService extends Connection {
     let discountAmount = 0;
     let pointsRedeemed = 0;
     // Points aren't combined with a gift card or package code.
-    if (userId && data.applyPoints === "true" && !onPromo && !data.voucherCode) {
+    if (
+      userId &&
+      data.applyPoints === "true" &&
+      !onPromo &&
+      !data.voucherCode
+    ) {
       const balance = await this.loyaltyPoints.findUnique({
         where: { userId },
       });
@@ -264,13 +283,20 @@ export class AppointmentService extends Connection {
         let staffId: string | null = null;
         const qualified = await this.qualifiedStaff(data.serviceId);
         if (qualified.length) {
-          const wanted = data.staffId && data.staffId !== "any" ? data.staffId : null;
+          const wanted =
+            data.staffId && data.staffId !== "any" ? data.staffId : null;
           if (wanted && !qualified.includes(wanted)) {
-            throw new ApiError("That person doesn't do this service. Pick someone else or Anyone.", 400);
+            throw new ApiError(
+              "That person doesn't do this service. Pick someone else or Anyone.",
+              400,
+            );
           }
           for (const candidate of wanted ? [wanted] : qualified) {
             try {
-              await this.assertSlotBookable({ ...slot, staffId: candidate }, tx);
+              await this.assertSlotBookable(
+                { ...slot, staffId: candidate },
+                tx,
+              );
               staffId = candidate;
               break;
             } catch (e) {
@@ -303,7 +329,9 @@ export class AppointmentService extends Connection {
             notes: data.notes ?? null,
             totalPrice: effectivePrice,
             discountAmount: discountAmount + (voucher?.covered ?? 0),
-            ...(voucher ? { voucherId: voucher.voucherId, voucherAmount: voucher.covered } : {}),
+            ...(voucher
+              ? { voucherId: voucher.voucherId, voucherAmount: voucher.covered }
+              : {}),
             pointsRedeemed,
             serviceId: data.serviceId,
             ...(staffId ? { staffId } : {}),
@@ -479,7 +507,10 @@ export class AppointmentService extends Connection {
               entityId: `${appt.id}:${window}:admin`,
             },
             {
-              title: window === "24H" ? "Booking tomorrow" : "Booking in about an hour",
+              title:
+                window === "24H"
+                  ? "Booking tomorrow"
+                  : "Booking in about an hour",
               body: `${appt.fullName ?? "A client"} · ${appt.service?.name ?? "Appointment"} at ${appt.appointmentTime}`,
               url: `/admin/calendar?date=${appt.appointmentDate.toISOString().slice(0, 10)}`,
               tag: `admin-reminder:${appt.id}:${window}`,
@@ -491,7 +522,12 @@ export class AppointmentService extends Connection {
         // WhatsApp, when the studio has it on (whatever the email situation).
         if (appt.studioId) {
           const studioName =
-            (await this.studio.findUnique({ where: { id: appt.studioId }, select: { name: true } }))?.name ?? "the studio";
+            (
+              await this.studio.findUnique({
+                where: { id: appt.studioId },
+                select: { name: true },
+              })
+            )?.name ?? "the studio";
           await sendBookingWhatsapp({
             kind: window === "24H" ? "REMINDER_24H" : "REMINDER_1H",
             studioId: appt.studioId,
@@ -607,8 +643,14 @@ export class AppointmentService extends Connection {
             };
       })
       .filter(
-        (b): b is { start: string; label: string; minutes: number; staffId: string | null } =>
-          b !== null,
+        (
+          b,
+        ): b is {
+          start: string;
+          label: string;
+          minutes: number;
+          staffId: string | null;
+        } => b !== null,
       );
     return {
       message: "Availability retrieved successfully",
@@ -654,7 +696,10 @@ export class AppointmentService extends Connection {
     appointments.forEach((item) => {
       item.designImageUrl = this.s3.deliveryUrl(item.designImageUrl);
     });
-    return { message: "Appointments retrieved successfully", data: appointments };
+    return {
+      message: "Appointments retrieved successfully",
+      data: appointments,
+    };
   }
 
   public async listAll(page: CursorPage) {
@@ -807,7 +852,8 @@ export class AppointmentService extends Connection {
 
     for (const other of sameDay) {
       // Different staff can be booked at the same time.
-      if (check.staffId && other.staffId && other.staffId !== check.staffId) continue;
+      if (check.staffId && other.staffId && other.staffId !== check.staffId)
+        continue;
       const otherStart = parseTimeMinutes(other.appointmentTime);
       if (otherStart === null) continue;
       const otherEnd =
@@ -949,14 +995,17 @@ export class AppointmentService extends Connection {
       try {
         const to = await this.currentStudioNotifyEmail();
         if (to) {
-          const { subject, html } = bookingRescheduleRequested(await this.zuriBrand(), {
-            ...core,
-            customerName: appointment.fullName,
-            previousDate: formatDate(existing.appointmentDate),
-            previousTime: existing.appointmentTime,
-            reason,
-            ...(studio?.bookingUrl ? { reviewUrl: studio.bookingUrl } : {}),
-          });
+          const { subject, html } = bookingRescheduleRequested(
+            await this.zuriBrand(),
+            {
+              ...core,
+              customerName: appointment.fullName,
+              previousDate: formatDate(existing.appointmentDate),
+              previousTime: existing.appointmentTime,
+              reason,
+              ...(studio?.bookingUrl ? { reviewUrl: studio.bookingUrl } : {}),
+            },
+          );
           await this.notifications.send({
             template: NotificationTemplate.BOOKING_RESCHEDULE_REQUESTED,
             to,
@@ -1266,21 +1315,39 @@ export class AppointmentService extends Connection {
     });
 
     // A cancelled booking gives back what its gift card or package covered.
-    if (status === "CANCELLED" && existing.status !== "CANCELLED" && existing.voucherId) {
-      await new VoucherService().restore(existing.voucherId, existing.voucherAmount);
+    if (
+      status === "CANCELLED" &&
+      existing.status !== "CANCELLED" &&
+      existing.voucherId
+    ) {
+      await new VoucherService().restore(
+        existing.voucherId,
+        existing.voucherAmount,
+      );
     }
 
     // A cancelled slot is free again: tell anyone waiting for that day.
     if (status === "CANCELLED" && existing.status !== "CANCELLED") {
-      void new WaitlistService().slotOpened(appointment.appointmentDate).catch((e) =>
-        console.warn("Waitlist check failed:", (e as Error).message),
-      );
+      void new WaitlistService()
+        .slotOpened(appointment.appointmentDate)
+        .catch((e) =>
+          console.warn("Waitlist check failed:", (e as Error).message),
+        );
     }
 
     // A WhatsApp confirmation too, when the studio has it on.
-    if (status === "CONFIRMED" && existing.status !== "CONFIRMED" && appointment.studioId) {
+    if (
+      status === "CONFIRMED" &&
+      existing.status !== "CONFIRMED" &&
+      appointment.studioId
+    ) {
       const studioName =
-        (await this.studio.findUnique({ where: { id: appointment.studioId }, select: { name: true } }))?.name ?? "the studio";
+        (
+          await this.studio.findUnique({
+            where: { id: appointment.studioId },
+            select: { name: true },
+          })
+        )?.name ?? "the studio";
       void sendBookingWhatsapp({
         kind: "CONFIRMED",
         studioId: appointment.studioId,

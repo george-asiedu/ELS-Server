@@ -118,11 +118,19 @@ export class PaymentService extends Connection {
     // theirs with the token they were given when they booked.
     const userId = typeof owner === "string" ? owner : null;
     if (userId) {
-      if (appointment.userId !== userId) throw new ApiError("You can only pay for your own booking", 403);
+      if (appointment.userId !== userId)
+        throw new ApiError("You can only pay for your own booking", 403);
     } else {
-      const given = Buffer.from(typeof owner === "string" ? "" : owner.guestToken);
+      const given = Buffer.from(
+        typeof owner === "string" ? "" : owner.guestToken,
+      );
       const real = Buffer.from(appointment.guestToken ?? "");
-      if (appointment.userId || !real.length || given.length !== real.length || !timingSafeEqual(given, real))
+      if (
+        appointment.userId ||
+        !real.length ||
+        given.length !== real.length ||
+        !timingSafeEqual(given, real)
+      )
         throw new ApiError("You can only pay for your own booking", 403);
     }
 
@@ -137,8 +145,15 @@ export class PaymentService extends Connection {
       throw new ApiError("Partial (deposit) payment is not available", 400);
     }
     // Customers who've missed bookings pay in full rather than a deposit.
-    if (type === "PARTIAL" && userId && (await this.noShowCount(userId)) >= NO_SHOWS_FOR_FULL_PAYMENT) {
-      throw new ApiError("Because of missed appointments, please pay the full amount for this booking.", 400);
+    if (
+      type === "PARTIAL" &&
+      userId &&
+      (await this.noShowCount(userId)) >= NO_SHOWS_FOR_FULL_PAYMENT
+    ) {
+      throw new ApiError(
+        "Because of missed appointments, please pay the full amount for this booking.",
+        400,
+      );
     }
 
     const amountDue =
@@ -152,7 +167,8 @@ export class PaymentService extends Connection {
         : amountDue;
     if (charge <= 0) throw new ApiError("Invalid payment amount", 400);
 
-    const email = appointment.email || (userId ? await this.userEmail(userId) : null);
+    const email =
+      appointment.email || (userId ? await this.userEmail(userId) : null);
     if (!email) throw new ApiError("An email is required to pay", 400);
 
     const reference = await this.makeReference("APT");
@@ -326,7 +342,8 @@ export class PaymentService extends Connection {
       paystackStatus = data.status;
       await this.processVerification(reference, data);
       await this.orders.finalizeByReference(reference, data);
-      if (reference.startsWith("BILL-")) await BillService.finalizeByReference(reference);
+      if (reference.startsWith("BILL-"))
+        await BillService.finalizeByReference(reference);
     } catch {
       // Transaction not found yet / still initializing — treat as pending.
     }
@@ -794,7 +811,9 @@ export class PaymentService extends Connection {
       const paidNow = Math.round((payment.amount + fee) * 100) / 100;
       const lines: MoneyLine[] = [
         { label: "Total", value: ghs(payment.totalAmount) },
-        ...(fee > 0 ? [{ label: "Payment processing fee", value: ghs(fee), muted: true }] : []),
+        ...(fee > 0
+          ? [{ label: "Payment processing fee", value: ghs(fee), muted: true }]
+          : []),
         {
           label: isPartial ? "Deposit paid" : "Amount paid",
           value: ghs(paidNow),
@@ -853,7 +872,9 @@ export class PaymentService extends Connection {
             value: `${receiptDayOnly(appt.appointmentDate)} · ${appt.appointmentTime}`,
           },
           { label: "Total", value: ghs(payment.totalAmount) },
-          ...(fee > 0 ? [{ label: "Payment processing fee", value: ghs(fee) }] : []),
+          ...(fee > 0
+            ? [{ label: "Payment processing fee", value: ghs(fee) }]
+            : []),
           {
             label: isPartial ? "Deposit paid" : "Amount paid",
             value: ghs(paidNow),
@@ -963,7 +984,9 @@ export class PaymentService extends Connection {
           await new VoucherService().finalizeByReference(reference);
         } else if (reference.startsWith("BILL-")) {
           // A walk-in's bill paid through its link.
-          await BillService.finalizeByReference(reference).catch((e) => console.warn("Bill webhook:", (e as Error).message));
+          await BillService.finalizeByReference(reference).catch((e) =>
+            console.warn("Bill webhook:", (e as Error).message),
+          );
         } else if (isStudioBillingReference(reference)) {
           // A studio's renewal or plan change. Applying it here means a studio
           // that paid and closed the tab is still renewed.

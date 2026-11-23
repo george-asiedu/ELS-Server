@@ -59,7 +59,10 @@ const FROM_ZURI = new Set<string>([
   "BOOKING_REQUEST_STUDIO",
   "BOOKING_RESCHEDULE_REQUESTED",
 ]);
-const senderCache = new Map<string, { at: number; value: { fromName: string; replyTo?: string } }>();
+const senderCache = new Map<
+  string,
+  { at: number; value: { fromName: string; replyTo?: string } }
+>();
 
 export class NotificationService extends Connection {
   /**
@@ -67,18 +70,34 @@ export class NotificationService extends Connection {
    * so they know where it comes from, and replies go to the business. Mail
    * from the platform says Zuri, Zuri Studios or Zuri Stores to match.
    */
-  private async senderFor(args: SendNotificationArgs): Promise<{ fromName: string; replyTo?: string }> {
+  private async senderFor(
+    args: SendNotificationArgs,
+  ): Promise<{ fromName: string; replyTo?: string }> {
     const key = `${args.studioId ?? "-"}:${FROM_ZURI.has(args.template) ? "z" : "s"}`;
     const hit = senderCache.get(key);
     if (hit && Date.now() - hit.at < 5 * 60_000) return hit.value;
     let value: { fromName: string; replyTo?: string } = { fromName: "Zuri" };
     if (args.studioId) {
-      const studio = await runAsSuperAdmin(() => this.studio.findUnique({ where: { id: args.studioId! }, select: { name: true, plan: true } })).catch(() => null);
+      const studio = await runAsSuperAdmin(() =>
+        this.studio.findUnique({
+          where: { id: args.studioId! },
+          select: { name: true, plan: true },
+        }),
+      ).catch(() => null);
       if (studio) {
-        if (FROM_ZURI.has(args.template)) value = { fromName: zuriNameForPlan(studio.plan) };
+        if (FROM_ZURI.has(args.template))
+          value = { fromName: zuriNameForPlan(studio.plan) };
         else {
-          const contact = await runAsSuperAdmin(() => this.contactInfo.findFirst({ where: { studioId: args.studioId! }, select: { email: true } })).catch(() => null);
-          value = { fromName: studio.name, ...(contact?.email ? { replyTo: contact.email } : {}) };
+          const contact = await runAsSuperAdmin(() =>
+            this.contactInfo.findFirst({
+              where: { studioId: args.studioId! },
+              select: { email: true },
+            }),
+          ).catch(() => null);
+          value = {
+            fromName: studio.name,
+            ...(contact?.email ? { replyTo: contact.email } : {}),
+          };
         }
       }
     }
@@ -123,7 +142,10 @@ export class NotificationService extends Connection {
     // Reminders go to the recipient's devices first; the email is only the
     // fallback for someone with no device switched on.
     if (PUSH_FIRST.has(args.template)) {
-      const pushed = await pushForNotification({ ...args, waitForDevices: true });
+      const pushed = await pushForNotification({
+        ...args,
+        waitForDevices: true,
+      });
       if (pushed > 0) {
         await this.notificationLog.update({
           where: { id: log.id },

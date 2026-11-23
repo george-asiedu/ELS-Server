@@ -75,7 +75,11 @@ const newRecoveryCodes = (): string[] => {
  * older one) can't be used again. Returns false for a wrong or reused code.
  */
 const acceptCode = async (
-  user: { id: string; totpSecretEnc: string | null; totpLastStep: number | null },
+  user: {
+    id: string;
+    totpSecretEnc: string | null;
+    totpLastStep: number | null;
+  },
   code: string,
 ): Promise<boolean> => {
   if (!user.totpSecretEnc || !/^\d{6}$/.test(code)) return false;
@@ -111,7 +115,11 @@ const useRecoveryCode = async (userId: string, input: string) => {
 
 /** Login's second step: an authenticator code or a recovery code. */
 export const verifySignInCode = async (
-  user: { id: string; totpSecretEnc: string | null; totpLastStep: number | null },
+  user: {
+    id: string;
+    totpSecretEnc: string | null;
+    totpLastStep: number | null;
+  },
   input: string,
 ): Promise<boolean> => {
   const code = input.trim();
@@ -170,7 +178,11 @@ export const twoFactorStatus = async (userId: string) => {
     load(userId),
     raw.recoveryCode.count({ where: { userId, usedAt: null } }),
   ]);
-  return { enabled: u.totpEnabled, recoveryCodesLeft: u.totpEnabled ? left : 0, required: env.require2faForAdmins };
+  return {
+    enabled: u.totpEnabled,
+    recoveryCodesLeft: u.totpEnabled ? left : 0,
+    required: env.require2faForAdmins,
+  };
 };
 
 /** Step 1: a fresh secret and the QR code to scan. Not on until confirmed. */
@@ -183,7 +195,10 @@ export const startTwoFactorSetup = async (userId: string, issuer: string) => {
     data: { totpSecretEnc: encrypt(secret), totpLastStep: null },
   });
   const otpauthUri = authenticator.keyuri(u.email, issuer, secret);
-  const qrDataUrl = await QRCode.toDataURL(otpauthUri, { margin: 1, width: 240 });
+  const qrDataUrl = await QRCode.toDataURL(otpauthUri, {
+    margin: 1,
+    width: 240,
+  });
   return { secret, otpauthUri, qrDataUrl };
 };
 
@@ -193,7 +208,9 @@ export const confirmTwoFactorSetup = async (userId: string, code: unknown) => {
   if (u.totpEnabled) throw bad("Two-step sign-in is already on");
   if (!u.totpSecretEnc) throw bad("Start the setup first");
   if (typeof code !== "string" || !(await acceptCode(u, code.trim())))
-    throw bad("That code isn't right. Check the time on your phone and try the newest code.");
+    throw bad(
+      "That code isn't right. Check the time on your phone and try the newest code.",
+    );
   const codes = newRecoveryCodes();
   const hashes = codes.map(hashRecoveryCode);
   await raw.$transaction([
@@ -214,7 +231,10 @@ export const disableTwoFactor = async (
 ) => {
   const u = await load(userId);
   if (!u.totpEnabled) throw bad("Two-step sign-in is already off");
-  if (typeof password !== "string" || !(await verifyPassword(password, u.password)))
+  if (
+    typeof password !== "string" ||
+    !(await verifyPassword(password, u.password))
+  )
     throw bad("That password isn't right");
   if (typeof code !== "string" || !(await verifySignInCode(u, code)))
     throw bad("That code isn't right");
@@ -229,7 +249,10 @@ export const disableTwoFactor = async (
 };
 
 /** New recovery codes (the old ones stop working). Needs a current code. */
-export const regenerateRecoveryCodes = async (userId: string, code: unknown) => {
+export const regenerateRecoveryCodes = async (
+  userId: string,
+  code: unknown,
+) => {
   const u = await load(userId);
   if (!u.totpEnabled) throw bad("Two-step sign-in is off");
   if (typeof code !== "string" || !(await acceptCode(u, code.trim())))

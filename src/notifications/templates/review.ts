@@ -7,7 +7,12 @@ import { EmailBrand } from "../types";
  */
 export const reviewRequest = (
   brand: EmailBrand,
-  data: { customerFirstName: string; studioName: string; what: string; reviewUrl: string },
+  data: {
+    customerFirstName: string;
+    studioName: string;
+    what: string;
+    reviewUrl: string;
+  },
 ) => ({
   subject: `How was ${data.what}?`,
   html: renderShell({

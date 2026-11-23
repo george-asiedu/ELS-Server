@@ -41,7 +41,9 @@ export const monthlyReport = (
     </td>`;
   const rows: string[] = [];
   for (let i = 0; i < data.figures.length; i += 2) {
-    rows.push(`<tr>${cell(data.figures[i]!)}${data.figures[i + 1] ? cell(data.figures[i + 1]!) : '<td width="50%"></td>'}</tr>`);
+    rows.push(
+      `<tr>${cell(data.figures[i]!)}${data.figures[i + 1] ? cell(data.figures[i + 1]!) : '<td width="50%"></td>'}</tr>`,
+    );
   }
   return {
     subject: `${data.studioName}: your ${data.monthLabel} report`,
@@ -85,7 +87,12 @@ export const weeklyInsights = (
     insightsUrl: string;
   },
 ) => {
-  const trend = data.revenueChange === null ? "" : data.revenueChange >= 0 ? ` (up ${data.revenueChange}% on the week before)` : ` (down ${Math.abs(data.revenueChange)}% on the week before)`;
+  const trend =
+    data.revenueChange === null
+      ? ""
+      : data.revenueChange >= 0
+        ? ` (up ${data.revenueChange}% on the week before)`
+        : ` (down ${Math.abs(data.revenueChange)}% on the week before)`;
   const items = data.findings
     .map(
       (f, i) => `
@@ -94,7 +101,9 @@ export const weeklyInsights = (
     )
     .join("");
   return {
-    subject: data.findings.length ? `Your week at ${data.businessName}: ${data.findings.length} ${data.findings.length === 1 ? "thing" : "things"} to act on` : `Your week at ${data.businessName}`,
+    subject: data.findings.length
+      ? `Your week at ${data.businessName}: ${data.findings.length} ${data.findings.length === 1 ? "thing" : "things"} to act on`
+      : `Your week at ${data.businessName}`,
     html: renderShell({
       brand,
       previewText: data.findings[0]?.title ?? "How your week went",

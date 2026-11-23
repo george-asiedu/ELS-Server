@@ -11,7 +11,9 @@ import { whatsappQueue, type WhatsappJobData } from "../queue/queues";
 
 const { raw } = createTenantClient();
 
-export const whatsappConfigured = Boolean(env.whatsapp.token && env.whatsapp.phoneNumberId);
+export const whatsappConfigured = Boolean(
+  env.whatsapp.token && env.whatsapp.phoneNumberId,
+);
 
 export type WhatsappKind = "CONFIRMED" | "REMINDER_24H" | "REMINDER_1H";
 
@@ -59,28 +61,55 @@ export const deliverBookingWhatsapp = async (args: {
       throw e;
     }
 
-    const params = [args.firstName, args.studioName, args.serviceName, args.date, args.time];
-    if (args.kind !== "CONFIRMED") params.push(args.kind === "REMINDER_24H" ? "tomorrow" : "in about an hour");
+    const params = [
+      args.firstName,
+      args.studioName,
+      args.serviceName,
+      args.date,
+      args.time,
+    ];
+    if (args.kind !== "CONFIRMED")
+      params.push(
+        args.kind === "REMINDER_24H" ? "tomorrow" : "in about an hour",
+      );
     const res = await fetch(
       `https://graph.facebook.com/${env.whatsapp.apiVersion}/${env.whatsapp.phoneNumberId}/messages`,
       {
         method: "POST",
-        headers: { Authorization: `Bearer ${env.whatsapp.token}`, "Content-Type": "application/json" },
+        headers: {
+          Authorization: `Bearer ${env.whatsapp.token}`,
+          "Content-Type": "application/json",
+        },
         body: JSON.stringify({
           messaging_product: "whatsapp",
           to,
           type: "template",
           template: {
-            name: args.kind === "CONFIRMED" ? env.whatsapp.templates.confirmed : env.whatsapp.templates.reminder,
+            name:
+              args.kind === "CONFIRMED"
+                ? env.whatsapp.templates.confirmed
+                : env.whatsapp.templates.reminder,
             language: { code: env.whatsapp.language },
-            components: [{ type: "body", parameters: params.map((text) => ({ type: "text", text: String(text).slice(0, 200) })) }],
+            components: [
+              {
+                type: "body",
+                parameters: params.map((text) => ({
+                  type: "text",
+                  text: String(text).slice(0, 200),
+                })),
+              },
+            ],
           },
         }),
       },
     );
     const ok = res.ok;
     await raw.notificationLog.updateMany({
-      where: { template: `WHATSAPP_${args.kind}`, recipient: to, entityId: args.appointmentId },
+      where: {
+        template: `WHATSAPP_${args.kind}`,
+        recipient: to,
+        entityId: args.appointmentId,
+      },
       data: ok
         ? { status: "SENT", sentAt: new Date() }
         : { status: "FAILED", error: (await res.text()).slice(0, 500) },
@@ -93,7 +122,9 @@ export const deliverBookingWhatsapp = async (args: {
 };
 
 /** Adds the message to the WhatsApp queue, or sends it here when there isn't one. */
-export const sendBookingWhatsapp = async (args: WhatsappJobData): Promise<boolean> => {
+export const sendBookingWhatsapp = async (
+  args: WhatsappJobData,
+): Promise<boolean> => {
   if (!whatsappConfigured) return false;
   if (whatsappQueue) {
     try {

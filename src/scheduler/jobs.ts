@@ -77,7 +77,8 @@ export const JOBS: JobDefinition[] = [
     maxRunMinutes: 20,
     lane: "heavy",
     run: async () => {
-      const { ReviewRequestService } = await import("../reviews/reviewRequests");
+      const { ReviewRequestService } =
+        await import("../reviews/reviewRequests");
       return { ...(await new ReviewRequestService().sendDue()) };
     },
   },
@@ -101,7 +102,10 @@ export const JOBS: JobDefinition[] = [
     description:
       "Emails each Premium and Zuri Stores business its week: money in, profit and the top things to act on. Each business can turn it off.",
     // Mondays at 07:30 UTC (the epoch began on a Thursday, hence the offset).
-    schedule: { periodMinutes: 7 * 24 * 60, offsetMinutes: 4 * 24 * 60 + 7 * 60 + 30 },
+    schedule: {
+      periodMinutes: 7 * 24 * 60,
+      offsetMinutes: 4 * 24 * 60 + 7 * 60 + 30,
+    },
     scheduleLabel: "Mondays at 07:30 UTC",
     maxRunMinutes: 30,
     lane: "heavy",
@@ -150,7 +154,9 @@ export const JOBS: JobDefinition[] = [
       const { GalleryService } = await import("../gallery/galleryService");
       const { S3BucketService } = await import("../bucket/s3BucketService");
       const { billStorageForMonth } = await import("../storage/storageService");
-      const purged = await new GalleryService(new S3BucketService()).purgeExpired();
+      const purged = await new GalleryService(
+        new S3BucketService(),
+      ).purgeExpired();
       // Extra storage is added for the month once; re-running it is harmless.
       const billed = await billStorageForMonth();
       return { ...purged, ...billed };

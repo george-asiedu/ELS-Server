@@ -18,10 +18,18 @@ let client: S3Client | null = null;
 const s3 = () =>
   (client ??= new S3Client({
     region: env.aws.region,
-    credentials: { accessKeyId: env.aws.accessKeyId, secretAccessKey: env.aws.secretAccessKey },
+    credentials: {
+      accessKeyId: env.aws.accessKeyId,
+      secretAccessKey: env.aws.secretAccessKey,
+    },
   }));
 
-type Listing = { at: number; total: number; byCategory: Record<string, number>; sizes: Map<string, number> };
+type Listing = {
+  at: number;
+  total: number;
+  byCategory: Record<string, number>;
+  sizes: Map<string, number>;
+};
 const cache = new Map<string, Listing>();
 
 /** Everything stored under the studio's folder, summed. Cached for a few minutes. */
@@ -35,7 +43,11 @@ const listing = async (studioId: string, force = false): Promise<Listing> => {
   let token: string | undefined;
   do {
     const page = await s3().send(
-      new ListObjectsV2Command({ Bucket: env.aws.s3BucketName, Prefix: prefix, ContinuationToken: token }),
+      new ListObjectsV2Command({
+        Bucket: env.aws.s3BucketName,
+        Prefix: prefix,
+        ContinuationToken: token,
+      }),
     );
     for (const o of page.Contents ?? []) {
       const size = o.Size ?? 0;
@@ -64,16 +76,22 @@ export const keyFromUrl = (url: string): string | null => {
   }
 };
 
-const config = async () => (await raw.platformConfig.findFirst()) ?? (await raw.platformConfig.create({ data: {} }));
+const config = async () =>
+  (await raw.platformConfig.findFirst()) ??
+  (await raw.platformConfig.create({ data: {} }));
 
 const limitsFor = async (studioId: string) => {
   const [studio, cfg] = await Promise.all([
-    raw.studio.findUnique({ where: { id: studioId }, select: { plan: true, storageExtraBlocks: true } }),
+    raw.studio.findUnique({
+      where: { id: studioId },
+      select: { plan: true, storageExtraBlocks: true },
+    }),
     config(),
   ]);
   if (!studio) throw new ApiError("Studio not found", 404);
   const applies = studio.plan !== "STOREFRONT";
-  const baseMb = studio.plan === "PREMIUM" ? cfg.storagePremiumMb : cfg.storageStandardMb;
+  const baseMb =
+    studio.plan === "PREMIUM" ? cfg.storagePremiumMb : cfg.storageStandardMb;
   const blocks = studio.storageExtraBlocks;
   return {
     applies,
@@ -87,7 +105,10 @@ const limitsFor = async (studioId: string) => {
 };
 
 /** Refuse an upload that would go past the limit. Zuri Stores accounts are exempt. */
-export const assertCanStore = async (studioId: string, incomingBytes: number) => {
+export const assertCanStore = async (
+  studioId: string,
+  incomingBytes: number,
+) => {
   const lim = await limitsFor(studioId);
   if (!lim.applies) return;
   const used = (await listing(studioId)).total;
@@ -106,7 +127,12 @@ export const storageSummary = async (studioId: string, force = false) => {
     where: { studioId, deletedAt: { not: null } },
     select: { imageUrl: true },
   });
-  const trashBytes = trashed.reduce((s, g) => s + ((keyFromUrl(g.imageUrl) && l.sizes.get(keyFromUrl(g.imageUrl)!)) || 0), 0);
+  const trashBytes = trashed.reduce(
+    (s, g) =>
+      s +
+      ((keyFromUrl(g.imageUrl) && l.sizes.get(keyFromUrl(g.imageUrl)!)) || 0),
+    0,
+  );
   return {
     applies: lim.applies,
     plan: lim.plan,
@@ -126,29 +152,58 @@ export const storageSummary = async (studioId: string, force = false) => {
 };
 
 const monthKey = (d = new Date()) => d.toISOString().slice(0, 7);
-const monthLabel = (d = new Date()) => d.toLocaleDateString("en-GB", { month: "long", year: "numeric", timeZone: "UTC" });
+const monthLabel = (d = new Date()) =>
+  d.toLocaleDateString("en-GB", {
+    month: "long",
+    year: "numeric",
+    timeZone: "UTC",
+  });
 
 /** Take one more block now; this month's charge is added to the next renewal. */
 export const addBlock = async (studioId: string) => {
   const lim = await limitsFor(studioId);
-  if (!lim.applies) throw new ApiError("Extra storage is for Zuri Studios plans", 400);
-  const updated = await raw.studio.update({ where: { id: studioId }, data: { storageExtraBlocks: { increment: 1 } }, select: { storageExtraBlocks: true } });
-  await chargeMonth(studioId, updated.storageExtraBlocks, lim.blockMb, lim.blockPrice);
+  if (!lim.applies)
+    throw new ApiError("Extra storage is for Zuri Studios plans", 400);
+  const updated = await raw.studio.update({
+    where: { id: studioId },
+    data: { storageExtraBlocks: { increment: 1 } },
+    select: { storageExtraBlocks: true },
+  });
+  await chargeMonth(
+    studioId,
+    updated.storageExtraBlocks,
+    lim.blockMb,
+    lim.blockPrice,
+  );
   return storageSummary(studioId, true);
 };
 
 /** Give a block back (only when what's stored still fits). It stops from next month. */
 export const removeBlock = async (studioId: string) => {
   const lim = await limitsFor(studioId);
-  if (lim.blocks <= 0) throw new ApiError("You haven't added any extra storage", 400);
+  if (lim.blocks <= 0)
+    throw new ApiError("You haven't added any extra storage", 400);
   const used = (await listing(studioId)).total;
   const newLimit = (lim.baseMb + (lim.blocks - 1) * lim.blockMb) * MB;
-  if (used > newLimit) throw new ApiError("What you've stored wouldn't fit. Delete some files first.", 400);
-  await raw.studio.update({ where: { id: studioId }, data: { storageExtraBlocks: { decrement: 1 } } });
+  if (used > newLimit)
+    throw new ApiError(
+      "What you've stored wouldn't fit. Delete some files first.",
+      400,
+    );
+  await raw.studio.update({
+    where: { id: studioId },
+    data: { storageExtraBlocks: { decrement: 1 } },
+  });
   return storageSummary(studioId, true);
 };
 
-const chargeMonth = (studioId: string, blocks: number, blockMb: number, price: number, at = new Date()) =>
+const chargeMonth = (
+  studioId: string,
+  blocks: number,
+  blockMb: number,
+  price: number,
+  at = new Date(),
+) =>
   addExtraCharge({
     studioId,
     kind: "STORAGE_OVERAGE",
@@ -164,7 +219,13 @@ export const billStorageForMonth = async () => {
     where: { storageExtraBlocks: { gt: 0 }, plan: { not: "STOREFRONT" } },
     select: { id: true, storageExtraBlocks: true },
   });
-  for (const s of studios) await chargeMonth(s.id, s.storageExtraBlocks, cfg.storageBlockMb, cfg.storageBlockPrice);
+  for (const s of studios)
+    await chargeMonth(
+      s.id,
+      s.storageExtraBlocks,
+      cfg.storageBlockMb,
+      cfg.storageBlockPrice,
+    );
   return { studiosBilled: studios.length };
 };
 
@@ -172,23 +233,42 @@ export const billStorageForMonth = async () => {
 
 export const platformStorageSettings = async () => {
   const c = await config();
-  return { standardMb: c.storageStandardMb, premiumMb: c.storagePremiumMb, blockMb: c.storageBlockMb, blockPrice: c.storageBlockPrice };
+  return {
+    standardMb: c.storageStandardMb,
+    premiumMb: c.storagePremiumMb,
+    blockMb: c.storageBlockMb,
+    blockPrice: c.storageBlockPrice,
+  };
 };
 
-export const savePlatformStorageSettings = async (input: Record<string, unknown>) => {
+export const savePlatformStorageSettings = async (
+  input: Record<string, unknown>,
+) => {
   const whole = (v: unknown, label: string, min: number, max: number) => {
     const n = Math.trunc(Number(v));
-    if (!Number.isFinite(n) || n < min || n > max) throw new ApiError(`${label} should be between ${min} and ${max}`, 400);
+    if (!Number.isFinite(n) || n < min || n > max)
+      throw new ApiError(`${label} should be between ${min} and ${max}`, 400);
     return n;
   };
   const price = Math.round(Number(input.blockPrice) * 100) / 100;
-  if (!Number.isFinite(price) || price < 0 || price > 10000) throw new ApiError("The block price should be between 0 and 10,000", 400);
+  if (!Number.isFinite(price) || price < 0 || price > 10000)
+    throw new ApiError("The block price should be between 0 and 10,000", 400);
   const c = await config();
   await raw.platformConfig.update({
     where: { id: c.id },
     data: {
-      storageStandardMb: whole(input.standardMb, "Standard storage (MB)", 50, 1_000_000),
-      storagePremiumMb: whole(input.premiumMb, "Premium storage (MB)", 50, 1_000_000),
+      storageStandardMb: whole(
+        input.standardMb,
+        "Standard storage (MB)",
+        50,
+        1_000_000,
+      ),
+      storagePremiumMb: whole(
+        input.premiumMb,
+        "Premium storage (MB)",
+        50,
+        1_000_000,
+      ),
       storageBlockMb: whole(input.blockMb, "Block size (MB)", 10, 100_000),
       storageBlockPrice: price,
     },

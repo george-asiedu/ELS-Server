@@ -19,6 +19,8 @@ export const createWhatsappWorker = (): Worker<WhatsappJobData> => {
       stalledInterval: 5 * 60_000,
     },
   );
-  worker.on("failed", (job, err) => console.error(`WhatsApp job ${job?.id} failed: ${err.message}`));
+  worker.on("failed", (job, err) =>
+    console.error(`WhatsApp job ${job?.id} failed: ${err.message}`),
+  );
   return worker;
 };

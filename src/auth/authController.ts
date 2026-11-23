@@ -119,7 +119,10 @@ export class AuthController {
     return res.status(200).json(result);
   };
 
-  public static twoFactorRecoveryCodes = async (req: Request, res: Response) => {
+  public static twoFactorRecoveryCodes = async (
+    req: Request,
+    res: Response,
+  ) => {
     const result = await regenerateRecoveryCodes(req.user!.id, req.body?.code);
     return res.status(200).json(result);
   };

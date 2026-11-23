@@ -123,7 +123,9 @@ export class S3BucketService {
         ? 2 * 1024 * 1024 * 1024
         : input.category === "studio"
           ? 4 * 1024 * 1024
-          : input.category === "profiles" || input.category === "appointments" || input.category === "requests"
+          : input.category === "profiles" ||
+              input.category === "appointments" ||
+              input.category === "requests"
             ? 10 * 1024 * 1024
             : 25 * 1024 * 1024;
     if (
@@ -192,7 +194,9 @@ export class S3BucketService {
         ? 2 * 1024 * 1024 * 1024
         : category === "studio"
           ? 4 * 1024 * 1024
-          : category === "profiles" || category === "appointments" || category === "requests"
+          : category === "profiles" ||
+              category === "appointments" ||
+              category === "requests"
             ? 10 * 1024 * 1024
             : 25 * 1024 * 1024;
     const uploadedParts = await this.s3.send(

@@ -13,10 +13,18 @@ const studio = () => {
 };
 
 // Scheduled sales: Black Friday and the like.
-router.get("/", authenticate, requireAdmin, async (_req, res) => res.status(200).json(await service.list()));
-router.post("/", authenticate, requireAdmin, async (req, res) => res.status(201).json(await service.create(studio(), req.body ?? {})));
+router.get("/", authenticate, requireAdmin, async (_req, res) =>
+  res.status(200).json(await service.list()),
+);
+router.post("/", authenticate, requireAdmin, async (req, res) =>
+  res.status(201).json(await service.create(studio(), req.body ?? {})),
+);
 router.patch("/:id", authenticate, requireAdmin, async (req, res) =>
-  res.status(200).json(await service.update(studio(), String(req.params.id), req.body ?? {})),
+  res
+    .status(200)
+    .json(
+      await service.update(studio(), String(req.params.id), req.body ?? {}),
+    ),
 );
 router.delete("/:id", authenticate, requireAdmin, async (req, res) =>
   res.status(200).json(await service.remove(studio(), String(req.params.id))),

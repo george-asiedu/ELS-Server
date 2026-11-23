@@ -30,7 +30,12 @@ router.get(
   UserDirectoryController.studioDetail,
 );
 // The business's private notes about a customer.
-router.put("/users/:id/notes", authenticate, requireAdmin, UserDirectoryController.studioNotes);
+router.put(
+  "/users/:id/notes",
+  authenticate,
+  requireAdmin,
+  UserDirectoryController.studioNotes,
+);
 
 // Admin: what customers paid and what Paystack has paid out to the studio.
 router.get("/money", authenticate, requireAdmin, StudioController.getMoney);
@@ -87,8 +92,18 @@ router.post(
   requireAdmin,
   StudioController.startRenewal,
 );
-router.post("/billing/extras", authenticate, requireAdmin, StudioController.startExtrasPayment);
-router.post("/billing/extras/apply", authenticate, requireAdmin, StudioController.applyExtrasPayment);
+router.post(
+  "/billing/extras",
+  authenticate,
+  requireAdmin,
+  StudioController.startExtrasPayment,
+);
+router.post(
+  "/billing/extras/apply",
+  authenticate,
+  requireAdmin,
+  StudioController.applyExtrasPayment,
+);
 router.post(
   "/billing/renew/apply",
   authenticate,
@@ -105,15 +120,35 @@ router.put(
 );
 router.get("/payout", authenticate, requireAdmin, StudioController.getPayout);
 // Who pays Paystack's fee on customer payments: the customer or the business.
-router.get("/messaging", authenticate, requireAdmin, StudioController.getMessaging);
+router.get(
+  "/messaging",
+  authenticate,
+  requireAdmin,
+  StudioController.getMessaging,
+);
 // Invite another business: the invite link and how many joined through it.
 router.get("/referrals", authenticate, requireAdmin, async (req, res) => {
   const { referralSummary } = await import("../billing/businessReferral");
   return res.status(200).json({ data: await referralSummary(req.studioId!) });
 });
-router.put("/messaging", authenticate, requireAdmin, StudioController.setMessaging);
-router.get("/fee-payer", authenticate, requireAdmin, StudioController.getFeePayer);
-router.put("/fee-payer", authenticate, requireAdmin, StudioController.setFeePayer);
+router.put(
+  "/messaging",
+  authenticate,
+  requireAdmin,
+  StudioController.setMessaging,
+);
+router.get(
+  "/fee-payer",
+  authenticate,
+  requireAdmin,
+  StudioController.getFeePayer,
+);
+router.put(
+  "/fee-payer",
+  authenticate,
+  requireAdmin,
+  StudioController.setFeePayer,
+);
 router.get(
   "/payout/resolve",
   authenticate,

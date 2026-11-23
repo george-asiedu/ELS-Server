@@ -139,10 +139,14 @@ export const featureRequestFeeSet = (
   const color = brandColor(brand);
   const free = data.amount <= 0;
   return {
-    subject: free ? `No fee for your feature request: ${data.title}` : `A fee for your feature request: ${data.title}`,
+    subject: free
+      ? `No fee for your feature request: ${data.title}`
+      : `A fee for your feature request: ${data.title}`,
     html: renderShell({
       brand,
-      previewText: free ? `${data.title} is free` : `${data.title}: GHS ${data.amount.toFixed(2)}`,
+      previewText: free
+        ? `${data.title} is free`
+        : `${data.title}: GHS ${data.amount.toFixed(2)}`,
       documentType: "Feature request",
       bodyHtml: `
         <h1 style="margin: 0 0 12px; font-family: Georgia, serif; font-size: 22px; color: #2A1B1F; text-align: center;">${free ? "This one is free" : "Here's what it will cost"}</h1>
