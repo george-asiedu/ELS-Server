@@ -68,7 +68,8 @@ const hexToRgb = (hex: string | null | undefined): RGB | null => {
 
 const luminance = ([r, g, b]: RGB) => (0.299 * r + 0.587 * g + 0.114 * b) / 255;
 // White on dark colours, ink on light ones.
-const onColor = (c: RGB): RGB => (luminance(c) > 0.6 ? ZURI_INK : [255, 255, 255]);
+const onColor = (c: RGB): RGB =>
+  luminance(c) > 0.6 ? ZURI_INK : [255, 255, 255];
 // A lighter tint of a colour, for the logo tile.
 const tint = (c: RGB, amount: number): RGB => [
   Math.round(c[0] + (255 - c[0]) * amount),
@@ -118,9 +119,14 @@ export const buildReceiptPdf = (input: ReceiptPdfInput): GeneratedPdf => {
   doc.setFont("helvetica", "bold");
   doc.setFontSize(26);
   doc.setTextColor(...(custom ? bandText : accentText));
-  doc.text(input.studioName.trim().charAt(0).toUpperCase() || "Z", left + 28, 70, {
-    align: "center",
-  });
+  doc.text(
+    input.studioName.trim().charAt(0).toUpperCase() || "Z",
+    left + 28,
+    70,
+    {
+      align: "center",
+    },
+  );
 
   doc.setFontSize(21);
   doc.setTextColor(...bandText);
@@ -156,7 +162,7 @@ export const buildReceiptPdf = (input: ReceiptPdfInput): GeneratedPdf => {
     return x + w + 10;
   };
   const paidInFull = input.status === "PAID";
-  let px = pill(
+  const px = pill(
     paidInFull ? "PAID IN FULL" : "DEPOSIT PAID",
     paidInFull ? GREEN : AMBER,
     paidInFull ? GREEN_BG : AMBER_BG,
