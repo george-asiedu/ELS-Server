@@ -111,11 +111,12 @@ export const env = {
   // Encrypts authenticator-app secrets (32 random bytes, base64). Optional:
   // without it a key is derived from JWT_SECRET. Set it in production, and
   // never change it once set, or everyone's two-step sign-in stops working.
-  // Studio admins and the super admin must turn on two-step sign-in before
-  // using their dashboards. On unless REQUIRE_2FA_FOR_ADMINS=false.
+  // Two-step sign-in is optional for studio admins and the super admin: they
+  // can turn it on from their security settings, but it never blocks the
+  // dashboard. Set REQUIRE_2FA_FOR_ADMINS=true to make it mandatory again.
   require2faForAdmins:
-    (process.env.REQUIRE_2FA_FOR_ADMINS ?? "true").trim().toLowerCase() !==
-    "false",
+    (process.env.REQUIRE_2FA_FOR_ADMINS ?? "false").trim().toLowerCase() ===
+    "true",
   // Cloudflare Turnstile (the security check on guest actions). Required in production.
   turnstileSecret: (process.env.TURNSTILE_SECRET_KEY as string) || "",
   // Optional extra fixed guest keys (the live key is managed in the super admin).
