@@ -158,7 +158,8 @@ export const env = {
   // Session cookie SameSite. "lax" when the site and API share a domain; "none"
   // only for a cross-site development setup (e.g. Vercel + Render).
   cookieSameSite: (process.env.COOKIE_SAMESITE === "none" ? "none" : "lax") as
-    "none" | "lax",
+    | "none"
+    | "lax",
   paystack: {
     // Paystack's fee on a local Ghana payment, in percent. Used to add the fee
     // for customers when a business has them pay it.
