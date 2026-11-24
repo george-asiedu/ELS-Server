@@ -83,7 +83,9 @@ export const env = {
   // run against this Redis instance and jobs are processed in the background
   // with retries. When unset, the app still works: emails send synchronously
   // inline and there's no reconciliation sweep — see src/queue/README.md.
-  redisUrl: (process.env.REDIS_URL as string) || "",
+  // Hosting dashboards (e.g. Render) keep quotes pasted from a .env file as
+  // part of the value, which breaks the connection, so strip them.
+  redisUrl: (process.env.REDIS_URL ?? "").trim().replace(/^["']|["']$/g, ""),
   // Recurring jobs (reconciliation, reminders) run from this process. On by
   // default only in production, so a laptop pointed at a shared database
   // doesn't start sending reminder emails. Set SCHEDULER_ENABLED=true|false to

@@ -6,8 +6,19 @@ import { env } from "../config/env.config";
 // limiter an independent key namespace. Without REDIS_URL, express-rate-limit
 // uses its built-in in-process store (suitable for local/single-instance use).
 const redis = env.redisUrl
-  ? new Redis(env.redisUrl, { maxRetriesPerRequest: 1 })
+  ? new Redis(env.redisUrl, {
+      maxRetriesPerRequest: 1,
+      // Fail fast when Redis is unreachable instead of queueing commands, and
+      // cap each command, so a Redis problem never slows API requests down.
+      enableOfflineQueue: false,
+      commandTimeout: 300,
+    })
   : null;
+// An unhandled "error" event would crash the process; the store errors are
+// already handled per request (passOnStoreError).
+redis?.on("error", (err) =>
+  console.error("Rate-limit Redis error:", err.message),
+);
 
 export const rateLimitStore = (namespace: string) => {
   if (!redis) return undefined;

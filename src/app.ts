@@ -119,7 +119,9 @@ const limitMessage = (message: string) => ({ status: "fail", message });
 
 const withRateLimitStore = (namespace: string) => {
   const store = rateLimitStore(namespace);
-  return store ? { store } : {};
+  // passOnStoreError: if Redis is down or over quota, let the request through
+  // (logged by express-rate-limit) instead of failing every protected route.
+  return store ? { store, passOnStoreError: true } : {};
 };
 
 app.use(
