@@ -160,34 +160,38 @@ export class NotificationService extends Connection {
     }
 
     const sender = await this.senderFor(args);
+    const payload = {
+      ...sender,
+      to: args.to,
+      subject: args.subject,
+      html: args.html,
+      ...(args.attachments?.length ? { attachments: args.attachments } : {}),
+    };
+    const sendInline = async () => {
+      await sendEmailNow(payload);
+      await this.notificationLog.update({
+        where: { id: log.id },
+        data: { status: "SENT", sentAt: new Date() },
+      });
+    };
     try {
       if (emailQueue) {
-        await emailQueue.add("send", {
-          ...sender,
-          to: args.to,
-          subject: args.subject,
-          html: args.html,
-          ...(args.attachments?.length
-            ? { attachments: args.attachments }
-            : {}),
-        });
-        // Stays "QUEUED" — the worker does the actual send; we don't have a
-        // "delivered" signal without Plunk webhooks (documented as a
+        // BullMQ waits forever while Redis is unreachable, which would hang
+        // the request (e.g. the signup email code). Give the enqueue a few
+        // seconds, then send the email directly instead.
+        const enqueued = await Promise.race([
+          emailQueue.add("send", payload).then(() => true),
+          new Promise<false>((resolve) => setTimeout(resolve, 3000, false)),
+        ]);
+        if (!enqueued) {
+          console.error("Email queue unreachable — sending inline instead.");
+          await sendInline();
+        }
+        // Otherwise stays "QUEUED" — the worker does the actual send; we don't
+        // have a "delivered" signal without Plunk webhooks (documented as a
         // follow-up in notifications/README.md).
       } else {
-        await sendEmailNow({
-          ...sender,
-          to: args.to,
-          subject: args.subject,
-          html: args.html,
-          ...(args.attachments?.length
-            ? { attachments: args.attachments }
-            : {}),
-        });
-        await this.notificationLog.update({
-          where: { id: log.id },
-          data: { status: "SENT", sentAt: new Date() },
-        });
+        await sendInline();
       }
     } catch (error) {
       await this.notificationLog.update({
