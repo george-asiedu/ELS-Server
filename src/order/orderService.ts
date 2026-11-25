@@ -967,7 +967,9 @@ export class OrderService extends Connection {
       customerFirstName:
         (order.customerName ?? "there").split(" ")[0] || "there",
       stage: order.status as
-        "PREPARING" | "READY_FOR_PICKUP" | "OUT_FOR_DELIVERY",
+        | "PREPARING"
+        | "READY_FOR_PICKUP"
+        | "OUT_FOR_DELIVERY",
       eta: order.deliveryEta,
       handoverCode: order.handoverCode,
       ...(brand.kind === "studio" && brand.studio.bookingUrl
