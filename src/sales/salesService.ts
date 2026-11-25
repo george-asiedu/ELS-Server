@@ -1,6 +1,7 @@
 import { Connection } from "../db/dbConnection";
 import { ApiError } from "../middleware/apiError";
 import { createTenantClient } from "../tenant/tenantClient";
+import { round2 } from "../utils/money";
 
 // Scheduled sales (Black Friday and the like) for a studio's or store's shop.
 //
@@ -12,7 +13,6 @@ import { createTenantClient } from "../tenant/tenantClient";
 
 const { raw } = createTenantClient();
 const DAY = 86_400_000;
-const round2 = (n: number) => Math.round(n * 100) / 100;
 const midnight = (d = new Date()) =>
   new Date(d.toISOString().slice(0, 10) + "T00:00:00.000Z");
 const iso = (d: Date) => d.toISOString().slice(0, 10);

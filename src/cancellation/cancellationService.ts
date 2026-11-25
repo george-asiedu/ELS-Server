@@ -10,6 +10,7 @@ import {
 import { refundedByStudio } from "../notifications/templates/refund";
 import { notifyStudioAdmins, notifyUsers } from "../push/pushService";
 import { getTenantContext } from "../tenant/context";
+import { round2 } from "../utils/money";
 
 // Cancellations and refunds without moving money through the platform.
 //
@@ -20,7 +21,6 @@ import { getTenantContext } from "../tenant/context";
 // Payment refunds through Paystack stay off: they'd come out of the platform's
 // balance, not the studio's (see refund/refundService.ts).
 
-const round2 = (n: number) => Math.round(n * 100) / 100;
 const bad = (message: string, code = 400) => new ApiError(message, code);
 
 const cleanReason = (v: unknown) =>

@@ -19,6 +19,7 @@ import { notifyStudioAdmins } from "../push/pushService";
 import { runWithTenant } from "../tenant/context";
 import { createTenantClient } from "../tenant/tenantClient";
 import { studioLink } from "../utils/studioLink";
+import { round2 } from "../utils/money";
 
 // Bills for walk-ins. The owner builds one, the customer pays through its link
 // on their own phone, and it stays on record: paid online, paid in cash, or
@@ -26,7 +27,6 @@ import { studioLink } from "../utils/studioLink";
 // bookings and orders.
 
 const { raw } = createTenantClient();
-const round2 = (n: number) => Math.round(n * 100) / 100;
 const bad = (m: string, c = 400) => new ApiError(m, c);
 
 export interface BillLine {

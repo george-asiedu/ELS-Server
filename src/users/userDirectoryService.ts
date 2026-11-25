@@ -3,6 +3,7 @@ import { Connection } from "../db/dbConnection";
 import { ApiError } from "../middleware/apiError";
 import { HttpCode } from "../models/status_codes";
 import { revokeLoginSessions } from "../auth/sessionService";
+import { round2 } from "../utils/money";
 
 // Customer and admin accounts, for the super admin's Users tab (every
 // studio) and a studio admin's Customers page (their own studio only: the
@@ -21,8 +22,6 @@ export interface UserListQuery {
   page?: number | undefined;
   pageSize?: number | undefined;
 }
-
-const round2 = (n: number) => Math.round(n * 100) / 100;
 
 export class UserDirectoryService extends Connection {
   public async list(q: UserListQuery) {

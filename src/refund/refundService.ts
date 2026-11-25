@@ -14,6 +14,7 @@ import { buildReceiptPdf } from "../notifications/receiptPdf";
 import { ghs, receiptDate, receiptNumber } from "../notifications/format";
 import { platformBrand } from "../notifications/brand";
 import { MoneyLine } from "../notifications/types";
+import { round2 } from "../utils/money";
 
 export interface RefundActor {
   id?: string | null;
@@ -24,7 +25,6 @@ export interface RefundActor {
 // Money comparisons happen in pesewas (integers) so float representation can
 // never let a refund creep a fraction over what was collected.
 const toPesewas = (n: number) => Math.round(n * 100);
-const round2 = (n: number) => Math.round(n * 100) / 100;
 
 // What a refund is drawn against. A booking refund draws on its Payment, a
 // shop refund on its Order; the lock key is per source so refunds against

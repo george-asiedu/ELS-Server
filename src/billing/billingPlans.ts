@@ -22,7 +22,7 @@ export type Cadence = "MONTHLY" | "YEARLY";
 
 // Prices are set by the super admin (PlatformConfig); see planPriceFor and
 // loadBillingConfig in platform/platformService.
-export const toPesewas = (ghs: number): number => Math.round(ghs * 100);
+export { toPesewas } from "../utils/money";
 
 // End of a fresh billing period starting at `from`.
 export const addPeriod = (from: Date, cadence: Cadence): Date => {

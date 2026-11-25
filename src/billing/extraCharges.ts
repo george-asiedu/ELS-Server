@@ -1,11 +1,11 @@
 import { createTenantClient } from "../tenant/tenantClient";
+import { round2 } from "../utils/money";
 
 // Money a studio owes on top of its plan (a feature request fee, extra storage,
 // in-person training). Pending ones are added to the studio's next renewal and
 // marked billed once that renewal is paid. See StudioExtraCharge in the schema.
 
 const { raw } = createTenantClient();
-const round2 = (n: number) => Math.round(n * 100) / 100;
 
 type Kind = "FEATURE_REQUEST" | "STORAGE_OVERAGE" | "TRAINING" | "OTHER";
 
