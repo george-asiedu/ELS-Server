@@ -66,9 +66,55 @@ export const waiveExtraCharge = async (
   });
 };
 
+/**
+ * Feature request fees that repeat: once a request's first charge has been
+ * paid, its monthly fee is added to every renewal after it (x12 on a yearly
+ * plan). Computed live, so a changed or withdrawn fee takes effect at once.
+ */
+const recurringExtras = async (studioId: string, months: number) => {
+  const requests = await raw.featureRequest.findMany({
+    where: {
+      studioId,
+      monthlyFee: { gt: 0 },
+      status: { not: "DECLINED" },
+    },
+    select: { id: true, title: true, monthlyFee: true, feeSetAt: true },
+  });
+  if (!requests.length) return [];
+  const billed = await raw.studioExtraCharge.findMany({
+    where: {
+      studioId,
+      kind: "FEATURE_REQUEST",
+      status: "BILLED",
+      refId: { in: requests.map((r) => r.id) },
+    },
+    select: { refId: true },
+  });
+  const paidFirst = new Set(billed.map((b) => b.refId));
+  return requests
+    .filter((r) => paidFirst.has(r.id))
+    .map((r) => ({
+      id: `recurring-${r.id}`,
+      kind: "FEATURE_REQUEST" as const,
+      description: `Feature request, monthly${months > 1 ? ` (x${months})` : ""}: ${r.title}`,
+      amount: round2((r.monthlyFee ?? 0) * months),
+      createdAt: r.feeSetAt ?? new Date(),
+    }));
+};
+
 /** What's waiting for the next renewal. */
-export const pendingExtras = async (studioId: string) => {
-  const items = await raw.studioExtraCharge.findMany({
+export const pendingExtras = async (
+  studioId: string,
+  cadence: "MONTHLY" | "YEARLY" = "MONTHLY",
+  // Monthly feature fees belong to renewals only. A stand-alone "pay extras
+  // now" must not take them, or they would be charged twice.
+  withRecurring = true,
+) => {
+  const months = cadence === "YEARLY" ? 12 : 1;
+  const recurring = withRecurring
+    ? await recurringExtras(studioId, months)
+    : [];
+  const pending = await raw.studioExtraCharge.findMany({
     where: { studioId, status: "PENDING" },
     orderBy: { createdAt: "asc" },
     select: {
@@ -79,6 +125,7 @@ export const pendingExtras = async (studioId: string) => {
       createdAt: true,
     },
   });
+  const items = [...pending, ...recurring];
   return { items, total: round2(items.reduce((s, i) => s + i.amount, 0)) };
 };
 

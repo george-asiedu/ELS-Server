@@ -436,6 +436,7 @@ export class StudioService extends Connection {
         platformFeePercent: true,
         subscriptionStatus: true,
         currentPeriodEnd: true,
+        status: true,
         ...STUDIO_PRICE_SELECT,
       },
     });
@@ -455,7 +456,10 @@ export class StudioService extends Connection {
     // the platform earns its cut per transaction instead.
     const revenueShare = s.billingMode === "REVENUE_SHARE";
     const lapsed = revenueShare ? false : isLapsed(s.currentPeriodEnd);
-    const extras = await pendingExtras(id);
+    const extras = await pendingExtras(
+      id,
+      s.billingCadence === "YEARLY" ? "YEARLY" : "MONTHLY",
+    );
     return {
       message: "Billing",
       data: {
@@ -466,6 +470,9 @@ export class StudioService extends Connection {
         billingMode: s.billingMode,
         commissionPercent: revenueShare ? s.platformFeePercent : 0,
         yourPrices,
+        // A suspended account pays this on top of the plan to come back.
+        suspended: s.status === "SUSPENDED",
+        reactivationFee: s.status === "SUSPENDED" ? cfg.reactivationFee : 0,
         discountPercent: activeDiscount(s),
         discountEndsAt: activeDiscount(s) ? s.billingDiscountEndsAt : null,
         // Derived from the period end so the UI always reflects reality even if
@@ -495,16 +502,11 @@ export class StudioService extends Connection {
   ) {
     const studio = await this.studio.findUnique({
       where: { id: studioId },
-      select: STUDIO_PRICE_SELECT,
+      select: { ...STUDIO_PRICE_SELECT, status: true },
     });
+    const billingCfg = await loadBillingConfig();
     const promo = await promoPercent(rawPromo, plan);
-    const { amount } = studioPriceFor(
-      studio,
-      plan,
-      cadence,
-      await loadBillingConfig(),
-      promo,
-    );
+    const { amount } = studioPriceFor(studio, plan, cadence, billingCfg, promo);
     if (!(amount > 0)) {
       throw new ApiError(
         "This charge comes to nothing. Contact us to apply it.",
@@ -515,9 +517,16 @@ export class StudioService extends Connection {
     // request fees, extra storage, training), added after any promo discount.
     const extras =
       kind === "RENEWAL"
-        ? await pendingExtras(studioId)
+        ? await pendingExtras(studioId, cadence)
         : { items: [], total: 0 };
-    const chargeAmount = Math.round((amount + extras.total) * 100) / 100;
+    // Bringing a suspended account back costs the reactivation fee on top of
+    // the plan, so the total includes the subscription.
+    const reactivationFee =
+      kind === "RENEWAL" && studio?.status === "SUSPENDED"
+        ? billingCfg.reactivationFee
+        : 0;
+    const chargeAmount =
+      Math.round((amount + extras.total + reactivationFee) * 100) / 100;
     const email = await this.ownerEmail(studioId);
     const reference = `${kind === "RENEWAL" ? "ZURI-RENEW-" : "ZURI-BILLING-"}${shortId()}`;
     await this.studioBillingCharge.create({
@@ -639,7 +648,11 @@ export class StudioService extends Connection {
       select: { plan: true, billingCadence: true },
     });
     if (!studio) throw new ApiError("Studio not found", HttpCode.NOT_FOUND);
-    const extras = await pendingExtras(id);
+    const extras = await pendingExtras(
+      id,
+      studio.billingCadence === "YEARLY" ? "YEARLY" : "MONTHLY",
+      false,
+    );
     if (!(extras.total > 0))
       throw new ApiError(
         "There's nothing to pay right now",
@@ -1636,6 +1649,7 @@ export class StudioService extends Connection {
                   month: "long",
                   year: "numeric",
                 }),
+                reactivationFee: billingConfig.reactivationFee,
                 reactivateUrl: studioLink(studio.slug, "/admin/billing"),
               },
             );
@@ -1668,6 +1682,7 @@ export class StudioService extends Connection {
                   year: "numeric",
                 }),
                 amountDue,
+                reactivationFee: billingConfig.reactivationFee,
                 manageUrl: studioLink(studio.slug, "/admin/billing"),
               },
             );

@@ -241,10 +241,17 @@ export class OnboardingService extends Connection {
         HttpCode.BAD_GATEWAY,
       );
     }
-    // A billing promo takes its % off whatever is charged now.
+    // A billing promo takes its % off whatever is charged now. The welcome
+    // discount (set by the super admin) also applies to a plain first period,
+    // but not to a setup or activation fee. They don't stack: the bigger wins.
     const promo = await promoPercent(input.promoCode, plan);
+    const welcomePercent =
+      billingMode === "SUBSCRIPTION" && !setup
+        ? cfg.newStudioDiscountPercent
+        : 0;
     const amountPesewas = Math.round(
-      listPesewas * (1 - Math.min(100, promo.percent) / 100),
+      listPesewas *
+        (1 - Math.min(100, Math.max(promo.percent, welcomePercent)) / 100),
     );
 
     const reference = `${SIGNUP_PREFIX}${shortId()}`;
@@ -386,6 +393,14 @@ export class OnboardingService extends Connection {
         // Revenue-share: platform takes the plan's commission per transaction and
         // there's no billing period. Subscription: 0% cut, a period is set.
         platformFeePercent: revenueShare ? commissionFor(plan, cfg) : 0,
+        // Welcome discount on the plan price for the first months (subscription
+        // plans only; revenue-share pays a commission instead).
+        welcomeDiscount: revenueShare
+          ? null
+          : {
+              percent: cfg.newStudioDiscountPercent,
+              months: cfg.newStudioDiscountMonths,
+            },
         // A setup fee covers its months; otherwise the first paid period.
         // Either way the plan's normal price is due when this period ends.
         subscription: revenueShare
@@ -488,7 +503,7 @@ export class OnboardingService extends Connection {
               balanceDue: null,
               reference,
               paymentMethod: "Online payment",
-              paidToEmail: env.senderEmail,
+              paidToEmail: env.platformEmail,
               status: "PAID",
             })
           : null;

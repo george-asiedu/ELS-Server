@@ -68,7 +68,7 @@ export class FeatureRequestService extends Connection {
       const emails = admins.map((a) => a.email).filter(Boolean);
       // Fall back to the configured sender so a request is never silently
       // unreported if no SUPER_ADMIN row exists yet.
-      return emails.length ? emails : [env.senderEmail];
+      return emails.length ? emails : [env.platformEmail];
     });
   }
 
@@ -271,11 +271,22 @@ export class FeatureRequestService extends Connection {
    * The super admin decides what building this costs (0 = free). The fee is
    * added to the studio's next renewal, and the studio is told now.
    */
-  public async setFee(id: string, rawAmount: unknown) {
+  public async setFee(id: string, rawAmount: unknown, rawMonthly?: unknown) {
     const amount = Math.round(Number(rawAmount) * 100) / 100;
     if (!Number.isFinite(amount) || amount < 0 || amount > 100000) {
       throw new ApiError(
         "Enter a fee between 0 and 100,000",
+        HttpCode.BAD_REQUEST,
+      );
+    }
+    // What it adds to the plan every month after the first billing (optional).
+    const monthly =
+      rawMonthly === undefined || rawMonthly === null || rawMonthly === ""
+        ? 0
+        : Math.round(Number(rawMonthly) * 100) / 100;
+    if (!Number.isFinite(monthly) || monthly < 0 || monthly > 100000) {
+      throw new ApiError(
+        "Enter a monthly amount between 0 and 100,000",
         HttpCode.BAD_REQUEST,
       );
     }
@@ -290,7 +301,11 @@ export class FeatureRequestService extends Connection {
     }
     const updated = await this.featureRequest.update({
       where: { id },
-      data: { feeAmount: amount, feeSetAt: new Date() },
+      data: {
+        feeAmount: amount,
+        monthlyFee: monthly > 0 ? monthly : null,
+        feeSetAt: new Date(),
+      },
       include: { studio: { select: { id: true, name: true, slug: true } } },
     });
     await addExtraCharge({
@@ -298,13 +313,16 @@ export class FeatureRequestService extends Connection {
       kind: "FEATURE_REQUEST",
       refId: id,
       description: `Feature request: ${existing.title}`,
-      amount,
+      // The first renewal pays the one-off fee; with only a monthly amount set,
+      // the first renewal pays that month's amount.
+      amount: amount > 0 ? amount : monthly,
     });
     await this.notifyStudioOfFee(
       updated.id,
       updated.studioId,
       updated.title,
-      amount,
+      amount > 0 ? amount : monthly,
+      monthly,
     );
     return { message: "Fee set. The studio has been told.", data: updated };
   }
@@ -315,6 +333,7 @@ export class FeatureRequestService extends Connection {
     studioId: string,
     title: string,
     amount: number,
+    monthly = 0,
   ) {
     try {
       const to = await this.studioNotifyEmail(studioId);
@@ -325,7 +344,7 @@ export class FeatureRequestService extends Connection {
       if (to) {
         const { subject, html } = featureRequestFeeSet(
           await this.brandFor(studioId),
-          { title, amount, dashboardUrl },
+          { title, amount, monthly, dashboardUrl },
         );
         await this.notifications.send({
           template: NotificationTemplate.FEATURE_REQUEST_FEE_STUDIO,

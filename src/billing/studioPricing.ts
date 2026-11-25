@@ -40,16 +40,23 @@ export const promoPercent = async (rawCode: unknown, plan: Plan) => {
     .toUpperCase();
   if (!code) return { code: null, percent: 0 };
   const promo = await raw.billingPromo.findUnique({ where: { code } });
-  if (
-    !promo ||
-    !promo.active ||
-    (promo.expiresAt && promo.expiresAt < new Date()) ||
-    (promo.maxUses !== null && promo.usedCount >= promo.maxUses) ||
-    (promo.plans.length > 0 && !promo.plans.includes(plan))
-  ) {
-    throw new ApiError("That promo code isn't valid", HttpCode.BAD_REQUEST);
-  }
-  return { code: promo.code, percent: promo.percentOff };
+  // Say what is actually wrong, so the person knows whether to retype the code
+  // or whether it simply can't be used.
+  const fail = (message: string): never => {
+    throw new ApiError(message, HttpCode.BAD_REQUEST);
+  };
+  if (!promo)
+    fail(
+      `We couldn't find the promo code "${code}". Check the spelling and try again.`,
+    );
+  if (!promo!.active) fail("That promo code is no longer active.");
+  if (promo!.expiresAt && promo!.expiresAt < new Date())
+    fail("That promo code has expired.");
+  if (promo!.maxUses !== null && promo!.usedCount >= promo!.maxUses)
+    fail("That promo code has reached its limit and can't be used any more.");
+  if (promo!.plans.length > 0 && !promo!.plans.includes(plan))
+    fail("That promo code doesn't apply to the plan you chose.");
+  return { code: promo!.code, percent: promo!.percentOff };
 };
 
 /** Count a promo once the charge that used it is paid. */

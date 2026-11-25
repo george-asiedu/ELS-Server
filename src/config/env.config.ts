@@ -63,7 +63,13 @@ export const env = {
       "",
     ),
   },
+  // The address emails are sent FROM (verified with the email provider).
   senderEmail: process.env.SENDER_EMAIL as string,
+  // The address shown to people as the platform contact: support lines in
+  // emails, "paid to" on receipts, and where platform alerts fall back to.
+  // Separate from senderEmail so the From address can stay as it is.
+  platformEmail:
+    (process.env.PLATFORM_EMAIL as string)?.trim() || "zuristudios53@gmail.com",
   // Plunk transactional email (replaces SendGrid). apiUrl is overridable in case
   // the account is on a different Plunk host.
   //
@@ -148,8 +154,7 @@ export const env = {
     publicKey: (process.env.VAPID_PUBLIC_KEY as string) || "",
     privateKey: (process.env.VAPID_PRIVATE_KEY as string) || "",
     subject:
-      (process.env.VAPID_SUBJECT as string) ||
-      "mailto:customersupport@zuristudios.com",
+      (process.env.VAPID_SUBJECT as string) || "mailto:zuristudios53@gmail.com",
   },
   // Studio slug used when a request carries no studio hint (subdomain/header).
   // Apex host of the platform, e.g. "app.example.com"; its subdomains are
@@ -158,8 +163,7 @@ export const env = {
   // Session cookie SameSite. "lax" when the site and API share a domain; "none"
   // only for a cross-site development setup (e.g. Vercel + Render).
   cookieSameSite: (process.env.COOKIE_SAMESITE === "none" ? "none" : "lax") as
-    | "none"
-    | "lax",
+    "none" | "lax",
   paystack: {
     // Paystack's fee on a local Ghana payment, in percent. Used to add the fee
     // for customers when a business has them pay it.

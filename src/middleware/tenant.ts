@@ -65,7 +65,17 @@ export const resolveTenant = async (
     if (!studio) {
       throw new ApiError("Studio not found", HttpCode.NOT_FOUND);
     }
-    if (studio.status === "SUSPENDED") {
+    // A suspended studio's owner can still sign in and pay to come back; every
+    // other request (the public site, customers, the rest of the dashboard)
+    // stays blocked.
+    const suspendedMayPass =
+      req.path.startsWith("/studio/billing") ||
+      req.path.startsWith("/auth/login") ||
+      req.path.startsWith("/auth/refresh") ||
+      req.path.startsWith("/auth/logout") ||
+      req.path === "/auth/me" ||
+      req.path === "/me";
+    if (studio.status === "SUSPENDED" && !suspendedMayPass) {
       throw new ApiError(
         "This studio is currently unavailable",
         HttpCode.FORBIDDEN,

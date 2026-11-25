@@ -3,7 +3,13 @@ import { S3BucketService } from "../bucket/s3BucketService";
 import { studioPriceFor } from "../billing/studioPricing";
 import { Connection } from "../db/dbConnection";
 import { ApiError } from "../middleware/apiError";
-import { isLapsed, byPlan, planName, type Plan } from "../billing/billingPlans";
+import {
+  isLapsed,
+  byPlan,
+  planName,
+  addMonths,
+  type Plan,
+} from "../billing/billingPlans";
 import { HttpCode } from "../models/status_codes";
 import { getPasswordHash } from "../utils/helper";
 import { toWhatsappNumber, WHATSAPP_NUMBER_HINT } from "../utils/whatsapp";
@@ -101,6 +107,12 @@ export interface BillingConfig {
   pricePremiumYearly: number;
   priceStorefrontMonthly: number;
   priceStorefrontYearly: number;
+  // Welcome discount for new subscription signups: % off the plan price for
+  // the first N months. 0% = off.
+  newStudioDiscountPercent: number;
+  newStudioDiscountMonths: number;
+  // Added to a renewal that brings a suspended account back (GHS, 0 = none).
+  reactivationFee: number;
 }
 
 type PlatformConfigRow = Omit<
@@ -154,6 +166,9 @@ const toBillingConfig = (row: PlatformConfigRow): BillingConfig => {
     pricePremiumYearly: yearlyFrom(premiumMonthly),
     priceStorefrontMonthly: storefrontMonthly,
     priceStorefrontYearly: yearlyFrom(storefrontMonthly),
+    newStudioDiscountPercent: row.newStudioDiscountPercent,
+    newStudioDiscountMonths: row.newStudioDiscountMonths,
+    reactivationFee: row.reactivationFee,
   };
 };
 
@@ -346,6 +361,8 @@ export interface ProvisionCoreInput {
     currentPeriodEnd?: Date | null;
   };
   settingsOverride?: StudioSettingsInput;
+  // Welcome discount: % off for the first `months` months from now.
+  welcomeDiscount?: { percent: number; months: number } | null;
 }
 
 type StudioStatus = "ACTIVE" | "SUSPENDED" | "TRIAL";
@@ -459,6 +476,15 @@ export class PlatformService extends Connection {
         pricePremiumYearly: yearlyFrom(premiumMonthly),
         priceStorefrontMonthly: storefrontMonthly,
         priceStorefrontYearly: yearlyFrom(storefrontMonthly),
+        newStudioDiscountPercent: clampPct(
+          input.newStudioDiscountPercent,
+          current.newStudioDiscountPercent,
+        ),
+        newStudioDiscountMonths: months(
+          input.newStudioDiscountMonths,
+          current.newStudioDiscountMonths,
+        ),
+        reactivationFee: nonNeg(input.reactivationFee, current.reactivationFee),
       },
     });
     return { message: "Billing config updated", data: toBillingConfig(row) };
@@ -1356,6 +1382,15 @@ export class PlatformService extends Connection {
           ? { currentPeriodEnd: sub.currentPeriodEnd }
           : {}),
         ...(customDomain ? { customDomain } : {}),
+        ...(input.welcomeDiscount && input.welcomeDiscount.percent > 0
+          ? {
+              billingDiscountPercent: input.welcomeDiscount.percent,
+              billingDiscountEndsAt: addMonths(
+                new Date(),
+                input.welcomeDiscount.months,
+              ),
+            }
+          : {}),
       },
     });
 
@@ -1509,7 +1544,8 @@ export class PlatformService extends Connection {
             platformBrandForPlan(studio.plan),
             {
               studioName: studio.name,
-              supportEmail: env.senderEmail,
+              supportEmail: env.platformEmail,
+              reactivationFee: (await this.getBillingConfig()).reactivationFee,
             },
           );
           await this.notifications.send({

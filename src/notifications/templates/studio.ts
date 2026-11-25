@@ -48,7 +48,7 @@ export const studioCreated = (
 
 export const studioAccountSuspended = (
   brand: EmailBrand,
-  data: { studioName: string; supportEmail: string },
+  data: { studioName: string; supportEmail: string; reactivationFee?: number },
 ) => ({
   subject: "Action required for your studio account",
   html: renderShell({
@@ -61,6 +61,11 @@ export const studioAccountSuspended = (
         <strong>${esc(data.studioName)}</strong> has been suspended and its storefront is currently unavailable to
         customers. If you believe this is a mistake, or would like to resolve it, please contact us at
         <a class="accent" href="mailto:${esc(data.supportEmail)}" style="color: #947400;">${esc(data.supportEmail)}</a>.
-      </p>`,
+      </p>
+      ${
+        data.reactivationFee && data.reactivationFee > 0
+          ? `<p style="margin: 12px 0 0; font-family: Arial, sans-serif; font-size: 14px; color: #2A1B1F; line-height: 1.6; text-align: center;">To bring it back, renew your plan from your dashboard. A suspended account pays its plan price <strong>plus a GHS ${data.reactivationFee.toFixed(2)} reactivation fee</strong>.</p>`
+          : ""
+      }`,
   }),
 });

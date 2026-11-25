@@ -3,6 +3,7 @@ import { authenticate, requireAdmin } from "../middleware/auth";
 import { getTenantContext } from "../tenant/context";
 import { ApiError } from "../middleware/apiError";
 import { requestInPerson, trainingInfo } from "./trainingService";
+import { verifyLearnSteps } from "./stepChecks";
 
 const router: Router = Router();
 const studio = () => {
@@ -14,6 +15,10 @@ const studio = () => {
 // A studio's view: the free live session and its own in-person requests.
 router.get("/", authenticate, requireAdmin, async (_req, res) =>
   res.status(200).json({ data: await trainingInfo(studio()) }),
+);
+// Which Learn steps the business has really done, proven from its own data.
+router.get("/steps", authenticate, requireAdmin, async (_req, res) =>
+  res.status(200).json({ data: await verifyLearnSteps(studio()) }),
 );
 router.post("/requests", authenticate, requireAdmin, async (req, res) =>
   res.status(201).json({

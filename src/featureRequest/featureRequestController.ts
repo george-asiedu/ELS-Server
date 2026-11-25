@@ -42,7 +42,9 @@ export class FeatureRequestController {
   public static platformSetFee = async (req: Request, res: Response) => {
     const { id } = req.params;
     if (!id) throw new ApiError("Request id is required", HttpCode.BAD_REQUEST);
-    return res.status(200).json(await service.setFee(id, req.body?.fee));
+    return res
+      .status(200)
+      .json(await service.setFee(id, req.body?.fee, req.body?.monthly));
   };
 
   public static withdraw = async (req: Request, res: Response) => {

@@ -304,6 +304,10 @@ model FeatureRequest {
   // decided; 0 means free. Added to the studio's next renewal.
   feeAmount       Float?
   feeSetAt        DateTime?
+  // What it adds to the studio's plan EVERY month after the first billing (GHS).
+  // The first renewal charges feeAmount; each renewal after that adds this on
+  // top of the plan (x12 for a yearly plan). Null/0 = no recurring addition.
+  monthlyFee      Float?
   // Pictures that show what they mean (up to 5), uploaded with the request.
   images          String[] @default([])
 
@@ -597,6 +601,14 @@ model PlatformConfig {
   subscriptionSetupFeeStorefront Float  @default(0)
   commissionStorefrontPercent    Float  @default(5)
   setupFeeStorefront             Float  @default(0)
+
+  // Welcome discount: every new subscription studio or store gets this % off
+  // its plan price for its first `newStudioDiscountMonths` months. 0 = off.
+  newStudioDiscountPercent Float @default(0)
+  newStudioDiscountMonths  Int   @default(6)
+  // Extra charged (GHS) on top of the plan price to bring a SUSPENDED account
+  // back. It is added to the renewal, so the total is plan + this. 0 = none.
+  reactivationFee          Float @default(0)
 
   // Public site details shown on the platform pages. Null = the frontend's
   // built-in default.

@@ -134,10 +134,17 @@ export const featureRequestStatusChanged = (
 /** Sent to the studio admin when the platform sets what a feature request costs. */
 export const featureRequestFeeSet = (
   brand: EmailBrand,
-  data: { title: string; amount: number; dashboardUrl?: string },
+  data: {
+    title: string;
+    amount: number;
+    // Added to the plan price every month after the first billing (0 = none).
+    monthly?: number;
+    dashboardUrl?: string;
+  },
 ) => {
   const color = brandColor(brand);
   const free = data.amount <= 0;
+  const monthly = data.monthly ?? 0;
   return {
     subject: free
       ? `No fee for your feature request: ${data.title}`
@@ -151,7 +158,13 @@ export const featureRequestFeeSet = (
       bodyHtml: `
         <h1 style="margin: 0 0 12px; font-family: Georgia, serif; font-size: 22px; color: #2A1B1F; text-align: center;">${free ? "This one is free" : "Here's what it will cost"}</h1>
         <p style="margin: 0 0 16px; font-family: Arial, sans-serif; font-size: 15px; color: #2A1B1F; line-height: 1.6; text-align: center;">
-          ${free ? "There's no charge for building this." : `Building this carries a one-off fee of <strong>GHS ${data.amount.toFixed(2)}</strong>. It will be added to your next renewal, and you can see it on your Billing page.`}
+          ${
+            free
+              ? "There's no charge for building this."
+              : monthly > 0
+                ? `Building this adds <strong>GHS ${data.amount.toFixed(2)}</strong> to your next renewal, on top of your plan. From the renewal after that, <strong>GHS ${monthly.toFixed(2)} a month</strong> is added to your plan price for as long as you keep it. You can see it on your Billing page.`
+                : `Building this carries a one-off fee of <strong>GHS ${data.amount.toFixed(2)}</strong>. It will be added to your next renewal, and you can see it on your Billing page.`
+          }
           If you'd rather not go ahead, you can withdraw the request before work starts and the fee is removed.
         </p>
         <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin: 0 0 8px; border: 1px solid #EADFE1; border-radius: 12px; border-left: 4px solid ${color};">

@@ -6,12 +6,20 @@ import { EmailBrand } from "../types";
 // Only covers SUBSCRIPTION billing mode: REVENUE_SHARE studios have no
 // billing period to expire, so these never fire for them (see registry.ts).
 
+// A suspended account pays a reactivation fee on top of its plan to come back.
+// Said in every expiry notice so it's no surprise.
+export const reactivationNote = (fee?: number) =>
+  fee && fee > 0
+    ? `<p style="margin: 12px 0 0; font-family: Arial, sans-serif; font-size: 13px; color: #7A6A6E; line-height: 1.6; text-align: center;">If an account is left unpaid and gets suspended, bringing it back costs your plan price <strong>plus a GHS ${fee.toFixed(2)} reactivation fee</strong>. Renewing on time avoids it.</p>`
+    : "";
+
 export const subscriptionExpiringSoon = (
   brand: EmailBrand,
   data: {
     planName: string;
     renewsOn: string;
     amountDue: string;
+    reactivationFee?: number;
     manageUrl: string;
   },
 ) => ({
@@ -28,13 +36,19 @@ export const subscriptionExpiringSoon = (
         (${esc(data.amountDue)}). Renew from your dashboard before then to avoid any interruption —
         plans don't renew automatically.
       </p>
+      ${reactivationNote(data.reactivationFee)}
       ${button("Manage Subscription", data.manageUrl, "#FBC500")}`,
   }),
 });
 
 export const subscriptionExpired = (
   brand: EmailBrand,
-  data: { planName: string; expiredOn: string; reactivateUrl: string },
+  data: {
+    planName: string;
+    expiredOn: string;
+    reactivationFee?: number;
+    reactivateUrl: string;
+  },
 ) => ({
   subject: "Your Zuri plan has expired",
   html: renderShell({
@@ -48,6 +62,7 @@ export const subscriptionExpired = (
         Your <strong>${esc(data.planName)}</strong> plan expired on <strong>${esc(data.expiredOn)}</strong> and your
         storefront may be unavailable to customers until you renew.
       </p>
+      ${reactivationNote(data.reactivationFee)}
       ${button("Reactivate Subscription", data.reactivateUrl, "#FBC500")}`,
   }),
 });

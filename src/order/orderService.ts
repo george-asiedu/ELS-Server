@@ -469,17 +469,30 @@ export class OrderService extends Connection {
     const coupon = code
       ? await this.coupon.findFirst({ where: { code } })
       : null;
-    if (
-      !coupon ||
-      !coupon.active ||
-      (coupon.expiresAt && coupon.expiresAt < new Date()) ||
-      (coupon.maxUses !== null && coupon.usedCount >= coupon.maxUses)
-    ) {
-      throw new ApiError("That code isn't valid", 400);
+    // Say what is actually wrong, so the customer knows whether to retype it
+    // or whether it simply can't be used.
+    if (!code) throw new ApiError("Enter a coupon code first.", 400);
+    if (!coupon) {
+      throw new ApiError(
+        `We couldn't find the coupon "${code}". Check the spelling and try again.`,
+        400,
+      );
+    }
+    if (!coupon.active) {
+      throw new ApiError("This coupon is no longer active.", 400);
+    }
+    if (coupon.expiresAt && coupon.expiresAt < new Date()) {
+      throw new ApiError("This coupon has expired.", 400);
+    }
+    if (coupon.maxUses !== null && coupon.usedCount >= coupon.maxUses) {
+      throw new ApiError(
+        "This coupon has been fully used and can't be applied any more.",
+        400,
+      );
     }
     if (subtotal < coupon.minSubtotal) {
       throw new ApiError(
-        `This code needs an order of at least GHS ${coupon.minSubtotal}`,
+        `This coupon needs an order of at least GHS ${coupon.minSubtotal}. Add GHS ${Math.round((coupon.minSubtotal - subtotal) * 100) / 100} more to use it.`,
         400,
       );
     }
@@ -954,9 +967,7 @@ export class OrderService extends Connection {
       customerFirstName:
         (order.customerName ?? "there").split(" ")[0] || "there",
       stage: order.status as
-        | "PREPARING"
-        | "READY_FOR_PICKUP"
-        | "OUT_FOR_DELIVERY",
+        "PREPARING" | "READY_FOR_PICKUP" | "OUT_FOR_DELIVERY",
       eta: order.deliveryEta,
       handoverCode: order.handoverCode,
       ...(brand.kind === "studio" && brand.studio.bookingUrl

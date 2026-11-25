@@ -9,7 +9,7 @@ export const platformBrand: EmailBrand = {
   zuri: {
     name: "Zuri",
     websiteUrl: env.clientUrl,
-    supportEmail: env.senderEmail,
+    supportEmail: env.platformEmail,
   },
 };
 
@@ -27,7 +27,7 @@ export const platformBrandForPlan = (plan?: string | null): EmailBrand => ({
   zuri: {
     name: zuriNameForPlan(plan),
     websiteUrl: env.clientUrl,
-    supportEmail: env.senderEmail,
+    supportEmail: env.platformEmail,
   },
 });
 
@@ -39,7 +39,7 @@ export const storefrontFallbackBrand: EmailBrand = {
   zuri: {
     name: "Zuri",
     websiteUrl: "https://zuristudios.com",
-    supportEmail: "customersupport@zuristudios.com",
+    supportEmail: env.platformEmail,
   },
 };
 
