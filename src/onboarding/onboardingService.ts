@@ -7,6 +7,7 @@ import { ApiError } from "../middleware/apiError";
 import { HttpCode } from "../models/status_codes";
 import { env } from "../config/env.config";
 import { getPasswordHash } from "../utils/helper";
+import { assertStrongPassword } from "../auth/passwordPolicy";
 import { runAsSuperAdmin } from "../tenant/context";
 import { paystack } from "../payment/paystackClient";
 import { AuditService } from "../audit/auditService";
@@ -42,10 +43,6 @@ type BillingMode = "SUBSCRIPTION" | "REVENUE_SHARE";
 
 const EMAIL_PROOF_PURPOSE = "signup-email";
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-// Min 8 chars with an uppercase, lowercase, number, and special character —
-// matches the login/signup validators so a new owner can sign in right after.
-const PASSWORD_RE =
-  /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[!@#$%^&*()_+\-=[\]{};'"\\|,.<>/?]).{8,}$/;
 
 // Signup references are prefixed so the shared Paystack webhook can tell a
 // studio-billing payment apart from a booking/order payment.
@@ -180,15 +177,9 @@ export class OnboardingService extends Connection {
       throw new ApiError("A valid email is required", HttpCode.BAD_REQUEST);
     }
     this.assertEmailProof(input.emailToken, ownerEmail);
-    const ownerPassword = String(input.ownerPassword ?? "");
-    // Enforce the SAME rules the login/signup validators use, so an owner can
-    // actually sign in afterwards with the password they set here.
-    if (!PASSWORD_RE.test(ownerPassword)) {
-      throw new ApiError(
-        "Password must be at least 8 characters and include an uppercase letter, a lowercase letter, a number, and a special character.",
-        HttpCode.BAD_REQUEST,
-      );
-    }
+    // The same rule as every other password, so the owner can sign in, reset
+    // and change it later without surprises.
+    const ownerPassword = assertStrongPassword(input.ownerPassword);
     const plan: Plan = isPlan(input.plan) ? input.plan : "STANDARD";
     // What the shop sells: required for Zuri Stores, optional for
     // Premium's shop, not used by booking-only Standard.

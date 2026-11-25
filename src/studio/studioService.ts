@@ -20,6 +20,7 @@ import {
   isLapsed,
   subtractPeriod,
   isPlan,
+  planName as planNameFor,
 } from "../billing/billingPlans";
 import {
   STUDIO_PRICE_SELECT,
@@ -1630,12 +1631,7 @@ export class StudioService extends Connection {
         if (!owner?.email) continue;
 
         const lapsed = isLapsed(studio.currentPeriodEnd);
-        const planName =
-          studio.plan === "PREMIUM"
-            ? "Premium"
-            : studio.plan === "STOREFRONT"
-              ? "Storefront"
-              : "Standard";
+        const planName = planNameFor(studio.plan);
         const periodKey = studio.currentPeriodEnd.toISOString().slice(0, 10);
 
         try {

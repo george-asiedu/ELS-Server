@@ -1,4 +1,5 @@
 import { assertSignInCode } from "../auth/twoFactor";
+import { assertStrongPassword } from "../auth/passwordPolicy";
 import { randomBytes, createHash } from "crypto";
 import { Connection } from "../db/dbConnection";
 import { ApiError } from "../middleware/apiError";
@@ -187,6 +188,8 @@ export class PlatformAuthService extends Connection {
         HttpCode.BAD_REQUEST,
       );
     }
+    // The most powerful account needs at least the rule everyone else has.
+    assertStrongPassword(newPassword);
     const hashedToken = createHash("sha256").update(token).digest("hex");
     const user = await this.user.findFirst({
       where: { resetToken: hashedToken, role: "SUPER_ADMIN" },

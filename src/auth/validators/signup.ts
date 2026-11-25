@@ -1,4 +1,10 @@
 import Ajv, { JSONSchemaType } from "ajv";
+import {
+  PASSWORD_MAX_LENGTH,
+  PASSWORD_MIN_LENGTH,
+  PASSWORD_PATTERN,
+  PASSWORD_RULE_MESSAGE,
+} from "../passwordPolicy";
 import addFormats from "ajv-formats";
 import addErrors from "ajv-errors";
 import { Signup } from "../../models/user";
@@ -20,16 +26,14 @@ const signupSchema: JSONSchemaType<Signup> = {
     },
     password: {
       type: "string",
-      minLength: 8,
-      maxLength: 32,
-      pattern:
-        "^(?=.*[a-z])(?=.*[A-Z])(?=.*\\d)(?=.*[!@#$%^&*()_+\\-=[\\]{};'\"\\\\|,.<>/?]).+$",
+      minLength: PASSWORD_MIN_LENGTH,
+      maxLength: PASSWORD_MAX_LENGTH,
+      pattern: PASSWORD_PATTERN,
       errorMessage: {
         type: "Password must be a string",
-        minLength: "Password must be at least 8 characters long",
-        maxLength: "Password must not exceed 32 characters",
-        pattern:
-          "Password must contain at least one uppercase letter, one lowercase letter, one number, and one special character",
+        minLength: PASSWORD_RULE_MESSAGE,
+        maxLength: `Password must not exceed ${PASSWORD_MAX_LENGTH} characters`,
+        pattern: PASSWORD_RULE_MESSAGE,
       },
     },
     fullName: {
