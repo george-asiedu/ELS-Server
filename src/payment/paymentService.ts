@@ -14,11 +14,8 @@ import { forgetStudioSlug } from "../tenant/studioResolver";
 import { AuditService } from "../audit/auditService";
 import { LedgerService } from "../ledger/ledgerService";
 import { RefundService } from "../refund/refundService";
-import {
-  StudioService,
-  isStudioBillingReference,
-} from "../studio/studioService";
-import { S3BucketService } from "../bucket/s3BucketService";
+import { isStudioBillingReference } from "../studio/studioService";
+import { StudioBillingService } from "../billing/studioBillingService";
 import { safeClientOrigin } from "../utils/helper";
 import { runAsSuperAdmin } from "../tenant/context";
 import { NotificationService } from "../notifications/notificationService";
@@ -81,7 +78,7 @@ export class PaymentService extends Connection {
   private audit = new AuditService();
   private ledger = new LedgerService();
   private refunds = new RefundService();
-  private studioBilling = new StudioService(new S3BucketService());
+  private studioBilling = new StudioBillingService();
 
   private async settings() {
     const existing = await this.paymentSettings.findFirst();

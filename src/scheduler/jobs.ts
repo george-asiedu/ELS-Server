@@ -171,12 +171,10 @@ export const JOBS: JobDefinition[] = [
     scheduleLabel: "Daily at 08:00",
     maxRunMinutes: 15,
     run: async () => {
-      const { StudioService } = await import("../studio/studioService");
-      const { S3BucketService } = await import("../bucket/s3BucketService");
+      const { StudioBillingService } =
+        await import("../billing/studioBillingService");
       return {
-        ...(await new StudioService(
-          new S3BucketService(),
-        ).checkBillingReminders()),
+        ...(await new StudioBillingService().checkBillingReminders()),
       };
     },
   },
