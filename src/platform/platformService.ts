@@ -356,6 +356,10 @@ export interface ProvisionCoreInput {
   billingMode?: "SUBSCRIPTION" | "REVENUE_SHARE";
   // What a shop sells (picks its website template). Null for booking-only.
   shopCategory?: string | null;
+  // Everything it sells; the first is shopCategory.
+  shopCategories?: string[];
+  // Kinds of studio it is; the first picks the website's wording.
+  studioTypes?: string[];
   // Platform's per-transaction cut (subaccount percentage_charge). Set for
   // REVENUE_SHARE studios from the plan's configured commission; 0 otherwise.
   platformFeePercent?: number;
@@ -630,9 +634,12 @@ export class PlatformService extends Connection {
         name: true,
         slug: true,
         shopCategory: true,
+        shopCategories: true,
         settings: { select: { booking: true, commerce: true } },
         branding: { select: { logoUrl: true } },
-        content: { select: { heroImageUrl: true, aboutText: true } },
+        content: {
+          select: { heroImageUrl: true, aboutText: true, studioTypes: true },
+        },
       },
       orderBy: { createdAt: "asc" },
     });
@@ -699,6 +706,7 @@ export class PlatformService extends Connection {
           slug: st.slug,
           kind: booking ? ("studio" as const) : ("store" as const),
           shopCategory: st.shopCategory,
+          shopCategories: st.shopCategories,
           area: contacts.find((c) => c.studioId === st.id)?.address ?? null,
           about: st.content?.aboutText?.slice(0, 160) ?? null,
           logoUrl: s3.deliveryUrl(st.branding?.logoUrl ?? null),
@@ -714,6 +722,8 @@ export class PlatformService extends Connection {
               .filter((c) => c.studioId === st.id)
               .map((c) => c.name),
             st.shopCategory ?? "",
+            ...st.shopCategories,
+            ...(st.content?.studioTypes ?? []).map((t) => t.replace(/-/g, " ")),
           ]
             .join(" ")
             .toLowerCase(),
@@ -1041,6 +1051,11 @@ export class PlatformService extends Connection {
         ...(input.cadence ? { billingCadence: input.cadence } : {}),
         ...(input.billingMode ? { billingMode: input.billingMode } : {}),
         ...(input.shopCategory ? { shopCategory: input.shopCategory } : {}),
+        ...(input.shopCategories?.length
+          ? { shopCategories: input.shopCategories }
+          : input.shopCategory
+            ? { shopCategories: [input.shopCategory] }
+            : {}),
         ...(input.platformFeePercent !== undefined
           ? { platformFeePercent: input.platformFeePercent }
           : {}),
@@ -1106,6 +1121,12 @@ export class PlatformService extends Connection {
         studioId: studio.id,
         heroHeadline: input.name,
         showTestimonials: true,
+        ...(input.studioTypes?.length
+          ? {
+              studioType: input.studioTypes[0]!,
+              studioTypes: input.studioTypes,
+            }
+          : {}),
       },
     });
 

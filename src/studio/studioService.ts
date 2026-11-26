@@ -1,4 +1,5 @@
 import { PAID_ORDER_STATUSES } from "../order/orderStatus";
+import { STUDIO_TYPES, isStudioType, parseStudioTypes } from "./studioTypes";
 import { Connection } from "../db/dbConnection";
 import { S3BucketService } from "../bucket/s3BucketService";
 import { ApiError } from "../middleware/apiError";
@@ -9,7 +10,7 @@ import { whatsappConfigured } from "../whatsapp/whatsappService";
 import { randomUUID } from "crypto";
 import { promises as dns } from "dns";
 import { StudioBillingService } from "../billing/studioBillingService";
-import { isShopCategory } from "../billing/shopCategories";
+import { isShopCategory, parseShopCategories } from "../billing/shopCategories";
 import {
   resolveStudioByDomain,
   forgetStudioDomain,
@@ -113,19 +114,9 @@ const sanitizeFeatureCards = (value: unknown): FeatureCard[] | undefined => {
 export const isStudioBillingReference = (reference: string) =>
   reference.startsWith("ZURI-RENEW-") || reference.startsWith("ZURI-BILLING-");
 
-// Kinds of studio (the website's default wording) and website layouts.
+// Kinds of studio live in studio/studioTypes.ts; website layouts here.
 // Mirrored by the frontend's lib/studioTemplates.ts.
-export const STUDIO_TYPES = [
-  "hair",
-  "braids",
-  "nails",
-  "lashes-brows",
-  "makeup",
-  "skin-spa",
-  "barber",
-  "wellness",
-  "general",
-] as const;
+export { STUDIO_TYPES };
 export const SITE_TEMPLATES = ["editorial", "bold", "minimal"] as const;
 
 export class StudioService extends Connection {
@@ -160,6 +151,8 @@ export class StudioService extends Connection {
       slug: studio.slug,
       // What the shop sells: picks the shop website's design.
       shopCategory: studio.shopCategory ?? null,
+      // Everything the shop sells; the first is shopCategory.
+      shopCategories: studio.shopCategories,
       plan: studio.plan,
       branding: {
         logoUrl: this.s3.deliveryUrl(studio.branding?.logoUrl ?? null) ?? null,
@@ -439,6 +432,10 @@ export class StudioService extends Connection {
       studioType:
         (content as { studioType?: string | null } | null | undefined)
           ?.studioType ?? null,
+      // Every kind the studio offers; the first is studioType.
+      studioTypes:
+        (content as { studioTypes?: string[] } | null | undefined)
+          ?.studioTypes ?? [],
       siteTemplate:
         (content as { siteTemplate?: string | null } | null | undefined)
           ?.siteTemplate ?? null,
@@ -917,8 +914,10 @@ export class StudioService extends Connection {
       featureCards?: unknown;
       showTestimonials?: unknown;
       studioType?: unknown;
+      studioTypes?: unknown;
       siteTemplate?: unknown;
       shopCategory?: unknown;
+      shopCategories?: unknown;
     },
   ) {
     const id = this.requireStudioId(studioId);
@@ -929,6 +928,7 @@ export class StudioService extends Connection {
       featureCards?: FeatureCard[];
       showTestimonials?: boolean;
       studioType?: string | null;
+      studioTypes?: string[];
       siteTemplate?: string | null;
     } = {};
 
@@ -974,17 +974,51 @@ export class StudioService extends Connection {
       }
       return v;
     };
-    if (input.studioType !== undefined)
+    if (input.studioTypes !== undefined) {
+      // Several kinds; the first is the main one and picks the wording.
+      const list = Array.isArray(input.studioTypes) ? input.studioTypes : [];
+      if (list.some((t) => !isStudioType(t))) {
+        throw new ApiError("Unknown studio type", HttpCode.BAD_REQUEST);
+      }
+      const types = parseStudioTypes(list);
+      data.studioTypes = types;
+      data.studioType = types[0] ?? null;
+    } else if (input.studioType !== undefined) {
       data.studioType = choice(input.studioType, STUDIO_TYPES, "studio type");
+    }
     // What the shop sells lives on the studio itself (set at signup).
-    if (input.shopCategory !== undefined) {
+    if (input.shopCategories !== undefined) {
+      // Several kinds; the first is the main one and picks the design.
+      const list = Array.isArray(input.shopCategories)
+        ? input.shopCategories
+        : [];
+      if (list.some((c) => !isShopCategory(c))) {
+        throw new ApiError("Unknown shop category", HttpCode.BAD_REQUEST);
+      }
+      const cats = parseShopCategories(list);
+      await this.studio.update({
+        where: { id },
+        data: { shopCategories: cats, shopCategory: cats[0] ?? null },
+      });
+    } else if (input.shopCategory !== undefined) {
       const cat = input.shopCategory;
       if (cat !== null && cat !== "" && !isShopCategory(cat)) {
         throw new ApiError("Unknown shop category", HttpCode.BAD_REQUEST);
       }
+      // A new main kind goes first; the others the shop sells are kept.
+      const current = await this.studio.findUnique({
+        where: { id },
+        select: { shopCategories: true },
+      });
+      const main = (cat as string | null) || null;
       await this.studio.update({
         where: { id },
-        data: { shopCategory: (cat as string | null) || null },
+        data: {
+          shopCategory: main,
+          shopCategories: main
+            ? parseShopCategories([main, ...(current?.shopCategories ?? [])])
+            : [],
+        },
       });
     }
     if (input.siteTemplate !== undefined)
@@ -1012,11 +1046,12 @@ export class StudioService extends Connection {
   ) {
     const studio = await this.studio.findUnique({
       where: { id },
-      select: { shopCategory: true },
+      select: { shopCategory: true, shopCategories: true },
     });
     return {
       ...this.publicContent(content),
       shopCategory: studio?.shopCategory ?? null,
+      shopCategories: studio?.shopCategories ?? [],
     };
   }
 

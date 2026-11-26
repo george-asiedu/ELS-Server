@@ -150,6 +150,9 @@ model Studio {
   // What a shop sells (clothing, food, perfume...), picked at signup. Chooses
   // the shop website template. Null for booking-only studios.
   shopCategory           String?
+  // Every kind of product the shop sells (a shop can sell several). The first
+  // is shopCategory, which picks the design; all of them help people find it.
+  shopCategories         String[] @default([])
   // Mobile-money settlement account the subaccount pays out to (display only;
   // the authoritative copy lives on Paystack).
   // Settlement account type: "momo" (mobile money) or "bank".
@@ -238,6 +241,8 @@ model StudioContent {
   // What kind of studio (hair, nails, spa...): picks the website's default
   // wording. Null = general beauty studio.
   studioType       String?
+  // Every kind of service the studio offers; the first is studioType.
+  studioTypes      String[] @default([])
   // The website's layout: editorial, bold or minimal. Null = editorial.
   siteTemplate     String?
 
@@ -422,6 +427,9 @@ model StudioSignup {
   cadence           BillingCadence @default(MONTHLY)
   billingMode       BillingMode    @default(SUBSCRIPTION)
   shopCategory      String?
+  shopCategories    String[]       @default([])
+  // Kinds of studio picked at signup (the first is the main one).
+  studioTypes       String[]       @default([])
   // The inviting business's address (slug), from ?ref= on the signup link.
   referralSlug      String?
   promoCode         String?

@@ -1,4 +1,5 @@
 import { rewardBusinessReferral } from "../billing/businessReferral";
+import { parseStudioTypes } from "../studio/studioTypes";
 import jwt from "jsonwebtoken";
 import { shortId } from "../utils/shortId";
 import { studioLink } from "../utils/studioLink";
@@ -28,7 +29,10 @@ import {
   isPlan,
   planName,
 } from "../billing/billingPlans";
-import { isShopCategory, type ShopCategory } from "../billing/shopCategories";
+import {
+  parseShopCategories,
+  type ShopCategory,
+} from "../billing/shopCategories";
 import { NotificationService } from "../notifications/notificationService";
 import { buildReceiptPdf } from "../notifications/receiptPdf";
 import { ghs, receiptNumber } from "../notifications/format";
@@ -161,6 +165,8 @@ export class OnboardingService extends Connection {
     cadence?: unknown;
     billingMode?: unknown;
     shopCategory?: unknown;
+    shopCategories?: unknown;
+    studioTypes?: unknown;
   }) {
     const name = String(input.name ?? "").trim();
     if (name.length < 2 || name.length > 60) {
@@ -183,16 +189,22 @@ export class OnboardingService extends Connection {
     const plan: Plan = isPlan(input.plan) ? input.plan : "STANDARD";
     // What the shop sells: required for Zuri Stores, optional for
     // Premium's shop, not used by booking-only Standard.
-    let shopCategory: ShopCategory | null = null;
+    let shopCategories: ShopCategory[] = [];
     if (plan !== "STANDARD") {
-      if (isShopCategory(input.shopCategory)) shopCategory = input.shopCategory;
-      else if (plan === "STOREFRONT") {
+      shopCategories = parseShopCategories(
+        input.shopCategories,
+        input.shopCategory,
+      );
+      if (!shopCategories.length && plan === "STOREFRONT") {
         throw new ApiError(
           "Tell us what you'll be selling",
           HttpCode.BAD_REQUEST,
         );
       }
     }
+    // What a studio does (booking plans): optional; the first is the main kind.
+    const studioTypes =
+      plan === "STOREFRONT" ? [] : parseStudioTypes(input.studioTypes);
     const cadence: Cadence = input.cadence === "YEARLY" ? "YEARLY" : "MONTHLY";
 
     // Revenue-share is only selectable when the super admin has enabled it;
@@ -259,7 +271,10 @@ export class OnboardingService extends Connection {
         plan,
         cadence,
         billingMode,
-        ...(shopCategory ? { shopCategory } : {}),
+        ...(shopCategories.length
+          ? { shopCategory: shopCategories[0]!, shopCategories }
+          : {}),
+        ...(studioTypes.length ? { studioTypes } : {}),
         reference,
         ...(promo.code ? { promoCode: promo.code } : {}),
         // An invite link from another business (checked when provisioning).
@@ -381,6 +396,8 @@ export class OnboardingService extends Connection {
         cadence,
         billingMode,
         shopCategory: signup.shopCategory ?? null,
+        shopCategories: signup.shopCategories,
+        studioTypes: signup.studioTypes,
         // Revenue-share: platform takes the plan's commission per transaction and
         // there's no billing period. Subscription: 0% cut, a period is set.
         platformFeePercent: revenueShare ? commissionFor(plan, cfg) : 0,
