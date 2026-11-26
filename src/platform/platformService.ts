@@ -494,6 +494,18 @@ export class PlatformService extends Connection {
 
   // ---- Listing / detail -------------------------------------------------
 
+  /**
+   * Every studio's id, name and address, for filter menus. Cheap on purpose:
+   * the full listStudios() adds up every studio's payments and earnings, which
+   * menus that only show names should not pay for on every page load.
+   */
+  public async listStudioOptions() {
+    return this.studio.findMany({
+      select: { id: true, name: true, slug: true },
+      orderBy: { name: "asc" },
+    });
+  }
+
   public async listStudios() {
     const studios = await this.studio.findMany({
       orderBy: { createdAt: "desc" },

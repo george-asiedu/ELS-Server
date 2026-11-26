@@ -91,6 +91,8 @@ router.post("/guest-key/rotate", async (req, res) => {
 router.get("/site-settings", PlatformController.getSiteSettings);
 router.patch("/site-settings", PlatformController.updateSiteSettings);
 
+// Just ids and names, for filter menus. Declared before /studios/:id.
+router.get("/studios/options", PlatformController.listStudioOptions);
 router.get("/studios", PlatformController.listStudios);
 router.post("/studios", PlatformController.createStudio);
 router.get("/studios/:id", PlatformController.getStudio);

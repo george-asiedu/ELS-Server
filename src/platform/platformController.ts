@@ -166,6 +166,10 @@ export class PlatformController {
       .json({ message: "Site settings saved", data: after });
   };
 
+  public static listStudioOptions = async (_req: Request, res: Response) => {
+    return res.status(200).json(await platformService.listStudioOptions());
+  };
+
   public static listStudios = async (_req: Request, res: Response) => {
     const result = await platformService.listStudios();
     return res.status(200).json(result);
