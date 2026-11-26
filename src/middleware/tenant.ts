@@ -31,7 +31,9 @@ const studioSlugFromRequest = (req: Request): string | null => {
 const isPlatformPath = (path: string) =>
   path.startsWith("/platform") ||
   path.startsWith("/onboarding") ||
-  path === "/studio/resolve-domain";
+  path === "/studio/resolve-domain" ||
+  // Crawler page heads: finds the studio from ?host= itself (seo/routes.ts).
+  path === "/seo/page";
 const isWebhookPath = (path: string) => path.endsWith("/webhook");
 
 /**
