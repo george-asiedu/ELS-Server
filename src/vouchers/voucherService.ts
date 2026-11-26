@@ -1,4 +1,9 @@
 import { randomInt } from "crypto";
+import {
+  CursorPage,
+  cursorPageArgs,
+  cursorPageResult,
+} from "../utils/cursorPagination";
 import { Connection, TenantTx } from "../db/dbConnection";
 import { ApiError } from "../middleware/apiError";
 import { paystack, PaystackVerifyData } from "../payment/paystackClient";
@@ -413,9 +418,9 @@ export class VoucherService extends Connection {
    * to their email. The code is shown only to the person who can use it, so a
    * gift bought for someone else lists who it went to, not its code.
    */
-  public async mine(userId: string, userEmail: string) {
+  public async mine(userId: string, userEmail: string, page: CursorPage) {
     const email = userEmail.toLowerCase();
-    const rows = await this.voucher.findMany({
+    const found = await this.voucher.findMany({
       where: {
         status: { not: "PENDING" },
         OR: [
@@ -424,8 +429,10 @@ export class VoucherService extends Connection {
           { recipientEmail: email },
         ],
       },
-      orderBy: { createdAt: "desc" },
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      ...cursorPageArgs(page),
     });
+    const { data: rows, pagination } = cursorPageResult(found, page);
     const services = new Map(
       (
         await this.service.findMany({
@@ -441,6 +448,7 @@ export class VoucherService extends Connection {
       ).map((sv) => [sv.id, sv.name]),
     );
     return {
+      pagination,
       data: rows.map((v) => {
         const forSomeoneElse =
           v.kind === "GIFT_CARD" &&
@@ -469,13 +477,13 @@ export class VoucherService extends Connection {
 
   // ---- Admin
 
-  public async list() {
-    const data = await this.voucher.findMany({
+  public async list(page: CursorPage) {
+    const rows = await this.voucher.findMany({
       where: { status: { not: "PENDING" } },
-      orderBy: { createdAt: "desc" },
-      take: 200,
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      ...cursorPageArgs(page),
     });
-    return { data };
+    return cursorPageResult(rows, page);
   }
 
   /** In person: take an amount off a gift card, or use a package session. */

@@ -1,4 +1,9 @@
 import { PAID_ORDER_STATUSES } from "../order/orderStatus";
+import {
+  CursorPage,
+  cursorPageArgs,
+  cursorPageResult,
+} from "../utils/cursorPagination";
 import { S3BucketService } from "../bucket/s3BucketService";
 import { studioPriceFor } from "../billing/studioPricing";
 import { Connection } from "../db/dbConnection";
@@ -506,11 +511,21 @@ export class PlatformService extends Connection {
     });
   }
 
-  public async listStudios() {
-    const studios = await this.studio.findMany({
-      orderBy: { createdAt: "desc" },
+  /**
+   * One page of studios for the super admin's table, newest first, optionally
+   * of one status. Counts are only worked out for the studios on this page.
+   */
+  public async listStudios(page: CursorPage, status?: string) {
+    const rows = await this.studio.findMany({
+      ...(status === "ACTIVE" || status === "SUSPENDED" || status === "TRIAL"
+        ? { where: { status } }
+        : {}),
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
       include: { settings: true },
+      ...cursorPageArgs(page),
     });
+    const { data: studios, pagination } = cursorPageResult(rows, page);
+    const pageIds = studios.map((s) => s.id);
 
     // Owner emails in one query.
     const ownerIds = studios
@@ -527,10 +542,12 @@ export class PlatformService extends Connection {
     // Per-studio member + booking counts (unscoped groupBy under superAdmin).
     const userCounts = await this.user.groupBy({
       by: ["studioId"],
+      where: { studioId: { in: pageIds } },
       _count: { _all: true },
     });
     const apptCounts = await this.appointment.groupBy({
       by: ["studioId"],
+      where: { studioId: { in: pageIds } },
       _count: { _all: true },
     });
     const countBy = (
@@ -560,7 +577,7 @@ export class PlatformService extends Connection {
     );
     const r2 = (n: number | undefined) => Math.round((n ?? 0) * 100) / 100;
 
-    return studios.map((s) => ({
+    const data = studios.map((s) => ({
       id: s.id,
       name: s.name,
       slug: s.slug,
@@ -583,6 +600,7 @@ export class PlatformService extends Connection {
       settings: s.settings,
       createdAt: s.createdAt,
     }));
+    return { data, pagination };
   }
 
   // ---- Earnings (lives in platform/platformEarningsService) ------------
@@ -604,7 +622,7 @@ export class PlatformService extends Connection {
    * with what customers need to choose one. Optional search over name, area
    * and services, and a filter for studios or stores.
    */
-  public async getDirectory(q: unknown, kind: unknown) {
+  public async getDirectory(q: unknown, kind: unknown, page: CursorPage) {
     const studios = await this.studio.findMany({
       where: { status: "ACTIVE" },
       select: {
@@ -709,7 +727,20 @@ export class PlatformService extends Connection {
           !query || query.split(/\s+/).every((w) => d.searchText.includes(w)),
       )
       .map(({ searchText: _searchText, ...rest }) => rest);
-    return { message: "Directory", data };
+    // Paged after the search: the cursor is the offset into the results.
+    const offset = Math.max(0, Number(page.cursor ?? 0) || 0);
+    const slice = data.slice(offset, offset + page.limit);
+    const hasMore = offset + page.limit < data.length;
+    return {
+      message: "Directory",
+      data: slice,
+      pagination: {
+        limit: page.limit,
+        hasMore,
+        nextCursor: hasMore ? String(offset + page.limit) : null,
+        total: data.length,
+      },
+    };
   }
 
   /**

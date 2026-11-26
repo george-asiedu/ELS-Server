@@ -1,4 +1,5 @@
 import { Request, Response, Router } from "express";
+import { parseCursorPage } from "../utils/cursorPagination";
 import { authenticate, optionalAuth, requireAdmin } from "../middleware/auth";
 import { VoucherService } from "./voucherService";
 
@@ -31,7 +32,15 @@ router.get("/check", async (req: Request, res: Response) =>
 
 // Customers: their own gift cards and packages.
 router.get("/mine", authenticate, async (req: Request, res: Response) =>
-  res.status(200).json(await service.mine(req.user!.id, req.user!.email)),
+  res
+    .status(200)
+    .json(
+      await service.mine(
+        req.user!.id,
+        req.user!.email,
+        parseCursorPage(req.query.cursor, req.query.limit, 20),
+      ),
+    ),
 );
 
 // Admin.
@@ -39,8 +48,14 @@ router.get(
   "/",
   authenticate,
   requireAdmin,
-  async (_req: Request, res: Response) =>
-    res.status(200).json(await service.list()),
+  async (req: Request, res: Response) =>
+    res
+      .status(200)
+      .json(
+        await service.list(
+          parseCursorPage(req.query.cursor, req.query.limit, 25),
+        ),
+      ),
 );
 router.post(
   "/:id/redeem",

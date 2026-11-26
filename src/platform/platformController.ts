@@ -1,4 +1,5 @@
 import { Request, Response } from "express";
+import { parseCursorPage } from "../utils/cursorPagination";
 import {
   loadBillingConfig,
   loadSiteSettings,
@@ -84,7 +85,13 @@ export class PlatformController {
   public static directory = async (req: Request, res: Response) => {
     return res
       .status(200)
-      .json(await platformService.getDirectory(req.query.q, req.query.kind));
+      .json(
+        await platformService.getDirectory(
+          req.query.q,
+          req.query.kind,
+          parseCursorPage(req.query.cursor, req.query.limit, 24),
+        ),
+      );
   };
 
   public static publicStats = async (_req: Request, res: Response) => {
@@ -170,8 +177,11 @@ export class PlatformController {
     return res.status(200).json(await platformService.listStudioOptions());
   };
 
-  public static listStudios = async (_req: Request, res: Response) => {
-    const result = await platformService.listStudios();
+  public static listStudios = async (req: Request, res: Response) => {
+    const result = await platformService.listStudios(
+      parseCursorPage(req.query.cursor, req.query.limit, 15),
+      typeof req.query.status === "string" ? req.query.status : undefined,
+    );
     return res.status(200).json(result);
   };
 
