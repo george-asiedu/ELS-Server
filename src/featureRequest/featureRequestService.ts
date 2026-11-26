@@ -1,4 +1,9 @@
 import { Connection } from "../db/dbConnection";
+import {
+  CursorPage,
+  cursorPageArgs,
+  cursorPageResult,
+} from "../utils/cursorPagination";
 import { ApiError } from "../middleware/apiError";
 import { HttpCode } from "../models/status_codes";
 import { NotificationService } from "../notifications/notificationService";
@@ -194,34 +199,43 @@ export class FeatureRequestService extends Connection {
     }
   }
 
-  public async listForStudio(studioId: string | null | undefined) {
+  public async listForStudio(
+    studioId: string | null | undefined,
+    page: CursorPage,
+  ) {
     const id = this.requireStudioId(studioId);
-    const requests = await this.featureRequest.findMany({
+    const rows = await this.featureRequest.findMany({
       where: { studioId: id },
-      orderBy: { createdAt: "desc" },
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      ...cursorPageArgs(page),
     });
+    const { data, pagination } = cursorPageResult(rows, page);
     return {
       message: "Feature requests",
-      data: requests.map((r) => this.shown(r)),
+      data: data.map((r) => this.shown(r)),
+      pagination,
     };
   }
 
   // ---- Platform (super-admin) side --------------------------------------
 
-  public async listAll(status?: string) {
+  public async listAll(status: string | undefined, page: CursorPage) {
     const where =
       status &&
       FEATURE_REQUEST_STATUSES.includes(status as FeatureRequestStatus)
         ? { status: status as FeatureRequestStatus }
         : {};
-    const requests = await this.featureRequest.findMany({
+    const rows = await this.featureRequest.findMany({
       where,
-      orderBy: { createdAt: "desc" },
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
       include: { studio: { select: { id: true, name: true, slug: true } } },
+      ...cursorPageArgs(page),
     });
+    const { data, pagination } = cursorPageResult(rows, page);
     return {
       message: "Feature requests",
-      data: requests.map((r) => this.shown(r)),
+      pagination,
+      data: data.map((r) => this.shown(r)),
     };
   }
 

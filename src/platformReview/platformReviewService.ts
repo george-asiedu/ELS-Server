@@ -1,4 +1,9 @@
 import { Connection } from "../db/dbConnection";
+import {
+  CursorPage,
+  cursorPageArgs,
+  cursorPageResult,
+} from "../utils/cursorPagination";
 import { ApiError } from "../middleware/apiError";
 import { HttpCode } from "../models/status_codes";
 
@@ -84,10 +89,12 @@ export class PlatformReviewService extends Connection {
   }
 
   // ---- Super admin ----
-  public async listAll() {
-    const reviews = await this.platformReview.findMany({
-      orderBy: { createdAt: "desc" },
+  public async listAll(page: CursorPage) {
+    const rows = await this.platformReview.findMany({
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      ...cursorPageArgs(page),
     });
+    const { data: reviews, pagination } = cursorPageResult(rows, page);
     const studioIds = [
       ...new Set(
         reviews.map((r) => r.studioId).filter((x): x is string => Boolean(x)),
@@ -102,6 +109,7 @@ export class PlatformReviewService extends Connection {
     const nameById = new Map(studios.map((s) => [s.id, s.name]));
     return {
       message: "Testimonials",
+      pagination,
       data: reviews.map((r) => ({
         ...r,
         studioName: r.studioId ? (nameById.get(r.studioId) ?? null) : null,

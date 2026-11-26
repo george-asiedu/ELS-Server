@@ -1,4 +1,9 @@
 import { Connection, TenantTx } from "../db/dbConnection";
+import {
+  CursorPage,
+  cursorPageArgs,
+  cursorPageResult,
+} from "../utils/cursorPagination";
 import { ApiError } from "../middleware/apiError";
 import { HttpCode } from "../models/status_codes";
 import { paystack } from "../payment/paystackClient";
@@ -692,14 +697,14 @@ export class RefundService extends Connection {
     return this.refund.findFirst({ where: { providerRefundId } });
   }
 
-  public async list(opts: { limit?: number; status?: string } = {}) {
-    const take = Math.min(Math.max(opts.limit ?? 50, 1), 200);
-    const refunds = await this.refund.findMany({
+  /** One page of refunds, newest first (cursor pagination). */
+  public async list(opts: { status?: string; page: CursorPage }) {
+    const rows = await this.refund.findMany({
       ...(opts.status ? { where: { status: opts.status as "PENDING" } } : {}),
-      orderBy: { createdAt: "desc" },
-      take,
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      ...cursorPageArgs(opts.page),
     });
-    return { message: "Refunds", data: refunds };
+    return { message: "Refunds", ...cursorPageResult(rows, opts.page) };
   }
 }
 

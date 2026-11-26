@@ -1,4 +1,5 @@
 import { Request, Response } from "express";
+import { parseCursorPage } from "../utils/cursorPagination";
 import { PlatformReviewService } from "./platformReviewService";
 import { ApiError } from "../middleware/apiError";
 
@@ -27,8 +28,10 @@ export class PlatformReviewController {
   };
 
   // Super admin — moderate.
-  public static listAll = async (_req: Request, res: Response) => {
-    const result = await service.listAll();
+  public static listAll = async (req: Request, res: Response) => {
+    const result = await service.listAll(
+      parseCursorPage(req.query.cursor, req.query.limit, 20),
+    );
     return res.status(200).json(result);
   };
 

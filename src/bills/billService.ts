@@ -1,4 +1,9 @@
 import { randomBytes } from "crypto";
+import {
+  CursorPage,
+  cursorPageArgs,
+  cursorPageResult,
+} from "../utils/cursorPagination";
 import { Connection } from "../db/dbConnection";
 import { ApiError } from "../middleware/apiError";
 import { env } from "../config/env.config";
@@ -186,25 +191,45 @@ export class BillService extends Connection {
     };
   }
 
-  public async list(status?: string) {
+  /**
+   * One page of bills, newest first, optionally of one status. Totals and
+   * counts come from the database over every bill, not just this page, so
+   * they stay right however many bills there are.
+   */
+  public async list(status: string | undefined, page: CursorPage) {
     const where: { status?: "UNPAID" | "PAID" | "VOID" } =
       status === "UNPAID" || status === "PAID" || status === "VOID"
         ? { status }
         : {};
-    const bills = await this.bill.findMany({
-      where,
-      orderBy: { createdAt: "desc" },
-      take: 200,
-    });
-    const withLinks = await Promise.all(bills.map((b) => this.withLink(b)));
-    const sum = (s: string) =>
-      round2(
-        bills.filter((b) => b.status === s).reduce((t, b) => t + b.total, 0),
-      );
+    const [rows, byStatus] = await Promise.all([
+      this.bill.findMany({
+        where,
+        orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+        ...cursorPageArgs(page),
+      }),
+      this.bill.groupBy({
+        by: ["status"],
+        _sum: { total: true },
+        _count: { _all: true },
+      }),
+    ]);
+    const { data, pagination } = cursorPageResult(rows, page);
+    const withLinks = await Promise.all(data.map((b) => this.withLink(b)));
+    const of = (s: string) => byStatus.find((g) => g.status === s);
+    const counts = {
+      UNPAID: of("UNPAID")?._count._all ?? 0,
+      PAID: of("PAID")?._count._all ?? 0,
+      VOID: of("VOID")?._count._all ?? 0,
+    };
     return {
       message: "Bills",
       data: withLinks,
-      totals: { unpaid: sum("UNPAID"), paid: sum("PAID") },
+      pagination,
+      totals: {
+        unpaid: round2(of("UNPAID")?._sum.total ?? 0),
+        paid: round2(of("PAID")?._sum.total ?? 0),
+      },
+      counts: { ...counts, ALL: counts.UNPAID + counts.PAID + counts.VOID },
     };
   }
 

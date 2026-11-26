@@ -1,4 +1,5 @@
 import { Request, Response } from "express";
+import { parseCursorPage } from "../utils/cursorPagination";
 import { RefundService } from "./refundService";
 import { ApiError } from "../middleware/apiError";
 
@@ -63,11 +64,9 @@ export class RefundController {
   public static list = async (req: Request, res: Response) => {
     const status =
       typeof req.query.status === "string" ? req.query.status : undefined;
-    const limit =
-      typeof req.query.limit === "string" ? Number(req.query.limit) : undefined;
     const result = await refunds.list({
       ...(status ? { status } : {}),
-      ...(limit !== undefined ? { limit } : {}),
+      page: parseCursorPage(req.query.cursor, req.query.limit, 50),
     });
     return res.status(200).json(result);
   };

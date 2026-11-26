@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { parseCursorPage } from "../utils/cursorPagination";
 import { authenticate, requireAdmin } from "../middleware/auth";
 import { BillService } from "./billService";
 import { ApiError } from "../middleware/apiError";
@@ -58,6 +59,7 @@ router.get("/", authenticate, requireAdmin, async (req, res) =>
     .json(
       await bills.list(
         typeof req.query.status === "string" ? req.query.status : undefined,
+        parseCursorPage(req.query.cursor, req.query.limit, 25),
       ),
     ),
 );
