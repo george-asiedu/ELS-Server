@@ -276,7 +276,15 @@ export class PlatformController {
         ? req.query.actionPrefix
         : undefined;
     const limit = req.query.limit ? Number(req.query.limit) : undefined;
-    const result = await audit.list({ studioId, action, actionPrefix, limit });
+    const cursor =
+      typeof req.query.cursor === "string" ? req.query.cursor : undefined;
+    const result = await audit.list({
+      studioId,
+      action,
+      actionPrefix,
+      limit,
+      cursor,
+    });
     return res.status(200).json(result);
   };
 

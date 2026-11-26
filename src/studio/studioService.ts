@@ -529,41 +529,48 @@ export class StudioService extends Connection {
     const prevStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
     const prevEnd = new Date(now);
     prevEnd.setMonth(now.getMonth() - 1);
-    const [payments, orders] = await Promise.all([
-      this.payment.findMany({
-        where: { status: { in: ["PAID", "PARTIALLY_REFUNDED", "REFUNDED"] } },
-        select: { amount: true, refundedAmount: true, paidAt: true },
-      }),
-      this.order.findMany({
-        where: { status: { in: [...PAID_ORDER_STATUSES] } },
-        select: {
-          total: true,
-          refundedAmount: true,
-          paidAt: true,
-          createdAt: true,
+    // Summed in the database rather than by loading every payment and order:
+    // the same figures, without the cost growing with the business's history.
+    // Booking payments count by paidAt; orders by paidAt, else createdAt.
+    const paidPaymentStatuses = [
+      "PAID",
+      "PARTIALLY_REFUNDED",
+      "REFUNDED",
+    ] as const;
+    const paidOrder = { status: { in: [...PAID_ORDER_STATUSES] } };
+    const orderDated = (range: { gte: Date; lte?: Date }) => ({
+      OR: [{ paidAt: range }, { paidAt: null, createdAt: range }],
+    });
+    const sumPayments = (extra: object = {}) =>
+      this.payment.aggregate({
+        where: {
+          status: { in: [...paidPaymentStatuses] },
+          ...extra,
         },
-      }),
+        _sum: { amount: true, refundedAmount: true },
+      });
+    const sumOrders = (extra: object = {}) =>
+      this.order.aggregate({
+        where: { ...paidOrder, ...extra },
+        _sum: { total: true, refundedAmount: true },
+      });
+    const [pAll, pMonth, pPrev, oAll, oMonth, oPrev] = await Promise.all([
+      sumPayments(),
+      sumPayments({ paidAt: { gte: monthStart } }),
+      sumPayments({ paidAt: { gte: prevStart, lte: prevEnd } }),
+      sumOrders(),
+      sumOrders(orderDated({ gte: monthStart })),
+      sumOrders(orderDated({ gte: prevStart, lte: prevEnd })),
     ]);
-    let allTime = 0;
-    let thisMonth = 0;
-    let lastMonthSoFar = 0;
-    let refunded = 0;
-    const inPrev = (d: Date | null) =>
-      Boolean(d && d >= prevStart && d <= prevEnd);
-    for (const p of payments) {
-      const net = p.amount - (p.refundedAmount ?? 0);
-      refunded += p.refundedAmount ?? 0;
-      allTime += net;
-      if (p.paidAt && p.paidAt >= monthStart) thisMonth += net;
-      if (inPrev(p.paidAt)) lastMonthSoFar += net;
-    }
-    for (const o of orders) {
-      const net = o.total - (o.refundedAmount ?? 0);
-      refunded += o.refundedAmount ?? 0;
-      allTime += net;
-      if ((o.paidAt ?? o.createdAt) >= monthStart) thisMonth += net;
-      if (inPrev(o.paidAt ?? o.createdAt)) lastMonthSoFar += net;
-    }
+    const netP = (a: typeof pAll) =>
+      (a._sum.amount ?? 0) - (a._sum.refundedAmount ?? 0);
+    const netO = (a: typeof oAll) =>
+      (a._sum.total ?? 0) - (a._sum.refundedAmount ?? 0);
+    const allTime = netP(pAll) + netO(oAll);
+    const thisMonth = netP(pMonth) + netO(oMonth);
+    const lastMonthSoFar = netP(pPrev) + netO(oPrev);
+    const refunded =
+      (pAll._sum.refundedAmount ?? 0) + (oAll._sum.refundedAmount ?? 0);
     const r2 = (n: number) => Math.round(n * 100) / 100;
 
     // Payouts, from Paystack. Optional: the rest of the card still works if

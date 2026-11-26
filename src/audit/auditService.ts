@@ -43,6 +43,8 @@ export class AuditService extends Connection {
 
   public async list(opts: {
     limit?: number | undefined;
+    // Id of the last entry already shown: returns the entries after it.
+    cursor?: string | undefined;
     studioId?: string | undefined;
     action?: string | undefined;
     // Prefix match, e.g. "payment." to return every payment-related entry.
@@ -58,11 +60,22 @@ export class AuditService extends Connection {
     else if (opts.actionPrefix)
       where.action = { startsWith: opts.actionPrefix };
 
-    const logs = await this.auditLog.findMany({
+    const rows = await this.auditLog.findMany({
       where,
-      orderBy: { createdAt: "desc" },
-      take,
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      take: take + 1,
+      ...(opts.cursor ? { cursor: { id: opts.cursor }, skip: 1 } : {}),
     });
-    return { message: "Audit logs", data: logs };
+    const hasMore = rows.length > take;
+    const logs = hasMore ? rows.slice(0, take) : rows;
+    return {
+      message: "Audit logs",
+      data: logs,
+      pagination: {
+        limit: take,
+        hasMore,
+        nextCursor: hasMore ? (logs[logs.length - 1]?.id ?? null) : null,
+      },
+    };
   }
 }
