@@ -574,6 +574,10 @@ model PlatformConfig {
   // Free live online training: where to join, and when (shown to every studio and store).
   trainingLiveUrl           String?
   trainingLiveNote          String?
+  // When the next free live session starts, and how long it runs. Studios
+  // reserve a spot for it (TrainingReservation).
+  trainingLiveAt            DateTime?
+  trainingLiveMinutes       Int     @default(60)
   // Storage for Zuri Studios plans (not Zuri Stores): included amount per plan,
   // and the size and monthly price of an extra block.
   storageStandardMb         Int     @default(500)
@@ -709,6 +713,21 @@ model TrainingRequest {
 
   @@index([studioId])
   @@map("training_requests")
+}
+
+// A studio's reserved spot at a free live online training session. One per
+// studio per session; when the session moves, reservations move with it.
+model TrainingReservation {
+  id                String   @id @default(cuid())
+  studioId          String
+  reservedByUserId  String?
+  reservedByEmail   String?
+  sessionAt         DateTime
+  createdAt         DateTime @default(now())
+
+  @@unique([studioId, sessionAt])
+  @@index([sessionAt])
+  @@map("training_reservations")
 }
 
 enum BillStatus {

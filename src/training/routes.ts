@@ -2,7 +2,12 @@ import { Router } from "express";
 import { authenticate, requireAdmin } from "../middleware/auth";
 import { getTenantContext } from "../tenant/context";
 import { ApiError } from "../middleware/apiError";
-import { requestInPerson, trainingInfo } from "./trainingService";
+import {
+  cancelLiveSpot,
+  requestInPerson,
+  reserveLiveSpot,
+  trainingInfo,
+} from "./trainingService";
 import { verifyLearnSteps } from "./stepChecks";
 
 const router: Router = Router();
@@ -25,6 +30,29 @@ router.post("/requests", authenticate, requireAdmin, async (req, res) =>
     message: "Request sent. We'll get back to you with a date and the fee.",
     data: await requestInPerson(studio(), req.user?.id, req.body ?? {}),
   }),
+);
+
+// Reserve (or give up) a spot at the next free live session.
+router.post("/live/reserve", authenticate, requireAdmin, async (req, res) => {
+  const result = await reserveLiveSpot(studio(), {
+    id: req.user?.id,
+    email: req.user?.email,
+  });
+  res.status(result.already ? 200 : 201).json({
+    message: result.already
+      ? "You already have a spot"
+      : "Spot reserved. We've emailed you a calendar invite.",
+    data: { sessionAt: result.at },
+  });
+});
+router.delete(
+  "/live/reserve",
+  authenticate,
+  requireAdmin,
+  async (_req, res) => {
+    await cancelLiveSpot(studio());
+    res.status(200).json({ message: "Your spot was cancelled" });
+  },
 );
 
 export default router;

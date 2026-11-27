@@ -1,7 +1,18 @@
 import { ApiError } from "../middleware/apiError";
 import { createTenantClient } from "../tenant/tenantClient";
 import { addExtraCharge, waiveExtraCharge } from "../billing/extraCharges";
-import { notifyStudioAdmins } from "../push/pushService";
+import { notifyStudioAdmins, notifyUsers } from "../push/pushService";
+import { NotificationService } from "../notifications/notificationService";
+import {
+  trainingSpotConfirmed,
+  trainingSpotReservedPlatform,
+} from "../notifications/templates/trainingSession";
+import {
+  buildIcs,
+  googleCalendarUrl,
+  whenText,
+  type SessionEvent,
+} from "./calendar";
 import { alertPlatform } from "../notifications/platformAlert";
 import { NotificationTemplate } from "../notifications/registry";
 import { platformBrand } from "../notifications/brand";
@@ -14,6 +25,7 @@ import { env } from "../config/env.config";
 // next bill, and the studio is told at each step.
 
 const { raw } = createTenantClient();
+const notifications = new NotificationService();
 const text = (v: unknown, max: number) =>
   typeof v === "string" && v.trim() ? v.trim().slice(0, max) : null;
 const STATUSES = ["NEW", "SCHEDULED", "DONE", "DECLINED"] as const;
@@ -23,17 +35,230 @@ const config = async () =>
   (await raw.platformConfig.findFirst()) ??
   (await raw.platformConfig.create({ data: {} }));
 
+/** The calendar entry for the next live session, or null when none is set. */
+const sessionEvent = (
+  cfg: {
+    trainingLiveAt: Date | null;
+    trainingLiveMinutes: number;
+    trainingLiveUrl: string | null;
+    trainingLiveNote: string | null;
+  },
+  studioId: string,
+): SessionEvent | null =>
+  cfg.trainingLiveAt
+    ? {
+        uid: `live-training-${cfg.trainingLiveAt.toISOString()}-${studioId}@zuristudios.com`,
+        title: "Zuri live training",
+        start: cfg.trainingLiveAt,
+        minutes: cfg.trainingLiveMinutes,
+        description: `Free live online training with Zuri.${cfg.trainingLiveNote ? ` ${cfg.trainingLiveNote}` : ""}`,
+        url: cfg.trainingLiveUrl,
+      }
+    : null;
+
 export const trainingInfo = async (studioId: string) => {
   const cfg = await config();
   const requests = await raw.trainingRequest.findMany({
     where: { studioId },
     orderBy: { createdAt: "desc" },
   });
+  const upcoming =
+    cfg.trainingLiveAt && cfg.trainingLiveAt.getTime() > Date.now()
+      ? cfg.trainingLiveAt
+      : null;
+  const reserved = upcoming
+    ? Boolean(
+        await raw.trainingReservation.findUnique({
+          where: { studioId_sessionAt: { studioId, sessionAt: upcoming } },
+          select: { id: true },
+        }),
+      )
+    : false;
+  const event = upcoming ? sessionEvent(cfg, studioId) : null;
   return {
     liveUrl: cfg.trainingLiveUrl,
     liveNote: cfg.trainingLiveNote,
+    // The next session (null when none is set or it has passed).
+    liveAt: upcoming,
+    liveMinutes: cfg.trainingLiveMinutes,
+    liveReserved: reserved,
+    googleCalendarUrl: event ? googleCalendarUrl(event) : null,
     requests,
   };
+};
+
+/**
+ * Reserve a spot at the next live session. The studio gets an email (with a
+ * calendar file) and a push, and the Zuri team is told. Reserving twice does
+ * nothing more.
+ */
+export const reserveLiveSpot = async (
+  studioId: string,
+  user: { id?: string | undefined; email?: string | undefined },
+) => {
+  const cfg = await config();
+  const at = cfg.trainingLiveAt;
+  if (!at || at.getTime() <= Date.now())
+    throw new ApiError(
+      "There's no live session to reserve a spot for yet",
+      400,
+    );
+  const existing = await raw.trainingReservation.findUnique({
+    where: { studioId_sessionAt: { studioId, sessionAt: at } },
+  });
+  if (existing) return { reservation: existing, already: true as const, at };
+  const reservation = await raw.trainingReservation.create({
+    data: {
+      studioId,
+      sessionAt: at,
+      ...(user.id ? { reservedByUserId: user.id } : {}),
+      ...(user.email ? { reservedByEmail: user.email } : {}),
+    },
+  });
+  await sendSpotNotices(cfg, reservation, { moved: false });
+  return { reservation, already: false as const, at };
+};
+
+export const cancelLiveSpot = async (studioId: string) => {
+  const cfg = await config();
+  if (!cfg.trainingLiveAt) return;
+  await raw.trainingReservation.deleteMany({
+    where: { studioId, sessionAt: cfg.trainingLiveAt },
+  });
+};
+
+type Reservation = {
+  id: string;
+  studioId: string;
+  reservedByUserId: string | null;
+  reservedByEmail: string | null;
+  sessionAt: Date;
+};
+
+/** Email + push to the studio (and, for a new spot, to the Zuri team). Never throws. */
+const sendSpotNotices = async (
+  cfg: Awaited<ReturnType<typeof config>>,
+  r: Reservation,
+  opts: { moved: boolean },
+) => {
+  try {
+    const event = sessionEvent(cfg, r.studioId);
+    if (!event) return;
+    const when = whenText(event.start);
+    const studio = await raw.studio.findUnique({
+      where: { id: r.studioId },
+      select: { name: true, slug: true },
+    });
+    const to =
+      r.reservedByEmail ??
+      (
+        await raw.user.findFirst({
+          where: { studioId: r.studioId, role: "ADMIN" },
+          select: { email: true },
+        })
+      )?.email ??
+      null;
+    if (to) {
+      const { subject, html } = trainingSpotConfirmed(platformBrand, {
+        firstName: studio?.name ?? "there",
+        when,
+        note: cfg.trainingLiveNote,
+        joinUrl: cfg.trainingLiveUrl,
+        calendarUrl: googleCalendarUrl(event),
+        moved: opts.moved,
+      });
+      await notifications.send({
+        template: NotificationTemplate.TRAINING_SPOT_CONFIRMED_STUDIO,
+        to,
+        subject,
+        html,
+        studioId: r.studioId,
+        entityType: "TrainingReservation",
+        entityId: `${r.id}:${event.start.toISOString()}`,
+        attachments: [
+          {
+            filename: "zuri-live-training.ics",
+            content: Buffer.from(buildIcs(event), "utf8").toString("base64"),
+            contentType: "text/calendar; charset=utf-8; method=PUBLISH",
+          },
+        ],
+      });
+    }
+    // The push goes to the person who reserved, else every admin of the studio.
+    const pushBody = opts.moved
+      ? `The live training is now ${when}.`
+      : `Your spot is reserved for ${when}. Add it to your calendar from the Learn page.`;
+    if (r.reservedByUserId)
+      await notifyUsers([r.reservedByUserId], {
+        title: opts.moved ? "Live training moved" : "Spot reserved",
+        body: pushBody,
+        url: "/admin/learn",
+      }).catch(() => 0);
+    else
+      await notifyStudioAdmins(
+        r.studioId,
+        {
+          template: "TRAINING_UPDATE",
+          entityId: `${r.id}:${event.start.toISOString()}`,
+          entityType: "TrainingReservation",
+        },
+        {
+          title: opts.moved ? "Live training moved" : "Spot reserved",
+          body: pushBody,
+          url: "/admin/learn",
+        },
+      ).catch(() => 0);
+
+    if (!opts.moved) {
+      const total = await raw.trainingReservation.count({
+        where: { sessionAt: r.sessionAt },
+      });
+      const platform = trainingSpotReservedPlatform(platformBrand, {
+        studioName: studio?.name ?? "A business",
+        studioSlug: studio?.slug ?? r.studioId,
+        byEmail: r.reservedByEmail,
+        when,
+        total,
+        reviewUrl: `${env.clientUrl}/platform/training`,
+      });
+      await alertPlatform({
+        template: NotificationTemplate.TRAINING_SPOT_RESERVED_PLATFORM,
+        subject: platform.subject,
+        html: platform.html,
+        studioId: r.studioId,
+        entityType: "TrainingReservation",
+        entityId: r.id,
+        push: {
+          title: "Live training spot reserved",
+          body: `${studio?.name ?? "A business"} will join on ${when}. ${total} so far.`,
+          url: "/platform/training",
+        },
+      });
+    }
+  } catch (e) {
+    console.warn("Live training notice failed:", (e as Error).message);
+  }
+};
+
+/** Who has reserved a spot at the next live session (for the super admin). */
+export const platformReservations = async () => {
+  const cfg = await config();
+  if (!cfg.trainingLiveAt) return [];
+  const rows = await raw.trainingReservation.findMany({
+    where: { sessionAt: cfg.trainingLiveAt },
+    orderBy: { createdAt: "asc" },
+  });
+  return Promise.all(
+    rows.map(async (r) => ({
+      id: r.id,
+      createdAt: r.createdAt,
+      email: r.reservedByEmail,
+      studio: await raw.studio.findUnique({
+        where: { id: r.studioId },
+        select: { id: true, name: true, slug: true },
+      }),
+    })),
+  );
 };
 
 export const requestInPerson = async (
@@ -193,14 +418,65 @@ export const saveSettings = async (input: Record<string, unknown>) => {
   const url = text(input.liveUrl, 300);
   if (url && !/^https:\/\//i.test(url))
     throw new ApiError("The join link should start with https://", 400);
-  return raw.platformConfig.update({
+  const data: {
+    trainingLiveUrl: string | null;
+    trainingLiveNote: string | null;
+    trainingLiveAt?: Date | null;
+    trainingLiveMinutes?: number;
+  } = { trainingLiveUrl: url, trainingLiveNote: text(input.liveNote, 200) };
+  if (input.liveAt !== undefined) {
+    const d = input.liveAt ? new Date(String(input.liveAt)) : null;
+    if (d && Number.isNaN(d.getTime()))
+      throw new ApiError("That date and time isn't valid", 400);
+    data.trainingLiveAt = d;
+  }
+  if (input.liveMinutes !== undefined) {
+    const m = Math.round(Number(input.liveMinutes));
+    if (!Number.isFinite(m) || m < 15 || m > 480)
+      throw new ApiError(
+        "The session should run between 15 and 480 minutes",
+        400,
+      );
+    data.trainingLiveMinutes = m;
+  }
+  const updated = await raw.platformConfig.update({
     where: { id: cfg.id },
-    data: { trainingLiveUrl: url, trainingLiveNote: text(input.liveNote, 200) },
-    select: { trainingLiveUrl: true, trainingLiveNote: true },
+    data,
   });
+  // The session moved: everyone with a spot keeps it, at the new time, and is told.
+  const old = cfg.trainingLiveAt;
+  const next = updated.trainingLiveAt;
+  if (
+    old &&
+    next &&
+    next.getTime() !== old.getTime() &&
+    next.getTime() > Date.now()
+  ) {
+    const moving = await raw.trainingReservation.findMany({
+      where: { sessionAt: old },
+    });
+    for (const r of moving) {
+      const moved = await raw.trainingReservation.update({
+        where: { id: r.id },
+        data: { sessionAt: next },
+      });
+      await sendSpotNotices(updated, moved, { moved: true });
+    }
+  }
+  return {
+    liveUrl: updated.trainingLiveUrl,
+    liveNote: updated.trainingLiveNote,
+    liveAt: updated.trainingLiveAt,
+    liveMinutes: updated.trainingLiveMinutes,
+  };
 };
 
 export const settings = async () => {
   const cfg = await config();
-  return { liveUrl: cfg.trainingLiveUrl, liveNote: cfg.trainingLiveNote };
+  return {
+    liveUrl: cfg.trainingLiveUrl,
+    liveNote: cfg.trainingLiveNote,
+    liveAt: cfg.trainingLiveAt,
+    liveMinutes: cfg.trainingLiveMinutes,
+  };
 };

@@ -32,6 +32,7 @@ import {
   platformUpdate as platformTrainingUpdate,
   saveSettings as saveTrainingSettings,
   settings as trainingSettings,
+  platformReservations as platformTrainingReservations,
 } from "../training/trainingService";
 
 const activityLogs = new PlatformActivityLogService();
@@ -197,6 +198,7 @@ router.get("/training", async (_req, res) =>
   res.status(200).json({
     data: await platformTrainingList(),
     settings: await trainingSettings(),
+    reservations: await platformTrainingReservations(),
   }),
 );
 router.patch("/training/settings", async (req, res) =>
