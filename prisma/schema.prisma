@@ -12,6 +12,9 @@ enum Role {
   CUSTOMER
   ADMIN
   SUPER_ADMIN
+  // A member of a studio's team: signs in to see their own bookings and get
+  // alerts, and can reach nothing else of the studio's dashboard.
+  STAFF
 }
 
 enum StudioStatus {
@@ -781,6 +784,9 @@ model User {
   email    String
   password String
   role     Role    @default(CUSTOMER)
+  // False for a staff account the owner just created: nobody knows its password
+  // yet, and the person sets their own on their first visit.
+  passwordSet Boolean @default(true)
 
   resetToken       String?
   resetTokenExpiry DateTime?
@@ -1158,6 +1164,11 @@ model Staff {
   // Where to alert this person when a booking with them is about to start.
   // Never shown to customers. Empty: the studio's admins are alerted instead.
   email        String?
+  phone        String?
+  // The sign-in account for this person (role STAFF), created with them. Null
+  // for people added before staff had accounts. An owner who is also a staff
+  // member keeps their admin account here.
+  userId       String?       @unique
   // Services this person does; empty means all of them.
   serviceIds   String[]      @default([])
   active       Boolean       @default(true)

@@ -7,7 +7,7 @@ export class UserRepository extends Connection {
     // findFirst (not findUnique): email is unique per studio now, and the tenant
     // extension scopes this to the current studio's user.
     const user = await this.user.findFirst({
-      where: { email },
+      where: { email: { equals: email, mode: "insensitive" } },
     });
     return user;
   }

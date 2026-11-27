@@ -247,6 +247,7 @@ const recoveryLimiter = rateLimit({
 });
 app.use("/api", limiter);
 app.use("/api/auth/login", loginIpLimiter);
+app.use("/api/auth/first-visit", loginIpLimiter);
 app.use("/api/platform/auth/login", loginIpLimiter);
 // The Zuri mark for emails. Public, cacheable, and built into the server.
 app.get("/api/brand/zuri-logo.png", (_req, res) => {

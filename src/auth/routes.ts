@@ -23,6 +23,8 @@ router.post(
   authenticate,
   AuthController.twoFactorRecoveryCodes,
 );
+router.post("/first-visit", AuthController.firstVisitCode);
+router.post("/first-visit/set-password", AuthController.firstVisitSetPassword);
 router.post("/forgot-password", AuthController.forgotPassword);
 router.post("/reset-password/:token", AuthController.resetPassword);
 

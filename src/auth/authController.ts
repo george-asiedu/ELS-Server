@@ -66,6 +66,25 @@ export class AuthController {
     return res.status(200).json(result);
   };
 
+  public static firstVisitCode = async (req: Request, res: Response) => {
+    const email = String(req.body?.email ?? "").trim();
+    if (!email) throw new ApiError("Enter your email", 400);
+    return res.status(200).json(await authService.firstVisitCode(email));
+  };
+
+  public static firstVisitSetPassword = async (req: Request, res: Response) => {
+    const body = req.body ?? {};
+    const result = await authService.firstVisitSetPassword(
+      {
+        email: String(body.email ?? "").trim(),
+        code: body.code,
+        password: String(body.password ?? ""),
+      },
+      getLoginDeviceMetadata(req),
+    );
+    return res.status(200).json(withoutToken(req, res, result));
+  };
+
   public static forgotPassword = async (req: Request, res: Response) => {
     assertValid(validateEmail, req.body);
 

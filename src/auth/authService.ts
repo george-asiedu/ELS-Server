@@ -29,6 +29,8 @@ import {
   unknownUserHash,
 } from "./loginLockout";
 import { getTenantContext } from "../tenant/context";
+import { HttpCode } from "../models/status_codes";
+import { isStrongPassword, PASSWORD_RULE_MESSAGE } from "./passwordPolicy";
 
 const notifications = new NotificationService();
 
@@ -201,6 +203,7 @@ export class AuthService extends UserRepository {
       }
       throw new ApiError("Invalid email or password", 400);
     }
+    await this.assertStaffMayEnter(user);
     await assertSignInCode(user, data.totp, lockKey);
     await clearLoginFailures(lockKey);
 
@@ -243,6 +246,92 @@ export class AuthService extends UserRepository {
 
     return {
       message: "Login successful",
+      data: {
+        user: {
+          id: user.id,
+          email: user.email,
+          role: user.role,
+          studioId: user.studioId,
+        },
+        token,
+      },
+    };
+  }
+
+  /** A staff account the owner has turned off can't sign in. */
+  private async assertStaffMayEnter(user: { id: string; role: string }) {
+    if (user.role !== "STAFF") return;
+    const staff = await this.staff.findFirst({
+      where: { userId: user.id },
+      select: { active: true },
+    });
+    if (!staff?.active)
+      throw new ApiError(
+        "Your access has been turned off. Please ask your studio.",
+        HttpCode.FORBIDDEN,
+      );
+  }
+
+  /**
+   * First visit of a staff member whose account the owner created: email a
+   * 6-digit code to their address. Always answers the same, so it never says
+   * which emails are accounts.
+   */
+  public async firstVisitCode(email: string) {
+    const generic = {
+      message:
+        "If that email is a new team account, we've sent a code to it. It can take a minute.",
+    };
+    const user = await this.getByEmail(email);
+    if (!user || user.role !== "STAFF" || user.passwordSet) return generic;
+    try {
+      await sendEmailCode({
+        key: `first:${user.id}`,
+        to: user.email,
+        brand: await this.studioEmailBrand(null, platformBrand),
+        studioId: user.studioId ?? null,
+      });
+    } catch (error) {
+      // "Wait a minute" would reveal the account, so it looks the same.
+      if (!(error instanceof ApiError && error.statusCode === 429)) throw error;
+    }
+    return generic;
+  }
+
+  /** The code proves the mailbox is theirs; they choose their own password and are signed in. */
+  public async firstVisitSetPassword(
+    data: { email: string; code: unknown; password: string },
+    device?: LoginDeviceMetadata,
+  ) {
+    if (!isStrongPassword(data.password))
+      throw new ApiError(PASSWORD_RULE_MESSAGE, 400);
+    const user = await this.getByEmail(data.email);
+    const wrong = new ApiError(
+      "That code isn't right or has expired. Check it, or ask for a new one.",
+      400,
+    );
+    if (!user || user.role !== "STAFF" || user.passwordSet) throw wrong;
+    await this.assertStaffMayEnter(user);
+    await confirmEmailCode(`first:${user.id}`, data.code);
+    await this.user.update({
+      where: { id: user.id },
+      data: {
+        password: await getPasswordHash(data.password),
+        passwordSet: true,
+        emailVerifiedAt: new Date(),
+      },
+    });
+    const { token } = await createLoginSession(
+      {
+        id: user.id,
+        email: user.email,
+        role: user.role,
+        studioId: user.studioId,
+      },
+      device,
+    );
+    return {
+      message: "Password set. You're signed in.",
       data: {
         user: {
           id: user.id,
