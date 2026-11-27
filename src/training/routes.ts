@@ -41,7 +41,7 @@ router.post("/live/reserve", authenticate, requireAdmin, async (req, res) => {
   res.status(result.already ? 200 : 201).json({
     message: result.already
       ? "You already have a spot"
-      : "Spot reserved. We've emailed you a calendar invite.",
+      : "Spot reserved. We've emailed you the details.",
     data: { sessionAt: result.at },
   });
 });

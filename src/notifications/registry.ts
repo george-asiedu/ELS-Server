@@ -69,6 +69,12 @@ export const NotificationTemplate = {
   BOOKING_SERVICE_CHANGED: "BOOKING_SERVICE_CHANGED",
   BOOKING_REMINDER_24H: "BOOKING_REMINDER_24H",
   BOOKING_REMINDER_1H: "BOOKING_REMINDER_1H",
+  // About to start, and the moment it is due: to the customer, and to the
+  // person doing the service (or the studio's admins).
+  BOOKING_STARTING_SOON: "BOOKING_STARTING_SOON",
+  BOOKING_TIME_NOW: "BOOKING_TIME_NOW",
+  BOOKING_ALERT_STAFF: "BOOKING_ALERT_STAFF",
+  TRAINING_LIVE_STARTING_SOON: "TRAINING_LIVE_STARTING_SOON",
 } as const;
 
 export type NotificationTemplateKey =

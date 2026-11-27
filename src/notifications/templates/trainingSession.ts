@@ -36,10 +36,9 @@ export const trainingSpotConfirmed = (
         </p>
         ${data.note ? `<p style="margin: 0 0 18px; font-family: Arial, sans-serif; font-size: 14px; color: #7A6A6E; text-align: center;">${esc(data.note)}</p>` : ""}
         ${data.joinUrl ? button("Join the session", data.joinUrl, color) : ""}
+        ${button("Add to Google Calendar", data.calendarUrl, color)}
         <p style="margin: 0; font-family: Arial, sans-serif; font-size: 13px; color: #7A6A6E; text-align: center; line-height: 1.6;">
-          A calendar file is attached, so you can add it to your calendar and get a reminder 15 minutes before.
-          Or <a href="${esc(data.calendarUrl)}" style="color: ${color};">add it to Google Calendar</a>.
-          You can cancel your spot from the Learn page in your dashboard.
+          You'll get a reminder about 15 minutes before it starts. You can cancel your spot from the Learn page in your dashboard.
         </p>`,
     }),
   };
@@ -73,6 +72,35 @@ export const trainingSpotReservedPlatform = (
         </p>
         <p style="margin: 0; font-family: Arial, sans-serif; font-size: 14px; color: #2A1B1F; text-align: center;">${data.total} ${data.total === 1 ? "studio has" : "studios have"} reserved a spot so far.</p>
         ${button("See who is coming", data.reviewUrl, color)}`,
+    }),
+  };
+};
+
+/** To the studio, about 15 minutes before the live session. */
+export const trainingLiveStartingSoon = (
+  brand: EmailBrand,
+  data: {
+    name: string;
+    when: string;
+    joinUrl?: string | null;
+    note?: string | null;
+  },
+) => {
+  const color = brandColor(brand);
+  return {
+    subject: "Your live training starts in about 15 minutes",
+    html: renderShell({
+      brand,
+      previewText: `Live training: ${data.when}`,
+      documentType: "Live training",
+      bodyHtml: `
+        ${statusBadge("info", "STARTING SOON")}
+        <h1 style="margin: 0 0 8px; font-family: Georgia, serif; font-size: 22px; color: #2A1B1F; text-align: center;">Almost time, ${esc(data.name)}</h1>
+        <p style="margin: 0 0 18px; font-family: Arial, sans-serif; font-size: 15px; color: #2A1B1F; text-align: center; line-height: 1.6;">
+          Your free live training starts at<br /><strong>${esc(data.when)}</strong>
+        </p>
+        ${data.note ? `<p style="margin: 0 0 18px; font-family: Arial, sans-serif; font-size: 14px; color: #7A6A6E; text-align: center;">${esc(data.note)}</p>` : ""}
+        ${data.joinUrl ? button("Join the session", data.joinUrl, color) : ""}`,
     }),
   };
 };

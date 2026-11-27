@@ -723,6 +723,8 @@ model TrainingReservation {
   reservedByUserId  String?
   reservedByEmail   String?
   sessionAt         DateTime
+  // Set once the "starting soon" reminder went out for this session time.
+  reminderSentAt    DateTime?
   createdAt         DateTime @default(now())
 
   @@unique([studioId, sessionAt])
@@ -1153,6 +1155,9 @@ model Staff {
   name         String
   role         String?
   photoUrl     String?
+  // Where to alert this person when a booking with them is about to start.
+  // Never shown to customers. Empty: the studio's admins are alerted instead.
+  email        String?
   // Services this person does; empty means all of them.
   serviceIds   String[]      @default([])
   active       Boolean       @default(true)

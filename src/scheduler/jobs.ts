@@ -68,6 +68,48 @@ export const JOBS: JobDefinition[] = [
     },
   },
   {
+    key: "booking-starting-soon",
+    label: "Starting-soon alerts",
+    description:
+      "About 15 minutes before an appointment: tells the customer (push, else email) and the person doing the service (their email, if they have one) or the studio's admins (push). Each booking gets this once.",
+    schedule: { periodMinutes: 5, offsetMinutes: 0 },
+    scheduleLabel: "Every 5 minutes",
+    maxRunMinutes: 4,
+    run: async () => {
+      const { AppointmentService } =
+        await import("../appointment/appointmentService");
+      return { ...(await new AppointmentService().sendTimeAlerts("SOON")) };
+    },
+  },
+  {
+    key: "booking-time-now",
+    label: "Time-is-here alerts",
+    description:
+      "When an appointment's start time arrives: tells the customer (push, else email) and the person doing the service or the studio's admins. Each booking gets this once.",
+    schedule: { periodMinutes: 5, offsetMinutes: 0 },
+    scheduleLabel: "Every 5 minutes",
+    maxRunMinutes: 4,
+    run: async () => {
+      const { AppointmentService } =
+        await import("../appointment/appointmentService");
+      return { ...(await new AppointmentService().sendTimeAlerts("NOW")) };
+    },
+  },
+  {
+    key: "live-training-reminders",
+    label: "Live training reminders",
+    description:
+      "About 15 minutes before the free live training: emails and pushes everyone who reserved a spot, with the join link. Sent once per person.",
+    schedule: { periodMinutes: 5, offsetMinutes: 0 },
+    scheduleLabel: "Every 5 minutes",
+    maxRunMinutes: 4,
+    run: async () => {
+      const { sendLiveTrainingReminders } =
+        await import("../training/trainingService");
+      return { ...(await sendLiveTrainingReminders()) };
+    },
+  },
+  {
     key: "review-requests",
     label: "Review requests",
     description:

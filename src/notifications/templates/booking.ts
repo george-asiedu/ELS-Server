@@ -229,27 +229,49 @@ export const bookingReminder = (
   brand: EmailBrand,
   data: BookingCore & {
     customerFirstName: string;
-    window: "24H" | "1H";
+    window: "24H" | "1H" | "SOON" | "NOW";
     balanceDue?: string | null;
     bookingUrl?: string;
   },
 ) => {
   const color = brandColor(brand);
-  const soon = data.window === "1H";
+  const w = data.window;
+  const copy = {
+    "24H": {
+      subject: "Your appointment is tomorrow",
+      preview: `${data.serviceName} tomorrow at ${data.time}.`,
+      badge: "TOMORROW",
+      heading: `See you tomorrow, ${data.customerFirstName}`,
+    },
+    "1H": {
+      subject: "Your appointment starts in 1 hour",
+      preview: `${data.serviceName} at ${data.time}.`,
+      badge: "STARTING SOON",
+      heading: `See you shortly, ${data.customerFirstName}`,
+    },
+    SOON: {
+      subject: "Your appointment starts in about 15 minutes",
+      preview: `${data.serviceName} at ${data.time}.`,
+      badge: "STARTING SOON",
+      heading: `Almost time, ${data.customerFirstName}`,
+    },
+    NOW: {
+      subject: "It's time for your appointment",
+      preview: `${data.serviceName} is due now (${data.time}).`,
+      badge: "IT'S TIME",
+      heading: `It's time, ${data.customerFirstName}`,
+    },
+  }[w];
   return {
-    subject: soon
-      ? "Your appointment starts in 1 hour"
-      : "Your appointment is tomorrow",
+    subject: copy.subject,
     html: renderShell({
       brand,
-      previewText: soon
-        ? `${data.serviceName} at ${data.time}.`
-        : `${data.serviceName} tomorrow at ${data.time}.`,
+      previewText: copy.preview,
       documentType: "Appointment reminder",
       bodyHtml: `
-        ${statusBadge("info", soon ? "STARTING SOON" : "TOMORROW")}
+        ${statusBadge(w === "NOW" ? "warning" : "info", copy.badge)}
         <h1 style="margin: 0 0 12px; font-family: Georgia, serif; font-size: 22px; color: #2A1B1F; text-align: center;">
-          ${soon ? `See you shortly, ${esc(data.customerFirstName)}` : `See you tomorrow, ${esc(data.customerFirstName)}`}
+          ${esc(copy.heading)}
         </h1>
         ${appointmentCard({ serviceName: data.serviceName, date: data.date, time: data.time, duration: data.duration ?? null, studioName: data.studioName, color })}
         ${
@@ -259,6 +281,44 @@ export const bookingReminder = (
         }
         <p class="muted" style="margin: 14px 0 0; font-family: Arial, sans-serif; font-size: 12px; color: #7A6A6E; text-align: center;">Booking ${esc(data.bookingRef)}</p>
         ${data.bookingUrl ? button("View Appointment", data.bookingUrl, color) : ""}`,
+    }),
+  };
+};
+
+/**
+ * To the person doing the service (when they have an email on file): a
+ * booking with them is about to start, or is due now.
+ */
+export const bookingStaffAlert = (
+  brand: EmailBrand,
+  data: {
+    staffName: string;
+    customerName: string;
+    serviceName: string;
+    time: string;
+    window: "SOON" | "NOW";
+    calendarUrl?: string;
+  },
+) => {
+  const color = brandColor(brand);
+  const now = data.window === "NOW";
+  return {
+    subject: now
+      ? `Time for ${data.customerName}: ${data.serviceName}`
+      : `${data.customerName} is due in about 15 minutes`,
+    html: renderShell({
+      brand,
+      previewText: `${data.customerName} · ${data.serviceName} at ${data.time}`,
+      documentType: "Booking alert",
+      bodyHtml: `
+        ${statusBadge(now ? "warning" : "info", now ? "DUE NOW" : "STARTING SOON")}
+        <h1 style="margin: 0 0 12px; font-family: Georgia, serif; font-size: 22px; color: #2A1B1F; text-align: center;">
+          ${now ? "Their time is here" : "Your next booking is almost here"}, ${esc(data.staffName)}
+        </h1>
+        <p style="margin: 0; font-family: Arial, sans-serif; font-size: 15px; color: #2A1B1F; text-align: center; line-height: 1.6;">
+          <strong>${esc(data.customerName)}</strong><br />${esc(data.serviceName)} at ${esc(data.time)}
+        </p>
+        ${data.calendarUrl ? button("Open the calendar", data.calendarUrl, color) : ""}`,
     }),
   };
 };

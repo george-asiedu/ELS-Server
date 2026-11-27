@@ -130,6 +130,8 @@ const PUSH_ROUTES: Partial<Record<NotificationTemplateKey, string>> = {
   BOOKING_COMPLETED: "/account?tab=appointments",
   BOOKING_REMINDER_24H: "/account?tab=appointments",
   BOOKING_REMINDER_1H: "/account?tab=appointments",
+  BOOKING_STARTING_SOON: "/account?tab=appointments",
+  BOOKING_TIME_NOW: "/account?tab=appointments",
   PAYMENT_SUCCESS: "/account?tab=transactions",
   PAYMENT_FAILED: "/account?tab=transactions",
   REFUND_PROCESSED: "/account?tab=transactions",
@@ -228,6 +230,8 @@ export const pushForNotification = async (args: {
 export const PUSH_FIRST = new Set<NotificationTemplateKey>([
   "BOOKING_REMINDER_24H",
   "BOOKING_REMINDER_1H",
+  "BOOKING_STARTING_SOON",
+  "BOOKING_TIME_NOW",
   "SUBSCRIPTION_EXPIRING_SOON",
 ]);
 

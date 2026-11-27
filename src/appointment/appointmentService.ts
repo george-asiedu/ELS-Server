@@ -1,5 +1,5 @@
 import { randomBytes } from "crypto";
-import { notifyStudioAdmins } from "../push/pushService";
+import { notifyStudioAdmins, notifyUsers } from "../push/pushService";
 import { sendBookingWhatsapp } from "../whatsapp/whatsappService";
 import { WaitlistService } from "../waitlist/waitlistService";
 import { VoucherService } from "../vouchers/voucherService";
@@ -32,6 +32,7 @@ import {
   bookingConfirmed,
   bookingRescheduled,
   bookingReminder,
+  bookingStaffAlert,
   bookingRescheduleRequested,
   bookingServiceChanged,
 } from "../notifications/templates/booking";
@@ -590,6 +591,145 @@ export class AppointmentService extends Connection {
       }
 
       return { window, scanned: candidates.length, sent, skipped, errors };
+    });
+  }
+
+  /**
+   * "Starting soon" (about 15 minutes before) and "it's time" (the start time
+   * has come) alerts. Each goes to the customer (push if they have a device
+   * on, else email) and to whoever is doing the service: the assigned staff
+   * member when they have an email on file, otherwise the studio's admins.
+   * Runs every few minutes, so each alert is sent once, by the notification
+   * log's key (`${id}:SOON`, `${id}:NOW`).
+   */
+  public async sendTimeAlerts(kind: "SOON" | "NOW") {
+    return runAsSuperAdmin(async () => {
+      const now = Date.now();
+      const [from, to] =
+        kind === "SOON"
+          ? [now + 10 * 60 * 1000, now + 25 * 60 * 1000]
+          : [now - 10 * 60 * 1000, now + 2 * 60 * 1000];
+      const dayStart = new Date(new Date(from).setUTCHours(0, 0, 0, 0));
+      const dayEnd = new Date(new Date(to).setUTCHours(23, 59, 59, 999));
+      const candidates = await this.appointment.findMany({
+        where: {
+          appointmentDate: { gte: dayStart, lte: dayEnd },
+          status: { in: ["PENDING", "CONFIRMED"] },
+        },
+        include: serviceInclude,
+      });
+
+      const template =
+        kind === "SOON"
+          ? NotificationTemplate.BOOKING_STARTING_SOON
+          : NotificationTemplate.BOOKING_TIME_NOW;
+      let customers = 0;
+      let team = 0;
+      const errors: string[] = [];
+
+      for (const appt of candidates) {
+        const mins = parseTimeMinutes(appt.appointmentTime);
+        if (mins === null) continue;
+        const at = new Date(appt.appointmentDate);
+        at.setUTCHours(Math.floor(mins / 60), mins % 60, 0, 0);
+        const ms = at.getTime();
+        if (Number.isNaN(ms) || ms < from || ms > to) continue;
+
+        const who = appt.fullName ?? "A client";
+        const what = appt.service?.name ?? "Appointment";
+        try {
+          const studio = await this.currentStudioBranding(
+            appt.studioId ?? undefined,
+          );
+          const brand = brandFromStudio(studio, storefrontFallbackBrand);
+
+          // 1. The customer.
+          if (appt.email) {
+            const { subject, html } = bookingReminder(brand, {
+              serviceName: what,
+              date: formatDate(appt.appointmentDate),
+              time: appt.appointmentTime,
+              duration: appt.service?.duration ?? null,
+              studioName: studio?.name ?? "the studio",
+              bookingRef: shortRef("APT", appt.id),
+              customerFirstName: firstName(appt.fullName),
+              window: kind,
+              ...(studio?.bookingUrl ? { bookingUrl: studio.bookingUrl } : {}),
+            });
+            await this.notifications.send({
+              template,
+              to: appt.email,
+              subject,
+              html,
+              studioId: appt.studioId ?? null,
+              entityType: "Appointment",
+              entityId: `${appt.id}:${kind}`,
+            });
+            customers++;
+          }
+
+          // 2. The person doing the service, else the studio's admins.
+          const payload = {
+            title:
+              kind === "SOON"
+                ? "Booking in about 15 minutes"
+                : `Time for ${who}`,
+            body: `${who} · ${what} at ${appt.appointmentTime}`,
+            url: `/admin/calendar?date=${appt.appointmentDate.toISOString().slice(0, 10)}`,
+            tag: `admin-${kind}:${appt.id}`,
+          };
+          const staff = appt.staffId
+            ? await this.staff.findUnique({
+                where: { id: appt.staffId },
+                select: { name: true, email: true },
+              })
+            : null;
+          if (staff?.email && appt.studioId) {
+            const { subject, html } = bookingStaffAlert(brand, {
+              staffName: staff.name,
+              customerName: who,
+              serviceName: what,
+              time: appt.appointmentTime,
+              window: kind,
+            });
+            await this.notifications.send({
+              template: NotificationTemplate.BOOKING_ALERT_STAFF,
+              to: staff.email,
+              subject,
+              html,
+              studioId: appt.studioId,
+              entityType: "Appointment",
+              entityId: `${appt.id}:${kind}:staff`,
+            });
+            // A push too, when they also have an account here.
+            const accounts = await this.user.findMany({
+              where: {
+                studioId: appt.studioId,
+                email: { equals: staff.email, mode: "insensitive" },
+              },
+              select: { id: true },
+            });
+            if (accounts.length)
+              await notifyUsers(
+                accounts.map((a) => a.id),
+                payload,
+              ).catch(() => 0);
+            team++;
+          } else if (appt.studioId) {
+            await notifyStudioAdmins(
+              appt.studioId,
+              { template, entityId: `${appt.id}:${kind}:admin` },
+              payload,
+            );
+            team++;
+          }
+        } catch (error) {
+          errors.push(
+            `${appt.id}: ${error instanceof Error ? error.message : "unknown"}`,
+          );
+        }
+      }
+      return { kind, scanned: candidates.length, customers, team, errors };
     });
   }
 

@@ -6,16 +6,12 @@ import { NotificationService } from "../notifications/notificationService";
 import {
   trainingSpotConfirmed,
   trainingSpotReservedPlatform,
+  trainingLiveStartingSoon,
 } from "../notifications/templates/trainingSession";
-import {
-  buildIcs,
-  googleCalendarUrl,
-  whenText,
-  type SessionEvent,
-} from "./calendar";
+import { googleCalendarUrl, whenText, type SessionEvent } from "./calendar";
 import { alertPlatform } from "../notifications/platformAlert";
 import { NotificationTemplate } from "../notifications/registry";
-import { platformBrand } from "../notifications/brand";
+import { platformBrand, platformBrandForPlan } from "../notifications/brand";
 import { trainingRequestSubmitted } from "../notifications/templates/trainingRequest";
 import { env } from "../config/env.config";
 
@@ -147,7 +143,7 @@ const sendSpotNotices = async (
     const when = whenText(event.start);
     const studio = await raw.studio.findUnique({
       where: { id: r.studioId },
-      select: { name: true, slug: true },
+      select: { name: true, slug: true, plan: true },
     });
     const to =
       r.reservedByEmail ??
@@ -159,14 +155,17 @@ const sendSpotNotices = async (
       )?.email ??
       null;
     if (to) {
-      const { subject, html } = trainingSpotConfirmed(platformBrand, {
-        firstName: studio?.name ?? "there",
-        when,
-        note: cfg.trainingLiveNote,
-        joinUrl: cfg.trainingLiveUrl,
-        calendarUrl: googleCalendarUrl(event),
-        moved: opts.moved,
-      });
+      const { subject, html } = trainingSpotConfirmed(
+        platformBrandForPlan(studio?.plan),
+        {
+          firstName: studio?.name ?? "there",
+          when,
+          note: cfg.trainingLiveNote,
+          joinUrl: cfg.trainingLiveUrl,
+          calendarUrl: googleCalendarUrl(event),
+          moved: opts.moved,
+        },
+      );
       await notifications.send({
         template: NotificationTemplate.TRAINING_SPOT_CONFIRMED_STUDIO,
         to,
@@ -175,19 +174,12 @@ const sendSpotNotices = async (
         studioId: r.studioId,
         entityType: "TrainingReservation",
         entityId: `${r.id}:${event.start.toISOString()}`,
-        attachments: [
-          {
-            filename: "zuri-live-training.ics",
-            content: Buffer.from(buildIcs(event), "utf8").toString("base64"),
-            contentType: "text/calendar; charset=utf-8; method=PUBLISH",
-          },
-        ],
       });
     }
     // The push goes to the person who reserved, else every admin of the studio.
     const pushBody = opts.moved
       ? `The live training is now ${when}.`
-      : `Your spot is reserved for ${when}. Add it to your calendar from the Learn page.`;
+      : `Your spot is reserved for ${when}. Add it to Google Calendar from the Learn page.`;
     if (r.reservedByUserId)
       await notifyUsers([r.reservedByUserId], {
         title: opts.moved ? "Live training moved" : "Spot reserved",
@@ -458,7 +450,7 @@ export const saveSettings = async (input: Record<string, unknown>) => {
     for (const r of moving) {
       const moved = await raw.trainingReservation.update({
         where: { id: r.id },
-        data: { sessionAt: next },
+        data: { sessionAt: next, reminderSentAt: null },
       });
       await sendSpotNotices(updated, moved, { moved: true });
     }
@@ -479,4 +471,87 @@ export const settings = async () => {
     liveAt: cfg.trainingLiveAt,
     liveMinutes: cfg.trainingLiveMinutes,
   };
+};
+
+/**
+ * About 15 minutes before the live session: an email (with the join link) and
+ * a push to everyone who reserved a spot, once each. Runs every few minutes.
+ */
+export const sendLiveTrainingReminders = async () => {
+  const cfg = await config();
+  const at = cfg.trainingLiveAt;
+  const now = Date.now();
+  if (
+    !at ||
+    at.getTime() < now + 5 * 60_000 ||
+    at.getTime() > now + 25 * 60_000
+  )
+    return { sent: 0 };
+  const due = await raw.trainingReservation.findMany({
+    where: { sessionAt: at, reminderSentAt: null },
+  });
+  let sent = 0;
+  const when = whenText(at);
+  for (const r of due) {
+    try {
+      const studio = await raw.studio.findUnique({
+        where: { id: r.studioId },
+        select: { name: true, plan: true },
+      });
+      const to =
+        r.reservedByEmail ??
+        (
+          await raw.user.findFirst({
+            where: { studioId: r.studioId, role: "ADMIN" },
+            select: { email: true },
+          })
+        )?.email ??
+        null;
+      if (to) {
+        const { subject, html } = trainingLiveStartingSoon(
+          platformBrandForPlan(studio?.plan),
+          {
+            name: studio?.name ?? "there",
+            when,
+            joinUrl: cfg.trainingLiveUrl,
+            note: cfg.trainingLiveNote,
+          },
+        );
+        await notifications.send({
+          template: NotificationTemplate.TRAINING_LIVE_STARTING_SOON,
+          to,
+          subject,
+          html,
+          studioId: r.studioId,
+          entityType: "TrainingReservation",
+          entityId: `${r.id}:soon:${at.toISOString()}`,
+        });
+      }
+      const payload = {
+        title: "Live training starts soon",
+        body: "Your live training starts in about 15 minutes. Tap to join.",
+        url: "/admin/learn",
+      };
+      if (r.reservedByUserId)
+        await notifyUsers([r.reservedByUserId], payload).catch(() => 0);
+      else
+        await notifyStudioAdmins(
+          r.studioId,
+          {
+            template: "TRAINING_UPDATE",
+            entityId: `${r.id}:soon:${at.toISOString()}`,
+            entityType: "TrainingReservation",
+          },
+          payload,
+        ).catch(() => 0);
+      await raw.trainingReservation.update({
+        where: { id: r.id },
+        data: { reminderSentAt: new Date() },
+      });
+      sent++;
+    } catch (e) {
+      console.warn("Live training reminder failed:", (e as Error).message);
+    }
+  }
+  return { sent };
 };

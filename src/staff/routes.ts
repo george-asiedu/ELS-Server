@@ -30,6 +30,13 @@ const fields = async (body: Record<string, unknown>, partial: boolean) => {
       typeof body.role === "string" && body.role.trim()
         ? body.role.trim().slice(0, 60)
         : null;
+  if (body.email !== undefined) {
+    const email =
+      typeof body.email === "string" ? body.email.trim().toLowerCase() : "";
+    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))
+      throw new ApiError("That email address doesn't look right", 400);
+    out.email = email ? email.slice(0, 120) : null;
+  }
   if (body.active !== undefined)
     out.active = body.active === true || body.active === "true";
   if (body.order !== undefined && Number.isFinite(Number(body.order)))
