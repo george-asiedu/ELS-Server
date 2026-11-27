@@ -323,6 +323,9 @@ model FeatureRequest {
   monthlyFee      Float?
   // Pictures that show what they mean (up to 5), uploaded with the request.
   images          String[] @default([])
+  // An optional document (PDF or Word) that explains it in detail.
+  documentUrl     String?
+  documentName    String?
 
   studio Studio @relation(fields: [studioId], references: [id], onDelete: Cascade)
 

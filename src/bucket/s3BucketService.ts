@@ -91,8 +91,16 @@ export class S3BucketService {
       "image/avif",
       "image/gif",
     ]);
+    // A feature request can carry a document that explains it in detail.
+    const docTypes = new Set([
+      "application/pdf",
+      "application/msword",
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    ]);
     const isVideo = videoTypes.has(input.contentType);
     const isImage = imageTypes.has(input.contentType);
+    const isDoc =
+      docTypes.has(input.contentType) && input.category === "requests";
     const extensionMatches: Record<string, string[]> = {
       "image/jpeg": [".jpg", ".jpeg"],
       "image/png": [".png"],
@@ -103,6 +111,10 @@ export class S3BucketService {
       "video/quicktime": [".mov"],
       "video/webm": [".webm"],
       "video/x-m4v": [".m4v"],
+      "application/pdf": [".pdf"],
+      "application/msword": [".doc"],
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
+        [".docx"],
     };
     if (!extensionMatches[input.contentType]?.includes(ext)) {
       throw new ApiError(
@@ -110,11 +122,19 @@ export class S3BucketService {
         400,
       );
     }
-    if (input.category === "gallery" ? !(isImage || isVideo) : !isImage) {
+    if (
+      input.category === "gallery"
+        ? !(isImage || isVideo)
+        : input.category === "requests"
+          ? !(isImage || isDoc)
+          : !isImage
+    ) {
       throw new ApiError(
         input.category === "gallery"
           ? "Unsupported gallery media type"
-          : "This media category accepts images only",
+          : input.category === "requests"
+            ? "Attach images, or a PDF or Word document"
+            : "This media category accepts images only",
         400,
       );
     }

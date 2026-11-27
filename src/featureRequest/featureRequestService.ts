@@ -53,10 +53,15 @@ export class FeatureRequestService extends Connection {
   }
 
   /** Image addresses ready to show. */
-  private shown<T extends { images?: string[] }>(r: T): T {
+  private shown<T extends { images?: string[]; documentUrl?: string | null }>(
+    r: T,
+  ): T {
     return {
       ...r,
       images: (r.images ?? []).map((u) => this.s3.deliveryUrl(u) ?? u),
+      ...(r.documentUrl
+        ? { documentUrl: this.s3.deliveryUrl(r.documentUrl) ?? r.documentUrl }
+        : {}),
     };
   }
 
@@ -88,7 +93,13 @@ export class FeatureRequestService extends Connection {
   public async create(
     studioId: string | null | undefined,
     userId: string | undefined,
-    input: { title?: unknown; description?: unknown; images?: unknown },
+    input: {
+      title?: unknown;
+      description?: unknown;
+      images?: unknown;
+      documentUrl?: unknown;
+      documentName?: unknown;
+    },
   ) {
     const id = this.requireStudioId(studioId);
     const title = String(input.title ?? "").trim();
@@ -112,10 +123,21 @@ export class FeatureRequestService extends Connection {
       this.s3.assertOwnedMediaUrl(String(u), "requests"),
     );
 
+    // An optional document (PDF or Word) with the detail, uploaded by this studio.
+    const documentUrl = input.documentUrl
+      ? this.s3.assertOwnedMediaUrl(String(input.documentUrl), "requests")
+      : null;
+    const documentName = documentUrl
+      ? String(input.documentName ?? "Document")
+          .trim()
+          .slice(0, 120) || "Document"
+      : null;
+
     const created = await this.featureRequest.create({
       data: {
         studioId: id,
         images,
+        ...(documentUrl ? { documentUrl, documentName } : {}),
         ...(userId ? { createdByUserId: userId } : {}),
         title,
         description,
@@ -126,8 +148,8 @@ export class FeatureRequestService extends Connection {
       id,
       title,
       images.length
-        ? `${description}\n\n(${images.length} image${images.length === 1 ? "" : "s"} attached. See them on the review page.)`
-        : description,
+        ? `${description}\n\n(${images.length} image${images.length === 1 ? "" : "s"} attached. See them on the review page.)${documentUrl ? `\n\nDocument: ${documentName}\n${this.s3.deliveryUrl(documentUrl) ?? documentUrl}` : ""}`
+        : `${description}${documentUrl ? `\n\nDocument: ${documentName}\n${this.s3.deliveryUrl(documentUrl) ?? documentUrl}` : ""}`,
       userId,
     );
     return { message: "Feature request submitted", data: this.shown(created) };
