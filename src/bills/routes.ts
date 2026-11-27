@@ -74,8 +74,12 @@ router.post("/:id/paid", authenticate, requireAdmin, async (req, res) =>
         String(req.params.id),
         req.body?.method,
         req.body?.note,
+        req.body?.received,
       ),
     ),
+);
+router.post("/:id/remind", authenticate, requireAdmin, async (req, res) =>
+  res.status(200).json(await bills.remind(String(req.params.id))),
 );
 
 export default router;

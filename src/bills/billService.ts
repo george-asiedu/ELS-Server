@@ -201,7 +201,9 @@ export class BillService extends Connection {
       status === "UNPAID" || status === "PAID" || status === "VOID"
         ? { status }
         : {};
-    const [rows, byStatus] = await Promise.all([
+    const startOfToday = new Date();
+    startOfToday.setUTCHours(0, 0, 0, 0); // Ghana is on GMT (UTC+0)
+    const [rows, byStatus, today] = await Promise.all([
       this.bill.findMany({
         where,
         orderBy: [{ createdAt: "desc" }, { id: "desc" }],
@@ -212,7 +214,19 @@ export class BillService extends Connection {
         _sum: { total: true },
         _count: { _all: true },
       }),
+      this.bill.groupBy({
+        by: ["paidVia"],
+        where: { status: "PAID", paidAt: { gte: startOfToday } },
+        _sum: { total: true },
+        _count: { _all: true },
+      }),
     ]);
+    const takenToday = (via: string[]) =>
+      round2(
+        today
+          .filter((g) => via.includes(g.paidVia ?? "paystack"))
+          .reduce((n, g) => n + (g._sum.total ?? 0), 0),
+      );
     const { data, pagination } = cursorPageResult(rows, page);
     const withLinks = await Promise.all(data.map((b) => this.withLink(b)));
     const of = (s: string) => byStatus.find((g) => g.status === s);
@@ -229,6 +243,13 @@ export class BillService extends Connection {
         unpaid: round2(of("UNPAID")?._sum.total ?? 0),
         paid: round2(of("PAID")?._sum.total ?? 0),
       },
+      // What was taken today, by how it was paid.
+      today: {
+        cash: takenToday(["cash"]),
+        counter: takenToday(["momo", "card"]),
+        online: takenToday(["paystack"]),
+        count: today.reduce((n, g) => n + g._count._all, 0),
+      },
       counts: { ...counts, ALL: counts.UNPAID + counts.PAID + counts.VOID },
     };
   }
@@ -244,26 +265,68 @@ export class BillService extends Connection {
     };
   }
 
-  /** The customer paid at the counter instead: cash, Mobile Money to the owner's own number, or a card machine. */
-  public async markPaidOffline(id: string, method: unknown, note: unknown) {
+  /**
+   * The customer paid at the counter instead: cash, Mobile Money to the
+   * owner's own number, or a card machine. For cash the owner can enter what
+   * was handed over, and the change is worked out and kept in the note. The
+   * customer gets a receipt by email when they gave one.
+   */
+  public async markPaidOffline(
+    id: string,
+    method: unknown,
+    note: unknown,
+    received?: unknown,
+  ) {
     const bill = await this.bill.findUnique({ where: { id } });
     if (!bill) throw bad("Bill not found", 404);
     if (bill.status !== "UNPAID")
       throw bad("This bill isn't waiting for payment");
     const via = method === "momo" || method === "card" ? method : "cash";
+    const parts: string[] = [];
+    const given = Number(received);
+    if (via === "cash" && received !== undefined && received !== "") {
+      if (!Number.isFinite(given) || given < bill.total)
+        throw bad(`The cash received must be at least ${ghs(bill.total)}`);
+      parts.push(
+        `Received ${ghs(given)}${given > bill.total ? `, change ${ghs(round2(given - bill.total))}` : ""}`,
+      );
+    }
+    const typed = String(note ?? "")
+      .trim()
+      .slice(0, 120);
+    if (typed) parts.push(typed);
     const updated = await this.bill.update({
       where: { id },
       data: {
         status: "PAID",
         paidAt: new Date(),
         paidVia: via,
-        paidNote:
-          String(note ?? "")
-            .trim()
-            .slice(0, 200) || null,
+        paidNote: parts.join(". ").slice(0, 200) || null,
       },
     });
-    return { message: "Marked as paid", data: updated };
+    // A receipt for the customer; the admin who took the money knows already.
+    await this.afterPaid(updated, { via, notifyAdmins: false });
+    return {
+      message: updated.customerEmail
+        ? "Marked as paid and the receipt was emailed"
+        : "Marked as paid",
+      data: updated,
+    };
+  }
+
+  /** Email an unpaid bill to the customer again, with its pay link. */
+  public async remind(id: string) {
+    const bill = await this.bill.findUnique({ where: { id } });
+    if (!bill) throw bad("Bill not found", 404);
+    if (bill.status !== "UNPAID")
+      throw bad("Only a bill that is waiting for payment can be sent again");
+    if (!bill.customerEmail)
+      throw bad(
+        "This bill has no email address. Send the link on WhatsApp instead",
+      );
+    const withLink = await this.withLink(bill);
+    await this.emailBill(bill, withLink.payUrl);
+    return { message: `Reminder sent to ${bill.customerEmail}` };
   }
 
   // ---- Customer side (by the secret in the link)
@@ -498,18 +561,29 @@ export class BillService extends Connection {
     await this.afterPaid(bill);
   }
 
-  private async afterPaid(bill: {
-    id: string;
-    number: string;
-    customerName: string;
-    customerEmail: string | null;
-    items: unknown;
-    total: number;
-    processingFee?: number;
-    studioId: string | null;
-  }) {
+  private async afterPaid(
+    bill: {
+      id: string;
+      number: string;
+      customerName: string;
+      customerEmail: string | null;
+      items: unknown;
+      total: number;
+      processingFee?: number;
+      studioId: string | null;
+    },
+    opts: { via?: string; notifyAdmins?: boolean } = {},
+  ) {
+    const methodLabel =
+      opts.via === "cash"
+        ? "Cash"
+        : opts.via === "momo"
+          ? "Mobile Money (paid to the business)"
+          : opts.via === "card"
+            ? "Card machine"
+            : "Online payment";
     try {
-      if (bill.studioId)
+      if (bill.studioId && opts.notifyAdmins !== false)
         await notifyStudioAdmins(
           bill.studioId,
           { template: "BILL_PAID", entityId: bill.id, entityType: "Bill" },
@@ -575,7 +649,7 @@ export class BillService extends Connection {
           ],
           amountPaid: ghs(bill.total + fee),
           reference: bill.id,
-          paymentMethod: "Online payment",
+          paymentMethod: methodLabel,
           paidToEmail: studio?.email ?? null,
           status: "PAID",
         });

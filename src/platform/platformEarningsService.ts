@@ -9,6 +9,29 @@ import { planName } from "../billing/billingPlans";
  * unchanged; PlatformService still exposes listEarnings and
  * platformEarningEntries, delegating here.
  */
+/**
+ * Splits what a signup paid into the one-time setup (or activation) fee and
+ * the first period's price. Signups from before the setup fee was added on top
+ * have no split: with `coverageMonths` the whole amount was the setup fee that
+ * covered those months; without it the whole amount was the first period.
+ */
+export const splitSignupCharge = (x: {
+  amountCharged: number | null;
+  setupFeeCharged: number | null;
+  coverageMonths: number | null;
+  billingMode: string;
+}): { setup: number; period: number } => {
+  const amount = x.amountCharged ?? 0;
+  if (x.billingMode !== "SUBSCRIPTION") return { setup: amount, period: 0 };
+  if (x.setupFeeCharged != null) {
+    const setup = Math.min(amount, x.setupFeeCharged);
+    return { setup, period: amount - setup };
+  }
+  return x.coverageMonths
+    ? { setup: amount, period: 0 }
+    : { setup: 0, period: amount };
+};
+
 export class PlatformEarningsService extends Connection {
   // Paid GMV per studio (booking payments + product orders), rounded to 2dp.
   /**
@@ -77,7 +100,13 @@ export class PlatformEarningsService extends Connection {
           amountCharged: { gt: 0 },
           ...(within ? { updatedAt: within } : {}),
         },
-        select: { studioId: true, amountCharged: true },
+        select: {
+          studioId: true,
+          amountCharged: true,
+          setupFeeCharged: true,
+          coverageMonths: true,
+          billingMode: true,
+        },
       }),
       this.studioBillingCharge.findMany({
         where: { status: "APPLIED", ...(within ? { appliedAt: within } : {}) },
@@ -88,11 +117,12 @@ export class PlatformEarningsService extends Connection {
     const renewals = new Map<string, number>();
     const commissions = new Map<string, number>();
     for (const x of signups) {
-      if (x.studioId)
-        setupFees.set(
-          x.studioId,
-          (setupFees.get(x.studioId) ?? 0) + (x.amountCharged ?? 0),
-        );
+      if (!x.studioId) continue;
+      const { setup, period } = splitSignupCharge(x);
+      if (setup)
+        setupFees.set(x.studioId, (setupFees.get(x.studioId) ?? 0) + setup);
+      if (period)
+        renewals.set(x.studioId, (renewals.get(x.studioId) ?? 0) + period);
     }
     for (const c of charges)
       renewals.set(c.studioId, (renewals.get(c.studioId) ?? 0) + c.amount);
@@ -157,6 +187,7 @@ export class PlatformEarningsService extends Connection {
           cadence: true,
           billingMode: true,
           amountCharged: true,
+          setupFeeCharged: true,
           coverageMonths: true,
           updatedAt: true,
         },
@@ -210,21 +241,39 @@ export class PlatformEarningsService extends Connection {
 
     for (const x of signups) {
       const sub = x.billingMode === "SUBSCRIPTION";
-      entries.push({
-        id: `signup:${x.id}`,
-        date: x.updatedAt,
-        studio: studioRef(x.studioId),
-        purpose: sub ? "SETUP_FEE" : "ACTIVATION_FEE",
-        description: sub
-          ? `Setup fee at signup · ${planLabel(x.plan, x.cadence)}${x.coverageMonths ? ` · covers ${x.coverageMonths} months` : ""}`
-          : `Activation fee at signup · ${planName(x.plan)} pay as you earn`,
-        amount: x.amountCharged ?? 0,
-        reference: x.reference,
-        plan: x.plan,
-        cadence: sub ? x.cadence : null,
-        estimated: false,
-        detail: { coverageMonths: x.coverageMonths ?? null },
-      });
+      const { setup, period } = splitSignupCharge(x);
+      if (setup > 0 || !sub) {
+        entries.push({
+          id: `signup:${x.id}`,
+          date: x.updatedAt,
+          studio: studioRef(x.studioId),
+          purpose: sub ? "SETUP_FEE" : "ACTIVATION_FEE",
+          description: sub
+            ? `Setup fee at signup · ${planLabel(x.plan, x.cadence)}${x.coverageMonths ? ` · covers ${x.coverageMonths} months` : ""}`
+            : `Activation fee at signup · ${planName(x.plan)} pay as you earn`,
+          amount: setup,
+          reference: x.reference,
+          plan: x.plan,
+          cadence: sub ? x.cadence : null,
+          estimated: false,
+          detail: { coverageMonths: x.coverageMonths ?? null },
+        });
+      }
+      if (sub && period > 0) {
+        entries.push({
+          id: `signup-period:${x.id}`,
+          date: x.updatedAt,
+          studio: studioRef(x.studioId),
+          purpose: "RENEWAL",
+          description: `First ${x.cadence === "YEARLY" ? "year" : "month"} at signup · ${planLabel(x.plan, x.cadence)}`,
+          amount: period,
+          reference: x.reference,
+          plan: x.plan,
+          cadence: x.cadence,
+          estimated: false,
+          detail: {},
+        });
+      }
     }
     for (const c of charges) {
       entries.push({

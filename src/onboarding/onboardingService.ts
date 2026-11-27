@@ -17,7 +17,7 @@ import {
   validateStudioSlug,
   commissionFor,
   setupFeeFor,
-  subscriptionSetupFor,
+  subscriptionSetupFeeFor,
   planPriceFor,
 } from "../platform/platformService";
 import {
@@ -224,38 +224,37 @@ export class OnboardingService extends Connection {
     // Amount charged now:
     //  - revenue-share: the plan's one-time activation fee (0 = provisioned
     //    immediately with no payment);
-    //  - subscription with a setup fee: the setup fee, which covers the first
-    //    `months` months in place of the first period;
-    //  - subscription without one: the first period's price.
-    const setup =
-      billingMode === "SUBSCRIPTION"
-        ? subscriptionSetupFor(plan, cadence, cfg)
-        : null;
-    const listPesewas =
-      billingMode === "REVENUE_SHARE"
-        ? Math.round(setupFeeFor(plan, cfg) * 100)
-        : setup
-          ? Math.round(setup.fee * 100)
-          : toPesewas(planPriceFor(plan, cadence, cfg));
+    //  - subscription: the first period's price PLUS the one-time setup fee.
+    //    The next renewal is the plan's price alone.
+    const setupFee =
+      billingMode === "SUBSCRIPTION" ? subscriptionSetupFeeFor(plan, cfg) : 0;
+    const periodPesewas = toPesewas(planPriceFor(plan, cadence, cfg));
 
-    if (billingMode === "SUBSCRIPTION" && !listPesewas) {
+    if (billingMode === "SUBSCRIPTION" && !periodPesewas) {
       throw new ApiError(
         "Billing is not configured for that plan yet. Please contact us.",
         HttpCode.BAD_GATEWAY,
       );
     }
-    // A billing promo takes its % off whatever is charged now. The welcome
-    // discount (set by the super admin) also applies to a plain first period,
-    // but not to a setup or activation fee. They don't stack: the bigger wins.
+    // A billing promo takes its % off the plan's price. The welcome discount
+    // (set by the super admin) applies to the first period too. They don't
+    // stack: the bigger wins. Neither touches the subscription setup fee.
     const promo = await promoPercent(input.promoCode, plan);
     const welcomePercent =
-      billingMode === "SUBSCRIPTION" && !setup
-        ? cfg.newStudioDiscountPercent
-        : 0;
-    const amountPesewas = Math.round(
-      listPesewas *
+      billingMode === "SUBSCRIPTION" ? cfg.newStudioDiscountPercent : 0;
+    const discountedPeriodPesewas = Math.round(
+      periodPesewas *
         (1 - Math.min(100, Math.max(promo.percent, welcomePercent)) / 100),
     );
+    const setupPesewas = Math.round(setupFee * 100);
+    const amountPesewas =
+      billingMode === "REVENUE_SHARE"
+        ? Math.round(
+            setupFeeFor(plan, cfg) *
+              100 *
+              (1 - Math.min(100, promo.percent) / 100),
+          )
+        : discountedPeriodPesewas + setupPesewas;
 
     const reference = `${SIGNUP_PREFIX}${shortId()}`;
     const ownerPasswordHash = await getPasswordHash(ownerPassword);
@@ -285,7 +284,9 @@ export class OnboardingService extends Connection {
         // Recorded now, so finalize provisions exactly what was paid for even
         // if the super admin changes the fees in between.
         amountCharged: amountPesewas / 100,
-        ...(setup ? { coverageMonths: setup.months } : {}),
+        ...(billingMode === "SUBSCRIPTION"
+          ? { setupFeeCharged: setupPesewas / 100 }
+          : {}),
       },
     });
 
@@ -409,8 +410,9 @@ export class OnboardingService extends Connection {
               percent: cfg.newStudioDiscountPercent,
               months: cfg.newStudioDiscountMonths,
             },
-        // A setup fee covers its months; otherwise the first paid period.
-        // Either way the plan's normal price is due when this period ends.
+        // The first paid period (the setup fee is on top of it and covers no
+        // time). Old signups that used a setup fee in place of the first
+        // period keep the months it covered.
         subscription: revenueShare
           ? { status: "revenue_share", currentPeriodEnd: null }
           : {
@@ -434,12 +436,13 @@ export class OnboardingService extends Connection {
       data: { status: "PROVISIONED", studioId: studio.id },
     });
 
-    // Per-studio payment audit for the signup charge (setup fee or first period).
+    // Per-studio payment audit for the signup charge (setup fee and first period).
     const amount =
       signup.amountCharged ??
       (revenueShare
         ? setupFeeFor(plan, cfg)
         : planPriceFor(plan, cadence, cfg));
+    const setupFeePaid = revenueShare ? 0 : (signup.setupFeeCharged ?? 0);
     await this.audit.record({
       actor: { email: signup.ownerEmail, role: "customer" },
       action: "payment.signup.succeeded",
@@ -453,6 +456,7 @@ export class OnboardingService extends Connection {
         cadence,
         billingMode,
         amount,
+        ...(setupFeePaid > 0 ? { setupFee: setupFeePaid } : {}),
         ...(signup.coverageMonths
           ? { setupFeeCoversMonths: signup.coverageMonths }
           : {}),
@@ -502,6 +506,18 @@ export class OnboardingService extends Connection {
                       {
                         label: "Covers",
                         value: `Your first ${signup.coverageMonths} months`,
+                      },
+                    ]
+                  : []),
+                ...(setupFeePaid > 0
+                  ? [
+                      {
+                        label: `${cadence === "YEARLY" ? "First year" : "First month"} (${planName(plan)})`,
+                        value: ghs(amount - setupFeePaid),
+                      },
+                      {
+                        label: "One-time setup fee",
+                        value: ghs(setupFeePaid),
                       },
                     ]
                   : []),
@@ -590,6 +606,7 @@ export class OnboardingService extends Connection {
       cadence: studio.billingCadence,
       billingMode: studio.billingMode,
       amountPaid: signup.amountCharged ?? null,
+      setupFeePaid: subscription ? (signup.setupFeeCharged ?? null) : null,
       currency: "GHS",
       paidAt: signup.updatedAt,
       // Subscription: the setup fee covers the first period(s).

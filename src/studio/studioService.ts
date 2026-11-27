@@ -61,6 +61,9 @@ const CONTENT_TEXT_LIMITS = {
   loyaltyText: 300,
   ctaHeading: 120,
   contactHeading: 120,
+  cancellationPolicy: 1500,
+  refundPolicy: 1500,
+  deliveryPolicy: 1500,
 } as const;
 type ContentTextField = keyof typeof CONTENT_TEXT_LIMITS;
 

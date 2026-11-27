@@ -97,8 +97,8 @@ export interface BillingConfig {
   setupFeePremium: number;
   setupFeeStorefront: number;
   commissionStorefrontPercent: number;
-  // Subscription setup fee: charged at signup in place of the first period's
-  // price and covering the first setupFeeMonths* months. 0 = no setup fee.
+  // Subscription setup fee: a one-time fee added to the first period's price at
+  // signup. 0 = no setup fee. (setupFeeMonths* below are no longer used.)
   subscriptionSetupFeeStandard: number;
   subscriptionSetupFeePremium: number;
   subscriptionSetupFeeStorefront: number;
@@ -281,28 +281,20 @@ export const planPriceFor = (
 };
 
 /**
- * The subscription setup fee for a plan and cadence, and how many months it
- * covers, or null when the plan has no setup fee (the studio then pays the
- * first period's price as usual).
+ * The one-time setup fee (GHS) for a subscription plan, ADDED to the first
+ * period's price at signup. 0 when the plan has none. The next renewal is the
+ * plan's price alone.
  */
-export const subscriptionSetupFor = (
+export const subscriptionSetupFeeFor = (
   plan: Plan,
-  cadence: "MONTHLY" | "YEARLY",
   cfg: BillingConfig,
-): { fee: number; months: number } | null => {
+): number => {
   const fee = byPlan(plan, {
     STANDARD: cfg.subscriptionSetupFeeStandard,
     PREMIUM: cfg.subscriptionSetupFeePremium,
     STOREFRONT: cfg.subscriptionSetupFeeStorefront,
   });
-  if (!(fee > 0)) return null;
-  return {
-    fee,
-    months:
-      cadence === "YEARLY"
-        ? cfg.setupFeeMonthsYearly
-        : cfg.setupFeeMonthsMonthly,
-  };
+  return fee > 0 ? fee : 0;
 };
 
 // Commission % the platform takes per transaction for a plan (REVENUE_SHARE).
@@ -904,6 +896,7 @@ export class PlatformService extends Connection {
         select: {
           reference: true,
           amountCharged: true,
+          setupFeeCharged: true,
           coverageMonths: true,
           updatedAt: true,
         },
@@ -936,6 +929,7 @@ export class PlatformService extends Connection {
         ? {
             reference: signup.reference,
             amount: signup.amountCharged ?? 0,
+            setupFee: signup.setupFeeCharged,
             coverageMonths: signup.coverageMonths,
             date: signup.updatedAt,
           }

@@ -238,6 +238,11 @@ model StudioContent {
   ctaImageUrl      String?
   contactHeading   String?
   showTestimonials Boolean @default(true)
+  // The studio's own policies, shown to customers before they book or pay
+  // (Paystack requires merchants to publish them). Null = the standard wording.
+  cancellationPolicy String? @db.VarChar(1500)
+  refundPolicy       String? @db.VarChar(1500)
+  deliveryPolicy     String? @db.VarChar(1500)
   // What kind of studio (hair, nails, spa...): picks the website's default
   // wording. Null = general beauty studio.
   studioType       String?
@@ -441,6 +446,11 @@ model StudioSignup {
   // platform's fees can't change what this studio paid for. Null on signups
   // made before these were recorded.
   amountCharged     Float?
+  // Of amountCharged, the one-time setup fee (the rest is the first period's
+  // price). Null on signups made before the setup fee was added on top.
+  setupFeeCharged   Float?
+  // Months a setup fee used to cover in place of the first period. No longer
+  // set: the setup fee is now added to the first period's price.
   coverageMonths    Int?
 
   createdAt DateTime @default(now())
@@ -588,11 +598,11 @@ model PlatformConfig {
   setupFeeStandard          Float   @default(0)
   setupFeePremium           Float   @default(0)
 
-  // Subscription setup fee (GHS) per plan, charged at signup instead of the
-  // first period's price. It covers the first `setupFeeMonths*` months; the
-  // normal monthly/yearly price is due after that. 0 turns it off.
-  subscriptionSetupFeeStandard Float @default(0)
-  subscriptionSetupFeePremium  Float @default(0)
+  // Subscription setup fee (GHS) per plan: a one-time fee ADDED to the first
+  // period's price at signup (the next renewal is the plan price alone).
+  // 0 turns it off. setupFeeMonths* are no longer used.
+  subscriptionSetupFeeStandard Float @default(100)
+  subscriptionSetupFeePremium  Float @default(100)
   setupFeeMonthsMonthly        Int   @default(2)
   setupFeeMonthsYearly         Int   @default(3)
 
@@ -606,7 +616,7 @@ model PlatformConfig {
   // pay-as-you-earn commission and activation fee.
   priceStorefrontMonthly         Float?
   priceStorefrontYearly          Float?
-  subscriptionSetupFeeStorefront Float  @default(0)
+  subscriptionSetupFeeStorefront Float  @default(100)
   commissionStorefrontPercent    Float  @default(5)
   setupFeeStorefront             Float  @default(0)
 
