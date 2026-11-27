@@ -57,8 +57,11 @@ Port 5060 and Postgres are never opened in UFW; Nginx is the only way in.
    `sudo certbot --nginx -d api.zuristudios.com --redirect -m YOU@EMAIL --agree-tos -n`
 4. **Settings** (Server): `sudoedit /etc/zuri/api.env`. Fill every empty value
    (Paystack **live** keys, JWT secret from `openssl rand -hex 48`, AWS media
-   bucket, Plunk). Check: `sudo grep -nE '^[A-Z_]+=$' /etc/zuri/api.env`;
-   only `BACKUP_BUCKET` may stay empty.
+   bucket, Plunk, `TOTP_ENCRYPTION_KEY`, VAPID push keys, Turnstile). Check:
+   `sudo grep -nE '^[A-Z_]+=$' /etc/zuri/api.env`; only `BACKUP_BUCKET` and the
+   `WHATSAPP_*` token and number id (WhatsApp is optional) may stay empty.
+   Generate the VAPID keys once with `npx web-push generate-vapid-keys` and never
+   regenerate them.
 5. **Backups off the server:** create a **private** S3 bucket (not the media
    one, which CloudFront serves publicly), set `BACKUP_BUCKET`, and give the
    AWS keys in `api.env` `s3:PutObject` on it. Add a lifecycle rule to delete
