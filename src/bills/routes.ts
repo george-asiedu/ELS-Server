@@ -59,7 +59,7 @@ router.get("/", authenticate, requireAdmin, async (req, res) =>
     .json(
       await bills.list(
         typeof req.query.status === "string" ? req.query.status : undefined,
-        parseCursorPage(req.query.cursor, req.query.limit, 25),
+        parseCursorPage(req.query.cursor, req.query.limit),
       ),
     ),
 );

@@ -26,7 +26,7 @@ export interface UserListQuery {
 export class UserDirectoryService extends Connection {
   public async list(q: UserListQuery) {
     const pageSize = Math.min(
-      Math.max(Number(q.pageSize) || 20, 1),
+      Math.max(Number(q.pageSize) || 15, 1),
       MAX_PAGE_SIZE,
     );
     const page = Math.max(Number(q.page) || 1, 1);

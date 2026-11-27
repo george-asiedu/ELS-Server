@@ -21,7 +21,7 @@ export class FeatureRequestController {
   public static listMine = async (req: Request, res: Response) => {
     const result = await service.listForStudio(
       req.studioId,
-      parseCursorPage(req.query.cursor, req.query.limit, 20),
+      parseCursorPage(req.query.cursor, req.query.limit),
     );
     return res.status(200).json(result);
   };
@@ -33,7 +33,7 @@ export class FeatureRequestController {
       typeof req.query.status === "string" ? req.query.status : undefined;
     const result = await service.listAll(
       status,
-      parseCursorPage(req.query.cursor, req.query.limit, 20),
+      parseCursorPage(req.query.cursor, req.query.limit),
     );
     return res.status(200).json(result);
   };

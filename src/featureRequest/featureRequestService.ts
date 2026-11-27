@@ -16,6 +16,7 @@ import {
 import { addExtraCharge, waiveExtraCharge } from "../billing/extraCharges";
 import { notifyStudioAdmins } from "../push/pushService";
 import { platformBrand } from "../notifications/brand";
+import { alertPlatform } from "../notifications/platformAlert";
 import { env } from "../config/env.config";
 import { S3BucketService } from "../bucket/s3BucketService";
 import { platformBrandForPlan } from "../notifications/brand";
@@ -57,24 +58,6 @@ export class FeatureRequestService extends Connection {
       ...r,
       images: (r.images ?? []).map((u) => this.s3.deliveryUrl(u) ?? u),
     };
-  }
-
-  /**
-   * Every super admin's email. User is a tenant-scoped model, so this must run
-   * in the super-admin context: from a studio request the ambient scope would
-   * filter to that studio and find nobody.
-   */
-  private async superAdminEmails(): Promise<string[]> {
-    return runAsSuperAdmin(async () => {
-      const admins = await this.user.findMany({
-        where: { role: "SUPER_ADMIN" },
-        select: { email: true },
-      });
-      const emails = admins.map((a) => a.email).filter(Boolean);
-      // Fall back to the configured sender so a request is never silently
-      // unreported if no SUPER_ADMIN row exists yet.
-      return emails.length ? emails : [env.platformEmail];
-    });
   }
 
   /** Where to reach the studio that raised a request (owner account email). */
@@ -183,17 +166,19 @@ export class FeatureRequestService extends Connection {
         reviewUrl: `${env.clientUrl}/platform/feature-requests`,
       });
 
-      for (const to of await this.superAdminEmails()) {
-        await this.notifications.send({
-          template: NotificationTemplate.FEATURE_REQUEST_SUBMITTED_PLATFORM,
-          to,
-          subject,
-          html,
-          studioId,
-          entityType: "FeatureRequest",
-          entityId: requestId,
-        });
-      }
+      await alertPlatform({
+        template: NotificationTemplate.FEATURE_REQUEST_SUBMITTED_PLATFORM,
+        subject,
+        html,
+        studioId,
+        entityType: "FeatureRequest",
+        entityId: requestId,
+        push: {
+          title: `Feature request from ${studio?.name ?? "a studio"}`,
+          body: title,
+          url: "/platform/feature-requests",
+        },
+      });
     } catch (error) {
       console.error("Feature request notification failed:", error);
     }

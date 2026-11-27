@@ -1,7 +1,12 @@
 import { ApiError } from "../middleware/apiError";
 import { createTenantClient } from "../tenant/tenantClient";
 import { addExtraCharge, waiveExtraCharge } from "../billing/extraCharges";
-import { notifyStudioAdmins, notifyUsers } from "../push/pushService";
+import { notifyStudioAdmins } from "../push/pushService";
+import { alertPlatform } from "../notifications/platformAlert";
+import { NotificationTemplate } from "../notifications/registry";
+import { platformBrand } from "../notifications/brand";
+import { trainingRequestSubmitted } from "../notifications/templates/trainingRequest";
+import { env } from "../config/env.config";
 
 // Training. Online training (the guides in the dashboard and a free live
 // session) costs nothing and needs no request. In-person training is a request:
@@ -53,22 +58,37 @@ export const requestInPerson = async (
       notes: text(input.notes, 500),
     },
   });
-  const studio = await raw.studio.findUnique({
-    where: { id: studioId },
-    select: { name: true },
+  const [studio, requestedBy] = await Promise.all([
+    raw.studio.findUnique({
+      where: { id: studioId },
+      select: { name: true, slug: true },
+    }),
+    userId
+      ? raw.user.findUnique({ where: { id: userId }, select: { email: true } })
+      : null,
+  ]);
+  const { subject, html } = trainingRequestSubmitted(platformBrand, {
+    studioName: studio?.name ?? "A business",
+    studioSlug: studio?.slug ?? studioId,
+    requestedByEmail: requestedBy?.email ?? null,
+    preferredDate: created.preferredDate,
+    location: created.location,
+    notes: created.notes,
+    reviewUrl: `${env.clientUrl}/platform/training`,
   });
-  const admins = await raw.user.findMany({
-    where: { role: "SUPER_ADMIN" },
-    select: { id: true },
-  });
-  await notifyUsers(
-    admins.map((a) => a.id),
-    {
+  await alertPlatform({
+    template: NotificationTemplate.TRAINING_REQUEST_SUBMITTED_PLATFORM,
+    subject,
+    html,
+    studioId,
+    entityType: "TrainingRequest",
+    entityId: created.id,
+    push: {
       title: "In-person training request",
       body: `${studio?.name ?? "A business"} asked for in-person training.`,
       url: "/platform/training",
     },
-  ).catch(() => 0);
+  });
   return created;
 };
 

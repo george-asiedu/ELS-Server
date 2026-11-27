@@ -1,5 +1,8 @@
 import { ApiError } from "../middleware/apiError";
 
+/** Every list returns this many rows unless the caller asks for another number. */
+export const DEFAULT_PAGE_SIZE = 15;
+
 export interface CursorPage {
   cursor?: string;
   limit: number;
@@ -17,7 +20,7 @@ const queryString = (value: unknown): string | undefined =>
 export const parseCursorPage = (
   cursorValue: unknown,
   limitValue: unknown,
-  defaultLimit = 10,
+  defaultLimit = DEFAULT_PAGE_SIZE,
 ): CursorPage => {
   const cursor = queryString(cursorValue);
   const rawLimit = queryString(limitValue);

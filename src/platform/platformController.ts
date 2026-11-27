@@ -1,4 +1,5 @@
 import { Request, Response } from "express";
+import { platformStorageSettings } from "../storage/storageService";
 import { parseCursorPage } from "../utils/cursorPagination";
 import {
   loadBillingConfig,
@@ -89,7 +90,7 @@ export class PlatformController {
         await platformService.getDirectory(
           req.query.q,
           req.query.kind,
-          parseCursorPage(req.query.cursor, req.query.limit, 24),
+          parseCursorPage(req.query.cursor, req.query.limit),
         ),
       );
   };
@@ -144,13 +145,14 @@ export class PlatformController {
   // Public: what the platform pages need before anyone signs in (site
   // details, plan prices, setup fees). Nothing here is secret.
   public static publicConfig = async (_req: Request, res: Response) => {
-    const [site, billing] = await Promise.all([
+    const [site, billing, storage] = await Promise.all([
       loadSiteSettings(),
       loadBillingConfig(),
+      platformStorageSettings(),
     ]);
     return res
       .status(200)
-      .json({ message: "Platform config", data: { site, billing } });
+      .json({ message: "Platform config", data: { site, billing, storage } });
   };
 
   public static getSiteSettings = async (_req: Request, res: Response) => {
@@ -179,7 +181,7 @@ export class PlatformController {
 
   public static listStudios = async (req: Request, res: Response) => {
     const result = await platformService.listStudios(
-      parseCursorPage(req.query.cursor, req.query.limit, 15),
+      parseCursorPage(req.query.cursor, req.query.limit),
       typeof req.query.status === "string" ? req.query.status : undefined,
     );
     return res.status(200).json(result);

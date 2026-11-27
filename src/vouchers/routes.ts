@@ -38,7 +38,7 @@ router.get("/mine", authenticate, async (req: Request, res: Response) =>
       await service.mine(
         req.user!.id,
         req.user!.email,
-        parseCursorPage(req.query.cursor, req.query.limit, 20),
+        parseCursorPage(req.query.cursor, req.query.limit),
       ),
     ),
 );
@@ -52,9 +52,7 @@ router.get(
     res
       .status(200)
       .json(
-        await service.list(
-          parseCursorPage(req.query.cursor, req.query.limit, 25),
-        ),
+        await service.list(parseCursorPage(req.query.cursor, req.query.limit)),
       ),
 );
 router.post(

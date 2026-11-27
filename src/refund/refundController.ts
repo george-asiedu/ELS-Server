@@ -66,7 +66,7 @@ export class RefundController {
       typeof req.query.status === "string" ? req.query.status : undefined;
     const result = await refunds.list({
       ...(status ? { status } : {}),
-      page: parseCursorPage(req.query.cursor, req.query.limit, 50),
+      page: parseCursorPage(req.query.cursor, req.query.limit),
     });
     return res.status(200).json(result);
   };

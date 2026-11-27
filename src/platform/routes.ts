@@ -1,5 +1,5 @@
 import { billingAdminRoutes } from "./billingAdmin";
-import { cachePublic } from "../cache/cache";
+import { bumpVersion, cachePublic } from "../cache/cache";
 import { Router } from "express";
 import { AuthController } from "../auth/authController";
 import pushRoutes from "../push/routes";
@@ -175,6 +175,8 @@ router.get("/storage-settings", async (_req, res) =>
 );
 router.patch("/storage-settings", async (req, res) => {
   const data = await savePlatformStorageSettings(req.body ?? {});
+  // The plan cards on the website show these, so don't let a cached copy linger.
+  await bumpVersion("all");
   await audit.record({
     actor: { id: req.user.id, email: req.user.email, role: req.user.role },
     action: "platform.storage_settings.updated",

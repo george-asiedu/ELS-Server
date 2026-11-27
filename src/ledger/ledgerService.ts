@@ -1,5 +1,6 @@
 import { Connection } from "../db/dbConnection";
 import { ApiError } from "../middleware/apiError";
+import { DEFAULT_PAGE_SIZE } from "../utils/cursorPagination";
 import { PaystackVerifyData } from "../payment/paystackClient";
 
 export type LedgerType =
@@ -233,7 +234,7 @@ export class LedgerService extends Connection {
     limit?: number | undefined;
     cursor?: string | undefined;
   }) {
-    const take = Math.min(Math.max(opts.limit ?? 50, 1), 200);
+    const take = Math.min(Math.max(opts.limit ?? DEFAULT_PAGE_SIZE, 1), 200);
 
     const where: Record<string, unknown> = {};
     if (opts.studioId) where.studioId = opts.studioId;

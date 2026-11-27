@@ -880,13 +880,19 @@ export class PlatformService extends Connection {
         })
       : null;
 
-    const [userCount, appointmentCount, serviceCount, orderCount] =
-      await Promise.all([
-        this.user.count({ where: { studioId: id } }),
-        this.appointment.count({ where: { studioId: id } }),
-        this.service.count({ where: { studioId: id } }),
-        this.order.count({ where: { studioId: id } }),
-      ]);
+    const [
+      userCount,
+      appointmentCount,
+      serviceCount,
+      orderCount,
+      productCount,
+    ] = await Promise.all([
+      this.user.count({ where: { studioId: id } }),
+      this.appointment.count({ where: { studioId: id } }),
+      this.service.count({ where: { studioId: id } }),
+      this.order.count({ where: { studioId: id } }),
+      this.product.count({ where: { studioId: id } }),
+    ]);
 
     // Plan, period and what this studio has paid the platform.
     const [signup, earnings] = await Promise.all([
@@ -956,7 +962,13 @@ export class PlatformService extends Connection {
     return {
       ...studio,
       owner,
-      counts: { userCount, appointmentCount, serviceCount, orderCount },
+      counts: {
+        userCount,
+        appointmentCount,
+        serviceCount,
+        orderCount,
+        productCount,
+      },
       billing,
     };
   }

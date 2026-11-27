@@ -58,7 +58,7 @@ export class PlatformActivityLogService extends Connection {
     statusCode?: number | undefined;
     method?: string | undefined;
   }) {
-    const page = parseCursorPage(opts.cursor, String(opts.limit), 50);
+    const page = parseCursorPage(opts.cursor, String(opts.limit));
     const where: {
       studioId?: string;
       statusCode?: { gte: number; lt: number };

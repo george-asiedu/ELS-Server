@@ -30,7 +30,7 @@ export class PlatformReviewController {
   // Super admin — moderate.
   public static listAll = async (req: Request, res: Response) => {
     const result = await service.listAll(
-      parseCursorPage(req.query.cursor, req.query.limit, 20),
+      parseCursorPage(req.query.cursor, req.query.limit),
     );
     return res.status(200).json(result);
   };
