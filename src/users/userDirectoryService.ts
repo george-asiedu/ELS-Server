@@ -12,7 +12,7 @@ import { round2 } from "../utils/money";
 // Passwords, reset tokens and session data are never selected.
 
 const MAX_PAGE_SIZE = 100;
-const ROLES = ["CUSTOMER", "ADMIN"] as const;
+const ROLES = ["CUSTOMER", "ADMIN", "STAFF"] as const;
 type ListedRole = (typeof ROLES)[number];
 
 export interface UserListQuery {
@@ -73,8 +73,13 @@ export class UserDirectoryService extends Connection {
     ]);
 
     const ids = users.map((u) => u.id);
-    const [bookings, spend, studios] = await Promise.all([
+    const [bookings, orderCounts, spend, studios] = await Promise.all([
       this.appointment.groupBy({
+        by: ["userId"],
+        where: { userId: { in: ids } },
+        _count: { _all: true },
+      }),
+      this.order.groupBy({
         by: ["userId"],
         where: { userId: { in: ids } },
         _count: { _all: true },
@@ -94,6 +99,7 @@ export class UserDirectoryService extends Connection {
       }),
     ]);
     const bookingsBy = new Map(bookings.map((b) => [b.userId, b._count._all]));
+    const ordersBy = new Map(orderCounts.map((o) => [o.userId, o._count._all]));
     const studioBy = new Map(studios.map((s) => [s.id, s]));
 
     return {
@@ -111,6 +117,7 @@ export class UserDirectoryService extends Connection {
             : null,
           isOwner: Boolean(studio && studio.ownerUserId === u.id),
           bookings: bookingsBy.get(u.id) ?? 0,
+          orders: ordersBy.get(u.id) ?? 0,
           totalSpent: spend.get(u.id) ?? 0,
           createdAt: u.createdAt,
         };
