@@ -1,6 +1,6 @@
 import { PAID_ORDER_STATUSES } from "../order/orderStatus";
 import { resetStockAlert } from "./stockAlerts";
-import { cleanVariants } from "./pricing";
+import { cleanTiers, cleanVariants } from "./pricing";
 import { Connection } from "../db/dbConnection";
 import { ApiError } from "../middleware/apiError";
 import { S3BucketService } from "../bucket/s3BucketService";
@@ -29,6 +29,12 @@ export interface CreateProductInput {
   unit?: string | null;
   /** A price for each option; an empty list goes back to one price. */
   variants?: { label: string; price: number }[];
+  /** Pre-order: the day it is ready (YYYY-MM-DD). Null clears it. */
+  availableFrom?: string | null;
+  /** The least a customer can order, in units. */
+  minQuantity?: number;
+  /** Cheaper in bulk; an empty list clears it. */
+  bulkTiers?: { minQty: number; percentOff: number }[];
   audience?: string;
   brand?: string | null;
   attributes?: string[];
@@ -106,7 +112,36 @@ export class ProductService extends Connection {
         };
       }
     }
+    // Pre-order date, minimum order and bulk prices.
+    const sellingFields: Record<string, unknown> = {};
+    if (data.availableFrom !== undefined) {
+      if (data.availableFrom === null) sellingFields.availableFrom = null;
+      else {
+        const d = new Date(`${data.availableFrom}T00:00:00.000Z`);
+        if (
+          !/^\d{4}-\d{2}-\d{2}$/.test(data.availableFrom) ||
+          Number.isNaN(d.getTime())
+        )
+          throw new ApiError("That ready-from date isn't valid", 400);
+        sellingFields.availableFrom = d;
+      }
+    }
+    if (data.minQuantity !== undefined) {
+      const m = Math.floor(Number(data.minQuantity));
+      if (!(m >= 1) || m > 100000)
+        throw new ApiError("The minimum order is a number from 1 up", 400);
+      sellingFields.minQuantity = m;
+    }
+    if (data.bulkTiers !== undefined) {
+      if (!data.bulkTiers.length) sellingFields.bulkTiers = null;
+      else {
+        const cleaned = cleanTiers(data.bulkTiers);
+        if ("error" in cleaned) throw new ApiError(cleaned.error, 400);
+        sellingFields.bulkTiers = cleaned.tiers;
+      }
+    }
     return {
+      ...sellingFields,
       ...variantFields,
       ...(data.unit !== undefined ? { unit: data.unit } : {}),
       ...(sizes ? { sizes } : {}),

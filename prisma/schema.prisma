@@ -1411,6 +1411,13 @@ model Product {
   // (what a customer chooses) and `price` is the lowest of them. Null when
   // every option costs the same.
   variants    Json?
+  // Pre-order: when it is ready (harvest, restock). While this day is still
+  // ahead the product shows "Pre-order" and an order can't be delivered earlier.
+  availableFrom DateTime?
+  // The least a customer can order of it, in units (a farm's 10 kg minimum).
+  minQuantity Int      @default(1)
+  // Cheaper per unit in bulk: [{ minQty, percentOff }], best tier that fits wins.
+  bulkTiers   Json?
   category    String // ProductCategory slug
   // Who it's for, so a shop can show Men and Women sections: MEN | WOMEN | UNISEX.
   audience    String   @default("UNISEX")
@@ -1558,6 +1565,8 @@ model Order {
   // Delivery and pickup: the customer's note for the rider, the expected time
   // the shop gives, and when the stage last changed (to spot stuck orders).
   deliveryNote          String?   @db.VarChar(300)
+  // The latest "ready from" date of the pre-order items in it, if any.
+  readyFrom             DateTime?
   deliveryEta           String?   @db.VarChar(60)
   statusUpdatedAt       DateTime?
   // The customer's code, given to the rider (or at the counter) to confirm

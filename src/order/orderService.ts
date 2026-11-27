@@ -34,6 +34,8 @@ const pickSlot = (
   windows: string[],
   date: string | undefined,
   window: string | undefined,
+  // Pre-order items: nothing can be delivered before this day.
+  notBefore?: Date | null,
 ): string | null => {
   if (!windows.length) return null;
   if (!window || !windows.includes(window))
@@ -46,8 +48,26 @@ const pickSlot = (
   const ahead = day
     ? Math.round((day.getTime() - today.getTime()) / 86_400_000)
     : -1;
-  if (!day || ahead < 0 || ahead > 13)
+  // A pre-order's day can be weeks away, so the two weeks count from then.
+  const wait = notBefore
+    ? Math.max(
+        0,
+        Math.round(
+          (new Date(
+            notBefore.toISOString().slice(0, 10) + "T12:00:00Z",
+          ).getTime() -
+            today.getTime()) /
+            86_400_000,
+        ),
+      )
+    : 0;
+  if (!day || ahead < 0 || ahead > 13 + wait)
     throw new ApiError("Choose a delivery day within the next two weeks", 400);
+  if (notBefore && ahead < wait)
+    throw new ApiError(
+      `Delivery can't be before ${notBefore.toLocaleDateString("en-GB", { day: "numeric", month: "long", timeZone: "UTC" })}, when your pre-order is ready`,
+      400,
+    );
   const label = day.toLocaleDateString("en-GB", {
     weekday: "short",
     day: "numeric",
@@ -161,8 +181,16 @@ export class OrderService extends Connection {
     });
     const byId = new Map(products.map((p) => [p.id, p]));
     const items: LineItem[] = [];
-    // Stock is per product: lines for different options share it.
+    // Stock is per product: lines for different options share it. So does a
+    // bulk price: it follows the total bought of the product.
     const wanted = new Map<string, number>();
+    const boughtOf = new Map<string, number>();
+    for (const spec of specs)
+      boughtOf.set(
+        spec.productId,
+        (boughtOf.get(spec.productId) ?? 0) +
+          Math.max(1, Math.floor(spec.quantity || 1)),
+      );
     for (const spec of specs) {
       const qty = Math.max(1, Math.floor(spec.quantity || 1));
       const p = byId.get(spec.productId);
@@ -184,6 +212,13 @@ export class OrderService extends Connection {
       if (requireOptions && colorNames.length && !color) {
         throw new ApiError(`Choose a colour for "${p.name}"`, 400);
       }
+      const bought = boughtOf.get(p.id) ?? qty;
+      if (requireOptions && p.minQuantity > 1 && bought < p.minQuantity) {
+        throw new ApiError(
+          `The minimum order for "${p.name}" is ${p.minQuantity}${p.unit ? ` ${p.unit}` : ""}`,
+          400,
+        );
+      }
       const total = (wanted.get(p.id) ?? 0) + qty;
       wanted.set(p.id, total);
       if (p.trackStock && total > p.stock) {
@@ -192,7 +227,7 @@ export class OrderService extends Connection {
       items.push({
         productId: p.id,
         name: p.name,
-        unitPrice: effectivePriceFor(p, size),
+        unitPrice: effectivePriceFor(p, size, bought),
         costPrice: p.costPrice ?? 0,
         quantity: qty,
         size,
@@ -287,12 +322,32 @@ export class OrderService extends Connection {
       throw new ApiError("Choose your delivery area", 400);
     const deliveryFee =
       fulfillment !== "DELIVERY" ? 0 : zone ? zone.fee : settings.deliveryFee;
+    // Pre-order items: the order is ready from the latest of their dates.
+    const preorders = await this.product.findMany({
+      where: {
+        id: {
+          in: params.lineItems
+            .map((l) => l.productId)
+            .filter((x): x is string => Boolean(x)),
+        },
+        availableFrom: { gt: new Date() },
+      },
+      select: { availableFrom: true },
+    });
+    const readyFrom = preorders.reduce<Date | null>(
+      (latest, p) =>
+        p.availableFrom && (!latest || p.availableFrom > latest)
+          ? p.availableFrom
+          : latest,
+      null,
+    );
     const deliverySlot =
       fulfillment === "DELIVERY"
         ? pickSlot(
             cleanSlots(settings.deliverySlots),
             params.deliveryDate,
             params.deliveryWindow,
+            readyFrom,
           )
         : null;
     let total =
@@ -339,6 +394,7 @@ export class OrderService extends Connection {
           fulfillment === "DELIVERY" ? params.deliveryPhone!.trim() : null,
         deliveryZone: zone?.name ?? null,
         deliverySlot,
+        ...(readyFrom ? { readyFrom } : {}),
         deliveryNote:
           fulfillment === "DELIVERY" && params.deliveryNote?.trim()
             ? params.deliveryNote.trim().slice(0, 300)

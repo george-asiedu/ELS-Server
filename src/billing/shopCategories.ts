@@ -10,6 +10,7 @@ export const SHOP_CATEGORIES = [
   { id: "hair", label: "Hair & wigs" },
   { id: "perfume", label: "Perfume & fragrance" },
   { id: "food", label: "Food & groceries" },
+  { id: "farm", label: "Farm & produce" },
   { id: "drinks", label: "Drinks" },
   { id: "bakery", label: "Cakes & pastries" },
   { id: "electronics", label: "Electronics & gadgets" },

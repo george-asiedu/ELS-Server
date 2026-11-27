@@ -28,16 +28,26 @@ export const readVariants = (raw: unknown): Variant[] => {
  * fraction comes off every option, so a 20% sale is 20% off each of them.
  */
 export const effectivePriceFor = (
-  p: { price: number; promoPrice: number | null; variants?: unknown },
+  p: {
+    price: number;
+    promoPrice: number | null;
+    variants?: unknown;
+    bulkTiers?: unknown;
+  },
   size?: string | null,
+  qty?: number,
 ): number => {
   const variant = size
     ? readVariants(p.variants).find((v) => v.label === size)
     : undefined;
   const base = variant?.price ?? p.price;
+  let price = base;
   if (p.promoPrice != null && p.promoPrice < p.price && p.price > 0)
-    return round2((base * p.promoPrice) / p.price);
-  return base;
+    price = round2((base * p.promoPrice) / p.price);
+  // Buying enough of it: the bulk price, unless a sale is already cheaper.
+  const off = qty ? tierPercent(p.bulkTiers, qty) : 0;
+  if (off > 0) price = Math.min(price, round2(base * (1 - off / 100)));
+  return price;
 };
 
 /** Validated variants from an owner's input, or an error message. */
@@ -61,4 +71,59 @@ export const cleanVariants = (
     variants.push({ label, price });
   }
   return { variants };
+};
+
+// ---- Bulk prices ---------------------------------------------------------
+
+export interface BulkTier {
+  minQty: number;
+  percentOff: number;
+}
+
+/** The stored `bulkTiers` JSON as a clean list, largest quantity first. */
+export const readTiers = (raw: unknown): BulkTier[] => {
+  if (!Array.isArray(raw)) return [];
+  const out: BulkTier[] = [];
+  for (const t of raw) {
+    const { minQty, percentOff } = (t ?? {}) as {
+      minQty?: unknown;
+      percentOff?: unknown;
+    };
+    if (
+      Number(minQty) >= 2 &&
+      Number(percentOff) > 0 &&
+      Number(percentOff) < 100
+    )
+      out.push({
+        minQty: Math.floor(Number(minQty)),
+        percentOff: Number(percentOff),
+      });
+  }
+  return out.sort((a, b) => b.minQty - a.minQty);
+};
+
+/** The percentage off for buying `qty` of the product (0 when no tier fits). */
+export const tierPercent = (raw: unknown, qty: number): number =>
+  readTiers(raw).find((t) => qty >= t.minQty)?.percentOff ?? 0;
+
+/** Validated bulk tiers from an owner's input, or an error message. */
+export const cleanTiers = (
+  raw: unknown,
+): { tiers: BulkTier[] } | { error: string } => {
+  if (!Array.isArray(raw))
+    return { error: "Bulk prices need a quantity and a discount" };
+  const seen = new Set<number>();
+  const tiers: BulkTier[] = [];
+  for (const t of raw.slice(0, 6)) {
+    const minQty = Math.floor(Number(t?.minQty));
+    const percentOff = Math.round(Number(t?.percentOff) * 10) / 10;
+    if (!(minQty >= 2) || minQty > 100000)
+      return { error: "A bulk price starts from 2 or more" };
+    if (!(percentOff > 0) || percentOff > 90)
+      return { error: "A bulk discount is between 1% and 90%" };
+    if (seen.has(minQty)) return { error: `${minQty}+ is listed twice` };
+    seen.add(minQty);
+    tiers.push({ minQty, percentOff });
+  }
+  return { tiers: tiers.sort((a, b) => a.minQty - b.minQty) };
 };

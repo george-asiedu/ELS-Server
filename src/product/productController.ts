@@ -27,6 +27,20 @@ const parseBody = (body: Record<string, unknown>): UpdateProductInput => {
     out.variants = (
       body.variants as { label?: unknown; price?: unknown }[]
     ).map((v) => ({ label: String(v?.label ?? ""), price: Number(v?.price) }));
+  if (body.availableFrom !== undefined)
+    out.availableFrom =
+      body.availableFrom === null || body.availableFrom === ""
+        ? null
+        : String(body.availableFrom);
+  const minQuantity = toNum(body.minQuantity);
+  if (minQuantity !== undefined) out.minQuantity = minQuantity;
+  if (Array.isArray(body.bulkTiers))
+    out.bulkTiers = (
+      body.bulkTiers as { minQty?: unknown; percentOff?: unknown }[]
+    ).map((t) => ({
+      minQty: Number(t?.minQty),
+      percentOff: Number(t?.percentOff),
+    }));
   if (body.name !== undefined) out.name = String(body.name);
   if (body.description !== undefined)
     out.description = body.description === "" ? null : String(body.description);
