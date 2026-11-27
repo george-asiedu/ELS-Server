@@ -57,6 +57,7 @@ const pickSlot = (
   return `${label}, ${window}`;
 };
 import { receiptMethodLabel } from "../notifications/design/shell";
+import { effectivePriceFor } from "../product/pricing";
 
 type FulfillmentType = "PICKUP" | "DELIVERY";
 
@@ -115,9 +116,6 @@ export interface GuestCheckoutInput {
 }
 
 const orderInclude = { items: true } as const;
-
-const effectivePrice = (p: { price: number; promoPrice: number | null }) =>
-  p.promoPrice != null && p.promoPrice < p.price ? p.promoPrice : p.price;
 
 export class OrderService extends Connection {
   private notifications = new NotificationService();
@@ -194,7 +192,7 @@ export class OrderService extends Connection {
       items.push({
         productId: p.id,
         name: p.name,
-        unitPrice: effectivePrice(p),
+        unitPrice: effectivePriceFor(p, size),
         costPrice: p.costPrice ?? 0,
         quantity: qty,
         size,

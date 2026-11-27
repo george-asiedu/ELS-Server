@@ -1,5 +1,6 @@
 import { PAID_ORDER_STATUSES } from "../order/orderStatus";
 import { resetStockAlert } from "./stockAlerts";
+import { cleanVariants } from "./pricing";
 import { Connection } from "../db/dbConnection";
 import { ApiError } from "../middleware/apiError";
 import { S3BucketService } from "../bucket/s3BucketService";
@@ -24,6 +25,10 @@ export interface CreateProductInput {
   images?: string[];
   sizes?: string[];
   colors?: string[];
+  /** What one item is sold as: "kg", "crate", "bag"... Blank clears it. */
+  unit?: string | null;
+  /** A price for each option; an empty list goes back to one price. */
+  variants?: { label: string; price: number }[];
   audience?: string;
   brand?: string | null;
   attributes?: string[];
@@ -85,7 +90,25 @@ export class ProductService extends Connection {
     const images = this.cleanList(data.images)?.map((u) =>
       this.s3.assertOwnedMediaUrl(u, "products"),
     );
+    // Options with their own prices: the names are the sizes a customer
+    // chooses, and the product's own price becomes the lowest of them.
+    let variantFields: Record<string, unknown> = {};
+    if (data.variants !== undefined) {
+      if (!data.variants.length) {
+        variantFields = { variants: null };
+      } else {
+        const cleaned = cleanVariants(data.variants);
+        if ("error" in cleaned) throw new ApiError(cleaned.error, 400);
+        variantFields = {
+          variants: cleaned.variants,
+          sizes: cleaned.variants.map((v) => v.label),
+          price: Math.min(...cleaned.variants.map((v) => v.price)),
+        };
+      }
+    }
     return {
+      ...variantFields,
+      ...(data.unit !== undefined ? { unit: data.unit } : {}),
       ...(sizes ? { sizes } : {}),
       ...(colors ? { colors } : {}),
       ...(attributes ? { attributes: attributes.slice(0, 12) } : {}),

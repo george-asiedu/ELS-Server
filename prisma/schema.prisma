@@ -1404,6 +1404,13 @@ model Product {
   sizes       String[] @default([])
   // "Name|#hex", e.g. "Sand|#C2B280".
   colors      String[] @default([])
+  // What one item is sold as ("kg", "crate", "bag", "dozen"), shown with the
+  // price: GHS 45 per kg. Null for everything sold as a plain item.
+  unit        String?  @db.VarChar(20)
+  // A price for each option, [{ label, price }]. The labels are also `sizes`
+  // (what a customer chooses) and `price` is the lowest of them. Null when
+  // every option costs the same.
+  variants    Json?
   category    String // ProductCategory slug
   // Who it's for, so a shop can show Men and Women sections: MEN | WOMEN | UNISEX.
   audience    String   @default("UNISEX")

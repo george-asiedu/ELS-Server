@@ -18,6 +18,8 @@ const itemsInclude = {
           category: true,
           sizes: true,
           colors: true,
+          unit: true,
+          variants: true,
         },
       },
     },

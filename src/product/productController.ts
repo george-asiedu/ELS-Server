@@ -18,6 +18,15 @@ const parseBody = (body: Record<string, unknown>): UpdateProductInput => {
     if (Array.isArray(body[key]))
       out[key] = (body[key] as unknown[]).map(String);
   }
+  if (body.unit !== undefined)
+    out.unit =
+      body.unit === null || String(body.unit).trim() === ""
+        ? null
+        : String(body.unit).trim().slice(0, 20);
+  if (Array.isArray(body.variants))
+    out.variants = (
+      body.variants as { label?: unknown; price?: unknown }[]
+    ).map((v) => ({ label: String(v?.label ?? ""), price: Number(v?.price) }));
   if (body.name !== undefined) out.name = String(body.name);
   if (body.description !== undefined)
     out.description = body.description === "" ? null : String(body.description);
