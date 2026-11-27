@@ -77,7 +77,12 @@ const pickSlot = (
   return `${label}, ${window}`;
 };
 import { receiptMethodLabel } from "../notifications/design/shell";
-import { effectivePriceFor } from "../product/pricing";
+import {
+  effectivePriceFor,
+  readVariants,
+  stockFor,
+  usesOptionStock,
+} from "../product/pricing";
 
 type FulfillmentType = "PICKUP" | "DELIVERY";
 
@@ -219,10 +224,16 @@ export class OrderService extends Connection {
           400,
         );
       }
-      const total = (wanted.get(p.id) ?? 0) + qty;
-      wanted.set(p.id, total);
-      if (p.trackStock && total > p.stock) {
-        throw new ApiError(`Only ${p.stock} of "${p.name}" left in stock`, 400);
+      // Each option counts its own stock when it has one; otherwise they share it.
+      const stockKey = usesOptionStock(p) ? `${p.id}|${size ?? ""}` : p.id;
+      const total = (wanted.get(stockKey) ?? 0) + qty;
+      wanted.set(stockKey, total);
+      const left = stockFor(p, size);
+      if (p.trackStock && total > left) {
+        throw new ApiError(
+          `Only ${left} of "${p.name}${usesOptionStock(p) && size ? ` (${size})` : ""}" left in stock`,
+          400,
+        );
       }
       items.push({
         productId: p.id,
@@ -1397,6 +1408,32 @@ export class OrderService extends Connection {
         // read-then-write, so concurrent orders can't overwrite each other.
         for (const item of items) {
           if (!item.productId) continue;
+          // A product that counts stock per option: lock its row, take from the
+          // option bought, and keep the product's own stock as their total.
+          const optioned = await tx.product.findUnique({
+            where: { id: item.productId },
+            select: { trackStock: true, variants: true },
+          });
+          if (optioned && usesOptionStock(optioned) && item.size) {
+            await tx.$queryRaw`SELECT id FROM products WHERE id = ${item.productId} FOR UPDATE`;
+            const fresh = await tx.product.findUnique({
+              where: { id: item.productId },
+              select: { variants: true },
+            });
+            const list = readVariants(fresh?.variants).map((v) =>
+              v.label === item.size
+                ? { ...v, stock: Math.max(0, (v.stock ?? 0) - item.quantity) }
+                : v,
+            );
+            await tx.product.update({
+              where: { id: item.productId },
+              data: {
+                variants: list as never,
+                stock: list.reduce((n, v) => n + (v.stock ?? 0), 0),
+              },
+            });
+            continue;
+          }
           const decremented = await tx.product.updateMany({
             where: {
               id: item.productId,

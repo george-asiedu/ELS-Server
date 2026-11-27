@@ -28,7 +28,7 @@ export interface CreateProductInput {
   /** What one item is sold as: "kg", "crate", "bag"... Blank clears it. */
   unit?: string | null;
   /** A price for each option; an empty list goes back to one price. */
-  variants?: { label: string; price: number }[];
+  variants?: { label: string; price: number; stock?: number }[];
   /** Pre-order: the day it is ready (YYYY-MM-DD). Null clears it. */
   availableFrom?: string | null;
   /** The least a customer can order, in units. */
@@ -109,6 +109,12 @@ export class ProductService extends Connection {
           variants: cleaned.variants,
           sizes: cleaned.variants.map((v) => v.label),
           price: Math.min(...cleaned.variants.map((v) => v.price)),
+          // With a stock number on each option, the product's stock is their total.
+          ...(cleaned.variants.every((v) => v.stock !== undefined)
+            ? {
+                stock: cleaned.variants.reduce((n, v) => n + (v.stock ?? 0), 0),
+              }
+            : {}),
         };
       }
     }

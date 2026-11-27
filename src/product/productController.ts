@@ -25,8 +25,14 @@ const parseBody = (body: Record<string, unknown>): UpdateProductInput => {
         : String(body.unit).trim().slice(0, 20);
   if (Array.isArray(body.variants))
     out.variants = (
-      body.variants as { label?: unknown; price?: unknown }[]
-    ).map((v) => ({ label: String(v?.label ?? ""), price: Number(v?.price) }));
+      body.variants as { label?: unknown; price?: unknown; stock?: unknown }[]
+    ).map((v) => ({
+      label: String(v?.label ?? ""),
+      price: Number(v?.price),
+      ...(v?.stock !== undefined && v?.stock !== null && v?.stock !== ""
+        ? { stock: Number(v.stock) }
+        : {}),
+    }));
   if (body.availableFrom !== undefined)
     out.availableFrom =
       body.availableFrom === null || body.availableFrom === ""

@@ -1,6 +1,7 @@
 import { Connection } from "../db/dbConnection";
 import { ApiError } from "../middleware/apiError";
 import { S3BucketService } from "../bucket/s3BucketService";
+import { stockFor, usesOptionStock } from "../product/pricing";
 
 const itemsInclude = {
   items: {
@@ -67,14 +68,21 @@ export class CartService extends Connection {
     if (!names.length && color) throw new ApiError("Invalid colour", 400);
   }
 
-  // Stock is per product, so other options of it in the cart count too.
+  // Stock is shared by a product's options, so other options of it in the cart
+  // count too, unless each option has its own stock: then only that option's.
   private async otherLinesQty(
     cartId: string,
     productId: string,
     lineId?: string,
+    sameOption?: string,
   ) {
     const lines = await this.cartItem.findMany({
-      where: { cartId, productId, ...(lineId ? { id: { not: lineId } } : {}) },
+      where: {
+        cartId,
+        productId,
+        ...(lineId ? { id: { not: lineId } } : {}),
+        ...(sameOption !== undefined ? { size: sameOption } : {}),
+      },
       select: { quantity: true },
     });
     return lines.reduce((n, l) => n + l.quantity, 0);
@@ -93,8 +101,14 @@ export class CartService extends Connection {
       throw new ApiError("Product is not available", 404);
     }
     this.assertOptions(product, size, color);
-    if (product.trackStock && product.stock <= 0) {
-      throw new ApiError("Product is out of stock", 400);
+    const room = stockFor(product, size);
+    if (product.trackStock && room <= 0) {
+      throw new ApiError(
+        usesOptionStock(product)
+          ? `"${size}" is out of stock`
+          : "Product is out of stock",
+        400,
+      );
     }
 
     const cart = await this.getOrCreate(userId);
@@ -105,10 +119,11 @@ export class CartService extends Connection {
       cart.id,
       productId,
       existingItem?.id,
+      usesOptionStock(product) ? size : undefined,
     );
     const desired = (existingItem?.quantity ?? 0) + qty;
     const finalQty = product.trackStock
-      ? Math.min(desired, product.stock - others)
+      ? Math.min(desired, room - others)
       : desired;
     if (finalQty <= 0) {
       throw new ApiError("You already have all our stock in your bag", 400);
@@ -147,9 +162,14 @@ export class CartService extends Connection {
     }
 
     const product = await this.product.findUnique({ where: { id: productId } });
-    const others = await this.otherLinesQty(cart.id, productId, item.id);
+    const others = await this.otherLinesQty(
+      cart.id,
+      productId,
+      item.id,
+      product && usesOptionStock(product) ? size : undefined,
+    );
     const finalQty = product?.trackStock
-      ? Math.max(1, Math.min(qty, product.stock - others))
+      ? Math.max(1, Math.min(qty, stockFor(product, size) - others))
       : qty;
 
     await this.cartItem.update({

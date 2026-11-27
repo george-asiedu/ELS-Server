@@ -5,6 +5,8 @@
 export interface Variant {
   label: string;
   price: number;
+  /** How many of this option are in stock. Set on every option, or on none. */
+  stock?: number;
 }
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
@@ -15,9 +17,19 @@ export const readVariants = (raw: unknown): Variant[] => {
   const out: Variant[] = [];
   for (const v of raw) {
     if (!v || typeof v !== "object") continue;
-    const { label, price } = v as { label?: unknown; price?: unknown };
+    const { label, price, stock } = v as {
+      label?: unknown;
+      price?: unknown;
+      stock?: unknown;
+    };
     if (typeof label === "string" && label.trim() && Number(price) > 0)
-      out.push({ label: label.trim(), price: round2(Number(price)) });
+      out.push({
+        label: label.trim(),
+        price: round2(Number(price)),
+        ...(stock !== undefined && stock !== null && Number(stock) >= 0
+          ? { stock: Math.floor(Number(stock)) }
+          : {}),
+      });
   }
   return out;
 };
@@ -61,6 +73,11 @@ export const cleanVariants = (
     const label =
       typeof v?.label === "string" ? v.label.trim().slice(0, 40) : "";
     const price = round2(Number(v?.price));
+    const hasStock =
+      v?.stock !== undefined && v?.stock !== null && v?.stock !== "";
+    const stock = hasStock ? Math.floor(Number(v.stock)) : undefined;
+    if (hasStock && !(stock! >= 0 && stock! <= 1_000_000))
+      return { error: `Enter how many "${label}" are in stock` };
     if (!label) return { error: "Every option needs a name" };
     if (!(price > 0) || price > 1_000_000)
       return { error: `Enter a price for "${label}"` };
@@ -68,8 +85,14 @@ export const cleanVariants = (
     const key = label.toLowerCase();
     if (seen.has(key)) return { error: `"${label}" is listed twice` };
     seen.add(key);
-    variants.push({ label, price });
+    variants.push({ label, price, ...(stock !== undefined ? { stock } : {}) });
   }
+  // Stock is set on every option or on none: a half-counted product can't be sold safely.
+  if (
+    variants.some((v) => v.stock !== undefined) &&
+    variants.some((v) => v.stock === undefined)
+  )
+    return { error: "Give every option a stock number, or none of them" };
   return { variants };
 };
 
@@ -126,4 +149,25 @@ export const cleanTiers = (
     tiers.push({ minQty, percentOff });
   }
   return { tiers: tiers.sort((a, b) => a.minQty - b.minQty) };
+};
+
+// ---- Stock per option ------------------------------------------------------
+
+/** True when each option of the product counts its own stock. */
+export const usesOptionStock = (p: {
+  trackStock: boolean;
+  variants?: unknown;
+}): boolean => {
+  const v = readVariants(p.variants);
+  return p.trackStock && v.length > 0 && v.every((x) => x.stock !== undefined);
+};
+
+/** How many can be bought: the chosen option's own stock, or the product's. */
+export const stockFor = (
+  p: { trackStock: boolean; stock: number; variants?: unknown },
+  size?: string | null,
+): number => {
+  if (!usesOptionStock(p)) return p.stock;
+  const v = readVariants(p.variants).find((x) => x.label === size);
+  return v?.stock ?? 0;
 };
