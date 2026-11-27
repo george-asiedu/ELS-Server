@@ -430,6 +430,10 @@ export class StudioService extends Connection {
     return {
       ...text,
       ...images,
+      heroImages: (
+        (content as { heroImages?: string[] } | null | undefined)?.heroImages ??
+        []
+      ).map((u) => this.s3.deliveryUrl(u) ?? u),
       featureCards: content?.featureCards ?? null,
       showTestimonials: content?.showTestimonials ?? true,
       studioType:
@@ -914,6 +918,7 @@ export class StudioService extends Connection {
   public async updateContent(
     studioId: string | null | undefined,
     input: Partial<Record<ContentTextField | ContentImageField, unknown>> & {
+      heroImages?: unknown;
       featureCards?: unknown;
       showTestimonials?: unknown;
       studioType?: unknown;
@@ -928,6 +933,7 @@ export class StudioService extends Connection {
     const data: Partial<
       Record<ContentTextField | ContentImageField, string | null>
     > & {
+      heroImages?: string[];
       featureCards?: FeatureCard[];
       showTestimonials?: boolean;
       studioType?: string | null;
@@ -961,6 +967,26 @@ export class StudioService extends Connection {
         );
       }
       data[field] = this.s3.assertOwnedMediaUrl(value, "studio");
+    }
+
+    // Up to 5 photos for the carousel at the top; the first is the hero photo.
+    if (input.heroImages !== undefined) {
+      const list = Array.isArray(input.heroImages) ? input.heroImages : [];
+      if (list.length > 5)
+        throw new ApiError(
+          "Add up to 5 photos for the top of the page",
+          HttpCode.BAD_REQUEST,
+        );
+      const urls = list.map((u) => {
+        if (typeof u !== "string")
+          throw new ApiError(
+            "Each photo must be an image URL",
+            HttpCode.BAD_REQUEST,
+          );
+        return this.s3.assertOwnedMediaUrl(u, "studio");
+      });
+      data.heroImages = [...new Set(urls)];
+      data.heroImageUrl = urls[0] ?? null;
     }
 
     const cards = sanitizeFeatureCards(input.featureCards);

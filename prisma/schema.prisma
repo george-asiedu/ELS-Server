@@ -226,6 +226,9 @@ model StudioContent {
   heroHeadline     String?
   heroSubtext      String?
   heroImageUrl     String?
+  // Up to 5 photos for the top of the page. With two or more, they are the
+  // carousel; the first is also heroImageUrl.
+  heroImages       String[] @default([])
   aboutHeading     String?
   aboutText        String?
   aboutImageUrl    String?
