@@ -3,6 +3,7 @@ import { authenticate, requireAdmin } from "../middleware/auth";
 import { ApiError } from "../middleware/apiError";
 import { createTenantClient } from "../tenant/tenantClient";
 import { S3BucketService } from "../bucket/s3BucketService";
+import { AppointmentService } from "../appointment/appointmentService";
 import {
   ensureStaffAccount,
   removeStaffAccount,
@@ -132,10 +133,62 @@ router.get(
         status: true,
         appointmentDate: true,
         appointmentTime: true,
+        totalPrice: true,
+        discountAmount: true,
         service: { select: { name: true, duration: true } },
+        payment: { select: { amount: true, totalAmount: true, status: true } },
       },
     });
-    return res.status(200).json({ data: rows });
+    // The price and what has been paid, for their own confirmation. Read-only:
+    // there is nothing here to change a payment with.
+    const data = rows.map(
+      ({ payment, totalPrice, discountAmount, ...rest }) => {
+        const due = (totalPrice ?? 0) - (discountAmount ?? 0);
+        const total = payment?.totalAmount || due || 0;
+        const paid = payment && payment.status === "PAID" ? payment.amount : 0;
+        const balance = Math.max(0, Math.round((total - paid) * 100) / 100);
+        return {
+          ...rest,
+          money: {
+            total: Math.round(total * 100) / 100,
+            paid: Math.round(paid * 100) / 100,
+            balance,
+            label:
+              paid <= 0 ? "Unpaid" : balance > 0 ? "Part paid" : "Paid in full",
+          },
+        };
+      },
+    );
+    return res.status(200).json({ data });
+  },
+);
+
+// Mark one of their own bookings done. It does exactly what the owner's "done"
+// does (loyalty points, the thank-you email), and nothing else about a booking
+// can be changed from here.
+router.post(
+  "/me/bookings/:id/done",
+  authenticate,
+  async (req: Request, res: Response) => {
+    const staff = await myProfile(req);
+    const id = String(req.params.id);
+    const booking = await db.appointment.findFirst({
+      where: { id, staffId: staff.id },
+      select: { status: true, appointmentDate: true },
+    });
+    if (!booking) throw new ApiError("Booking not found", 404);
+    if (booking.status === "COMPLETED")
+      return res.status(200).json({ message: "Already marked done" });
+    if (booking.status !== "CONFIRMED")
+      throw new ApiError(
+        "Only a confirmed booking can be marked done. Ask the studio to confirm it first.",
+        400,
+      );
+    const today = new Date(new Date().setUTCHours(0, 0, 0, 0));
+    if (booking.appointmentDate.getTime() > today.getTime())
+      throw new ApiError("You can mark it done once the day comes", 400);
+    await new AppointmentService().updateStatus(id, "COMPLETED");
+    return res.status(200).json({ message: "Marked as done" });
   },
 );
 
@@ -178,10 +231,9 @@ router.post(
       email?: string | null;
       phone?: string | null;
     };
-    // Each team member gets a sign-in straight away, so both are needed.
-    if (!data.email)
-      throw new ApiError("Enter their email: it is how they sign in", 400);
-    if (!data.phone) throw new ApiError("Enter their phone number", 400);
+    // Email and phone are optional (not everyone on a team has a phone). With
+    // an email the person gets a sign-in straight away; without one they are
+    // just listed, and the studio's admins get their booking alerts.
     const created = await db.staff.create({ data });
     try {
       await ensureStaffAccount(created);
@@ -193,8 +245,9 @@ router.post(
       where: { id: created.id },
     });
     return res.status(201).json({
-      message:
-        "Staff member added. They can set their password the first time they sign in.",
+      message: data.email
+        ? "Staff member added. They can set their password the first time they sign in."
+        : "Staff member added",
       data: present(withAccount ?? created),
     });
   },

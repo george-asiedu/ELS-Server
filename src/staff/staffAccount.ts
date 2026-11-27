@@ -124,6 +124,12 @@ export const syncStaffAccount = async (
     if (after.email) await ensureStaffAccount(after);
     return;
   }
+  // The email was cleared: the login goes with it (an admin's account stays).
+  if (!after.email) {
+    await removeStaffAccount(before);
+    await db.staff.update({ where: { id: before.id }, data: { userId: null } });
+    return;
+  }
   const user = await db.user.findUnique({
     where: { id: before.userId },
     select: { id: true, role: true, email: true },
